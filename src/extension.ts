@@ -119,6 +119,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Initialize projects
     await initializeProjects(projectRoots, context);
 
+    // Project roots can exist without any of them being Angular projects. In
+    // that case do not register providers: DiagnosticProvider eagerly loads
+    // @angular/compiler and subscribes to document/diagnostic events.
+    if (projectIndexers.size === 0) {
+      logger.info("Angular Auto-Import: No Angular projects found. Extension will remain inactive.");
+      return;
+    }
+
     // Register providers and commands
     await registerProvidersAndCommands(context);
 

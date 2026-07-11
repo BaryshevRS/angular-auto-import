@@ -196,6 +196,46 @@ describe("AngularIndexer", function () {
         }
       }
     });
+
+    it("should limit concurrent file reads while filtering Angular candidates", async () => {
+      let activeReads = 0;
+      let maxActiveReads = 0;
+      const pendingReads: Array<() => void> = [];
+
+      const readFile = async () => {
+        activeReads++;
+        maxActiveReads = Math.max(maxActiveReads, activeReads);
+        await new Promise<void>((resolve) => pendingReads.push(resolve));
+        activeReads--;
+        return Buffer.from("@Component({})");
+      };
+
+      const uris = Array.from({ length: 40 }, (_, index) =>
+        vscode.Uri.file(path.join(testProjectPath, `candidate-${index}.ts`))
+      );
+      const filtering = (
+        indexer as unknown as {
+          _filterRelevantFiles(
+            files: vscode.Uri[],
+            fileReader: (uri: vscode.Uri) => Promise<Uint8Array>
+          ): Promise<vscode.Uri[]>;
+        }
+      )._filterRelevantFiles(uris, readFile);
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.ok(maxActiveReads > 0, "Filtering should start reading files");
+      assert.ok(maxActiveReads <= 8, `Expected at most 8 concurrent reads, observed ${maxActiveReads}`);
+
+      while (pendingReads.length > 0 || activeReads > 0) {
+        pendingReads.splice(0).forEach((resolve) => {
+          resolve();
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+
+      const result = await filtering;
+      assert.strictEqual(result.length, uris.length, "All matching files should be returned");
+    });
   });
 
   describe("SelectorTrie Functionality", () => {

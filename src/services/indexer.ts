@@ -50,6 +50,9 @@ const DEPENDENCY_MANIFEST_GLOB = "{package.json,package-lock.json,pnpm-lock.yaml
  */
 const DEPENDENCY_REINDEX_DEBOUNCE_MS = 2000;
 
+/** Maximum number of project source files read at the same time. */
+const FILE_FILTER_CONCURRENCY = 8;
+
 /**
  * Represents a node in a Trie data structure for storing selectors.
  * @internal
@@ -1227,11 +1230,16 @@ export class AngularIndexer {
    * @returns A promise that resolves to a filtered array of file URIs.
    * @internal
    */
-  private async _filterRelevantFiles(uris: vscode.Uri[]): Promise<vscode.Uri[]> {
+  private async _filterRelevantFiles(
+    uris: vscode.Uri[],
+    readFile: (uri: vscode.Uri) => Promise<Uint8Array> = async (uri) => vscode.workspace.fs.readFile(uri)
+  ): Promise<vscode.Uri[]> {
     const angularDecoratorRegex = /@(Component|Directive|Pipe|NgModule)\s*\(/;
-    const promises = uris.map(async (uri) => {
+    const { default: pLimit } = await import("p-limit");
+    const limit = pLimit(FILE_FILTER_CONCURRENCY);
+    const results = await limit.map(uris, async (uri) => {
       try {
-        const content = await vscode.workspace.fs.readFile(uri);
+        const content = await readFile(uri);
         if (angularDecoratorRegex.test(content.toString())) {
           return uri;
         }
@@ -1241,7 +1249,6 @@ export class AngularIndexer {
       return null;
     });
 
-    const results = await Promise.all(promises);
     return results.filter((uri): uri is vscode.Uri => uri !== null);
   }
 

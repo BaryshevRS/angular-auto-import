@@ -47,8 +47,10 @@
     "angular 22"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onLanguage:html"
+    "workspaceContains:angular.json",
+    "workspaceContains:nx.json",
+    "onLanguage:html",
+    "onLanguage:typescript"
   ],
   "main": "./dist/extension.js",
   "repository": {
@@ -287,6 +289,7 @@
   "dependencies": {
     "@angular/compiler": "^22.0.1",
     "get-tsconfig": "^4.14.0",
+    "p-limit": "7.3.0",
     "ts-morph": "^26.0.0"
   },
   "pnpm": {
