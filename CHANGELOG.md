@@ -4,6 +4,19 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.7.0] - 2026-07-12
+
+### Fixed
+- **Inactive workspace overhead**: project indexers and language providers are now initialized lazily, only after an open document identifies an Angular package, preventing unnecessary discovery and indexing in unrelated workspaces
+- **Large-workspace file pressure**: candidate source-file reads are now concurrency-limited, avoiding unbounded parallel filesystem work during indexing
+- **Nested project resolution**: documents now resolve to the deepest containing project root, so nested projects and sibling paths with common prefixes use the correct index
+- **Generated-file watcher noise**: flattened exclude patterns and watcher guards keep dependency, build, and generated files from triggering redundant ts-morph updates and index saves
+
+### Improved
+- **External dependency indexing**: libraries are indexed through package entry points instead of a redundant per-file `node_modules` scan
+- **Angular project discovery**: package manifest checks are cached and invalidated when `package.json` changes, reducing repeated filesystem reads while still detecting newly installed Angular dependencies
+- **Extension activation**: activation events now target Angular/Nx workspaces and HTML/TypeScript documents instead of running after every VS Code startup
+
 ## [2.6.0] - 2026-06-26
 
 ### Fixed

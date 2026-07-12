@@ -3,7 +3,7 @@
   "displayName": "Angular Auto Import",
   "description": "Intelligent auto-import for Angular standalone components, directives & pipes. Fix all missing imports with one command. Works with templates, external libraries & monorepos.",
   "publisher": "baryshevrs",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "icon": "img/icon.png",
   "galleryBanner": {
     "color": "#0f172a",
