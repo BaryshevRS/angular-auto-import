@@ -1,5 +1,6 @@
 # Angular Auto-Import for VS Code
 
+[![Clone Alert: 0 clones](https://img.shields.io/badge/Clone%20Alert-0%20clones-brightgreen?style=flat-square)](https://www.npmjs.com/package/clone-alert)
 [![VS Marketplace](https://img.shields.io/badge/VS%20Marketplace-Angular%20Auto--Import-blue?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=baryshevrs.angular-auto-import)
 [![Install in VS Code](https://img.shields.io/badge/Install%20in-VS%20Code-007ACC?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=baryshevrs.angular-auto-import)
 
