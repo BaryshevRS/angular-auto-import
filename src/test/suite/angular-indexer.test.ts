@@ -290,6 +290,30 @@ describe("AngularIndexer", function () {
       assert.ok(indexer.fileWatcher, "Should have file watcher");
     });
 
+    it("only accepts project sources from the watcher, which has no exclude pattern of its own", () => {
+      const guard = (indexer as unknown as { isIndexableProjectFile(filePath: string): boolean })
+        .isIndexableProjectFile;
+      const isIndexable = (...segments: string[]) => guard.call(indexer, path.join(testProjectPath, ...segments));
+
+      assert.strictEqual(isIndexable("src", "app", "app.component.ts"), true, "Project sources must be indexed");
+      assert.strictEqual(isIndexable("src", "app", "nested", "feature.directive.ts"), true, "Nesting is fine");
+
+      assert.strictEqual(isIndexable("node_modules", "some-lib", "index.ts"), false, "Dependencies are excluded");
+      assert.strictEqual(isIndexable("dist", "main.ts"), false, "Build output is excluded");
+      assert.strictEqual(isIndexable("out", "main.ts"), false, "Build output is excluded");
+      assert.strictEqual(isIndexable("bazel-out", "main.ts"), false, "Build output is excluded");
+      assert.strictEqual(isIndexable("e2e", "app.e2e.ts"), false, "E2E projects are excluded");
+      assert.strictEqual(isIndexable(".angular", "cache", "x.ts"), false, "Dot directories are excluded");
+      assert.strictEqual(isIndexable("src", "app", "app.component.spec.ts"), false, "Specs are excluded");
+      assert.strictEqual(isIndexable("src", "app", "app.component.test.ts"), false, "Tests are excluded");
+
+      assert.strictEqual(
+        guard.call(indexer, path.join(path.dirname(testProjectPath), "other", "main.ts")),
+        false,
+        "Files outside the project root are excluded"
+      );
+    });
+
     it("should dispose file watcher on dispose", () => {
       indexer.initializeWatcher(mockContext);
       indexer.dispose();
@@ -528,6 +552,35 @@ export class TempComponent {}
       // Even if no actual Angular libraries are found, it shouldn't error
       const selectors = indexer.getAllSelectors();
       assert.ok(Array.isArray(selectors), "Should return selectors array even with node_modules present");
+    });
+
+    it("should index libraries only through package entry points", async () => {
+      await indexer.generateFullIndex(mockContext);
+
+      const libraryElements = indexer.getElements("mock-icon");
+      assert.ok(libraryElements.length > 0, "Entry-point indexing should find library elements");
+      assert.strictEqual(libraryElements[0].isExternal, true, "Library elements must be marked as external");
+    });
+
+    it("keeps node_modules out of the project file scan", async () => {
+      type UpdateFileIndex = (filePath: string, context: vscode.ExtensionContext) => Promise<void>;
+      const testIndexer = indexer as unknown as { updateFileIndex: UpdateFileIndex };
+      const originalUpdateFileIndex = testIndexer.updateFileIndex.bind(indexer);
+      const scannedPaths: string[] = [];
+
+      testIndexer.updateFileIndex = async (...args: Parameters<UpdateFileIndex>) => {
+        scannedPaths.push(args[0]);
+        return originalUpdateFileIndex(...args);
+      };
+
+      await indexer.generateFullIndex(mockContext);
+
+      const dependencyPaths = scannedPaths.filter((filePath) => filePath.split(path.sep).includes("node_modules"));
+      assert.deepStrictEqual(
+        dependencyPaths,
+        [],
+        "The exclude glob must keep node_modules out of the project scan; a mis-parsed glob pulls it back in"
+      );
     });
 
     it("should ignore entry points that only re-export private ɵ aliases", async () => {

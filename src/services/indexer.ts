@@ -24,7 +24,6 @@ import { isLibraryExcluded } from "../config/excluded-libraries";
 import { logger } from "../logger";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
 import {
-  type AngularDependency,
   createElementComparator,
   debounce,
   findAngularDependencies,
@@ -52,6 +51,22 @@ const DEPENDENCY_REINDEX_DEBOUNCE_MS = 2000;
 
 /** Maximum number of project source files read at the same time. */
 const FILE_FILTER_CONCURRENCY = 8;
+
+/** Directory names that never hold indexable project sources. */
+const NON_SOURCE_DIRECTORIES = ["node_modules", ".git", "dist", "out", "e2e", "bazel-out"] as const;
+
+/**
+ * Project files handled by the source indexer; dependencies have their own entry-point indexer.
+ *
+ * Kept as a flat brace list: VS Code's glob parser does not reliably expand nested
+ * braces, and a mis-parsed exclude would silently pull all of node_modules back in.
+ */
+const PROJECT_SOURCE_EXCLUDE_GLOB = `{${[
+  ...NON_SOURCE_DIRECTORIES.map((directory) => `**/${directory}/**`),
+  "**/.*/**",
+  "**/*.spec.ts",
+  "**/*.test.ts",
+].join(",")}}`;
 
 /**
  * Represents a node in a Trie data structure for storing selectors.
@@ -467,17 +482,28 @@ export class AngularIndexer {
     const pattern = new vscode.RelativePattern(this.projectRootPath, "**/*.ts");
     this.fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
 
+    // The watcher pattern cannot exclude anything, so an install or a build would
+    // otherwise push every written .ts through a full parse and index save.
     this.fileWatcher.onDidCreate(async (uri) => {
+      if (!this.isIndexableProjectFile(uri.fsPath)) {
+        return;
+      }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File created: ${uri.fsPath}`);
       await this.updateFileIndex(uri.fsPath, context);
     });
 
     this.fileWatcher.onDidChange(async (uri) => {
+      if (!this.isIndexableProjectFile(uri.fsPath)) {
+        return;
+      }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File changed: ${uri.fsPath}`);
       await this.updateFileIndex(uri.fsPath, context);
     });
 
     this.fileWatcher.onDidDelete(async (uri) => {
+      if (!this.isIndexableProjectFile(uri.fsPath)) {
+        return;
+      }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File deleted: ${uri.fsPath}`);
       await this.removeFromIndex(uri.fsPath, context);
       // Also remove from ts-morph project
@@ -862,16 +888,16 @@ export class AngularIndexer {
   }
 
   /**
-   * Updates the index for a single file.
+   * Updates the index for a single project source file.
+   *
+   * Library files never reach this method: dependencies are indexed from their
+   * package entry points by {@link indexNodeModules}.
+   *
    * @param filePath The path to the file.
    * @param context The extension context.
    * @internal
    */
-  private async updateFileIndex(
-    filePath: string,
-    context: vscode.ExtensionContext,
-    isExternal: boolean = false
-  ): Promise<void> {
+  private async updateFileIndex(filePath: string, context: vscode.ExtensionContext): Promise<void> {
     try {
       if (!this.validateFileForIndexing(filePath)) {
         return;
@@ -888,7 +914,7 @@ export class AngularIndexer {
       const parsedElements = this.parseAngularElementsWithTsMorph(filePath, content);
 
       if (parsedElements.length > 0) {
-        await this.processAndIndexElements(filePath, parsedElements, lastModified, hash, isExternal);
+        await this.processAndIndexElements(filePath, parsedElements, lastModified, hash);
       } else {
         await this.handleNoElementsFound(filePath);
       }
@@ -897,6 +923,37 @@ export class AngularIndexer {
     } catch (error) {
       logger.error(`Error updating index for ${filePath} in project ${this.projectRootPath}:`, error as Error);
     }
+  }
+
+  /**
+   * Reports whether a project file is an indexable source file.
+   *
+   * Mirrors {@link PROJECT_SOURCE_EXCLUDE_GLOB} for paths that reach the indexer
+   * without going through `findFiles`. The file watcher watches the project root
+   * recursively and cannot express an exclude pattern, so without this guard every
+   * `.ts` written into `node_modules` or `dist` (an install, a build) would be read
+   * and parsed with ts-morph.
+   *
+   * @param filePath - Absolute path to the file.
+   * @returns `true` when the file should be indexed as a project source.
+   * @internal
+   */
+  private isIndexableProjectFile(filePath: string): boolean {
+    const relativePath = path.relative(this.projectRootPath, filePath);
+    if (relativePath === "" || path.isAbsolute(relativePath) || relativePath.startsWith("..")) {
+      return false;
+    }
+
+    const segments = relativePath.split(path.sep);
+    const fileName = segments[segments.length - 1];
+    if (fileName.endsWith(".spec.ts") || fileName.endsWith(".test.ts")) {
+      return false;
+    }
+
+    const directorySegments = segments.slice(0, -1);
+    return !directorySegments.some(
+      (segment) => (NON_SOURCE_DIRECTORIES as readonly string[]).includes(segment) || segment.startsWith(".")
+    );
   }
 
   private validateFileForIndexing(filePath: string): boolean {
@@ -912,6 +969,10 @@ export class AngularIndexer {
       logger.warn(
         `AngularIndexer.updateFileIndex: File ${filePath} is outside of project root ${this.projectRootPath}. Skipping.`
       );
+      return false;
+    }
+    if (!this.isIndexableProjectFile(filePath)) {
+      logger.debug(`AngularIndexer.updateFileIndex: Skipping non-source file ${filePath}.`);
       return false;
     }
     return true;
@@ -963,8 +1024,7 @@ export class AngularIndexer {
     filePath: string,
     parsedElements: ComponentInfo[],
     lastModified: number,
-    hash: string,
-    isExternal: boolean
+    hash: string
   ): Promise<void> {
     const fileElementsInfo: FileElementsInfo = {
       filePath: filePath,
@@ -975,11 +1035,12 @@ export class AngularIndexer {
     this.fileCache.set(filePath, fileElementsInfo);
 
     for (const parsed of parsedElements) {
-      await this.indexSingleElement(parsed, isExternal, filePath);
+      await this.indexSingleElement(parsed, filePath);
     }
   }
 
-  private async indexSingleElement(parsed: ComponentInfo, isExternal: boolean, absolutePath?: string): Promise<void> {
+  /** Indexes one element parsed from a project source file; libraries are indexed from entry points. */
+  private async indexSingleElement(parsed: ComponentInfo, absolutePath?: string): Promise<void> {
     const individualSelectors = await parseAngularSelector(parsed.selector);
     const { importPath, importName, moduleToImport } = this.resolveElementImportInfo(parsed);
 
@@ -990,7 +1051,7 @@ export class AngularIndexer {
       originalSelector: parsed.selector,
       selectors: individualSelectors,
       isStandalone: parsed.isStandalone,
-      isExternal,
+      isExternal: false,
       exportingModuleName: moduleToImport,
       absolutePath,
     });
@@ -1107,32 +1168,13 @@ export class AngularIndexer {
       this.clearInMemoryState();
 
       progress?.report({ message: "Discovering project files..." });
-      const allFileUris = await vscode.workspace.findFiles(
+      const projectTsFiles = await vscode.workspace.findFiles(
         new vscode.RelativePattern(this.projectRootPath, "**/*.ts"),
-        "**/{.git,dist,out,e2e,bazel-out,.*,*.spec.ts,*.test.ts}"
+        PROJECT_SOURCE_EXCLUDE_GLOB
       );
-
-      const projectTsFiles: vscode.Uri[] = [];
-      const nodeModulesFiles: vscode.Uri[] = [];
-      const nodeModulesPath = path.join(this.projectRootPath, "node_modules");
-
-      for (const file of allFileUris) {
-        if (file.fsPath.includes(nodeModulesPath)) {
-          nodeModulesFiles.push(file);
-        } else {
-          projectTsFiles.push(file);
-        }
-      }
-
       logger.info(
-        `AngularIndexer (${path.basename(this.projectRootPath)}): Found ${
-          projectTsFiles.length
-        } project files and ${nodeModulesFiles.length} node_modules files.`
+        `AngularIndexer (${path.basename(this.projectRootPath)}): Found ${projectTsFiles.length} project files.`
       );
-
-      progress?.report({ message: "Indexing external libraries..." });
-      const pkg = await findAngularDependencies(this.projectRootPath);
-      await this._indexNodeModulesFromUris(nodeModulesFiles, pkg, context);
 
       progress?.report({ message: "Filtering project files..." });
       const candidateFiles = await this._filterRelevantFiles(projectTsFiles);
@@ -1186,44 +1228,6 @@ export class AngularIndexer {
     }
   }
 
-  private async _indexNodeModulesFromUris(
-    uris: vscode.Uri[],
-    dependencies: AngularDependency[],
-    context: vscode.ExtensionContext
-  ): Promise<void> {
-    const timerName = `indexNodeModulesFromUris:${path.basename(this.projectRootPath)}`;
-    logger.startTimer(timerName);
-    logger.info(`[NodeModules] Starting scan of ${uris.length} files from node_modules...`);
-
-    try {
-      const dependencySet = new Set(dependencies.map((d) => d.name));
-
-      const filesByPackage = new Map<string, vscode.Uri[]>();
-      for (const uri of uris) {
-        const pkgNameResult = this._getNpmPackageName(uri.fsPath);
-        if (pkgNameResult) {
-          const [pkgName] = pkgNameResult;
-          if (dependencySet.has(pkgName)) {
-            if (!filesByPackage.has(pkgName)) {
-              filesByPackage.set(pkgName, []);
-            }
-            filesByPackage.get(pkgName)?.push(uri);
-          }
-        }
-      }
-
-      for (const [, files] of filesByPackage) {
-        for (const file of files) {
-          await this.updateFileIndex(file.fsPath, context, true);
-        }
-      }
-    } catch (error) {
-      logger.error("[NodeModules] Error scanning node_modules:", error as Error);
-    }
-
-    logger.stopTimer(timerName);
-  }
-
   /**
    * Quickly filters a list of files to find ones that likely contain Angular declarations.
    * @param uris An array of file URIs to filter.
@@ -1250,32 +1254,6 @@ export class AngularIndexer {
     });
 
     return results.filter((uri): uri is vscode.Uri => uri !== null);
-  }
-
-  /**
-   * Finds the package name from a file path.
-   * @param filePath The full path to the file.
-   * @returns A tuple of [packageName, isDevDependency] or undefined if not a node_modules file.
-   * @internal
-   */
-  private _getNpmPackageName(filePath: string): [string, boolean] | undefined {
-    const nodeModulesPath = path.join(this.projectRootPath, "node_modules");
-    if (!filePath.startsWith(nodeModulesPath)) {
-      return undefined;
-    }
-
-    const relativePath = path.relative(nodeModulesPath, filePath);
-    const parts = relativePath.split(path.sep);
-
-    // Find the package name, which is the last part of the path
-    const packageName = parts[parts.length - 1];
-
-    // Determine if it's a dev dependency
-    const isDev = packageName.startsWith("@"); // Common pattern for scoped packages
-    if (isDev) {
-      return [packageName.slice(1), true];
-    }
-    return [packageName, false];
   }
 
   /**
@@ -2695,10 +2673,8 @@ export class AngularIndexer {
       finalImportName = isStandalone ? className : exportingModule.moduleName;
     }
 
-    const isExternal = true; // This method is only for node_modules
-
     // For standalone external components, ensure we only store the one with the shortest import path.
-    if (isStandalone && isExternal) {
+    if (isStandalone) {
       const bestPath = this._handleStandaloneExternalComponent(
         className,
         elementType,
@@ -2718,7 +2694,7 @@ export class AngularIndexer {
       originalSelector: selector,
       selectors: individualSelectors,
       isStandalone,
-      isExternal,
+      isExternal: true, // This method only indexes elements coming from node_modules.
       exportingModuleName: !isStandalone && exportingModule ? exportingModule.moduleName : undefined,
       absolutePath: absoluteFilePath,
     });

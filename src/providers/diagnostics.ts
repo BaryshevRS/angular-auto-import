@@ -36,7 +36,7 @@ import type {
 } from "../types";
 import { getAngularElements, getTsDocument, isStandalone, switchFileType } from "../utils";
 import { debounce } from "../utils/debounce";
-import { getProjectContextForDocument } from "../utils/project-context";
+import { findDeepestContainingProjectContext, getProjectContextForDocument } from "../utils/project-context";
 import type { ProviderContext } from "./index";
 
 /**
@@ -1223,13 +1223,7 @@ export class DiagnosticProvider {
    * Gets the indexer for a source file's workspace.
    */
   private getIndexerForSourceFile(sourceFile: SourceFile) {
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(sourceFile.getFilePath()));
-    if (!workspaceFolder) {
-      return undefined;
-    }
-
-    const projectRootPath = workspaceFolder.uri.fsPath;
-    return this.context.projectIndexers.get(projectRootPath);
+    return findDeepestContainingProjectContext(sourceFile.getFilePath(), this.context.projectIndexers);
   }
 
   /**

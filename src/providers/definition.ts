@@ -13,6 +13,7 @@ import * as vscode from "vscode";
 import { logger } from "../logger";
 import type { AngularElementData } from "../types";
 import { getAngularElements } from "../utils";
+import { getProjectContextForDocument } from "../utils/project-context";
 import type { ProviderContext } from "./index";
 
 /**
@@ -333,12 +334,6 @@ export class DefinitionProvider implements vscode.DefinitionProvider {
    * @returns Project context or null
    */
   private getProjectContextForDocument(document: vscode.TextDocument) {
-    for (const [projectPath, indexer] of this.context.projectIndexers) {
-      if (document.uri.fsPath.startsWith(projectPath)) {
-        const tsConfig = this.context.projectTsConfigs.get(projectPath);
-        return { indexer, projectRootPath: projectPath, tsConfig };
-      }
-    }
-    return null;
+    return getProjectContextForDocument(document, this.context.projectIndexers, this.context.projectTsConfigs);
   }
 }

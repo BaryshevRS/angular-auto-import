@@ -13,6 +13,7 @@ import * as TsConfigHelper from "../services/tsconfig";
 import type { AngularElementData } from "../types";
 import { getAngularElementAsync } from "../utils";
 import { switchFileType } from "../utils/path";
+import { getProjectContextForDocument } from "../utils/project-context";
 
 import type { ProviderContext } from "./index";
 
@@ -238,12 +239,6 @@ export class QuickfixImportProvider implements vscode.CodeActionProvider {
   }
 
   private getProjectContextForDocument(document: vscode.TextDocument) {
-    for (const [projectPath, indexer] of this.context.projectIndexers) {
-      if (document.uri.fsPath.startsWith(projectPath)) {
-        const tsConfig = this.context.projectTsConfigs.get(projectPath);
-        return { indexer, projectRootPath: projectPath, tsConfig };
-      }
-    }
-    return null;
+    return getProjectContextForDocument(document, this.context.projectIndexers, this.context.projectTsConfigs);
   }
 }

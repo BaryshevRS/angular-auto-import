@@ -26,7 +26,7 @@ import { type ProviderContext, registerProviders } from "./providers";
 import { AngularIndexer } from "./services";
 import * as TsConfigHelper from "./services/tsconfig";
 import type { ProcessedTsConfig, ProjectContext } from "./types";
-import { getProjectContextForDocumentWithLogging } from "./utils/project-context";
+import { findDeepestContainingProjectContext, getProjectContextForDocumentWithLogging } from "./utils/project-context";
 import { clearAllTemplateCache, clearTemplateCache } from "./utils/template-detection";
 
 /**
@@ -83,6 +83,9 @@ const projectIntervals = new Map<string, NodeJS.Timeout>();
  */
 let extensionConfig: ExtensionConfig;
 
+/** Invalidates project initializations that outlive their activation lifecycle. */
+let activationGeneration = 0;
+
 /**
  * Activates the Angular Auto-Import extension.
  *
@@ -102,7 +105,19 @@ let extensionConfig: ExtensionConfig;
  * await activate(context);
  * ```
  */
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export type ActivationDependencies = {
+  createProjectRegistry(options: ProjectRegistryOptions): ProjectRegistry;
+};
+
+const defaultActivationDependencies: ActivationDependencies = {
+  createProjectRegistry: (options) => new ProjectRegistry(options),
+};
+
+export async function activate(
+  context: vscode.ExtensionContext,
+  dependencies: ActivationDependencies = defaultActivationDependencies
+): Promise<void> {
+  const currentActivationGeneration = ++activationGeneration;
   logger.initialize(context);
   try {
     logger.info("🚀 Angular Auto-Import: Starting activation...");
@@ -115,20 +130,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (projectRoots.length === 0) {
       return;
     }
-
-    // Initialize projects
-    await initializeProjects(projectRoots, context);
-
-    // Project roots can exist without any of them being Angular projects. In
-    // that case do not register providers: DiagnosticProvider eagerly loads
-    // @angular/compiler and subscribes to document/diagnostic events.
-    if (projectIndexers.size === 0) {
-      logger.info("Angular Auto-Import: No Angular projects found. Extension will remain inactive.");
-      return;
-    }
-
-    // Register providers and commands
-    await registerProvidersAndCommands(context);
 
     // Setup configuration change handler
     const configHandler = onConfigurationChanged(async (newConfig) => {
@@ -145,6 +146,65 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
     context.subscriptions.push(documentCloseHandler);
 
+    // Keep the cached manifest checks that back root discovery honest: installing
+    // @angular/core into a package must make it discoverable without a reload.
+    const manifestWatcher = vscode.workspace.createFileSystemWatcher("**/package.json");
+    const onManifestChanged = (uri: vscode.Uri): void => invalidateAngularProjectCache(uri.fsPath);
+    manifestWatcher.onDidCreate(onManifestChanged);
+    manifestWatcher.onDidChange(onManifestChanged);
+    manifestWatcher.onDidDelete(onManifestChanged);
+    context.subscriptions.push(manifestWatcher);
+
+    let diagnosticProvider: ReturnType<typeof registerProviders>;
+    const rootsWithDiagnosticRefresh = new Set<string>();
+    const attachDiagnosticRefresh = (rootPath: string): void => {
+      if (!diagnosticProvider || rootsWithDiagnosticRefresh.has(rootPath)) {
+        return;
+      }
+      const indexer = projectIndexers.get(rootPath);
+      if (!indexer) {
+        return;
+      }
+      context.subscriptions.push(
+        indexer.onDidIndexNodeModules(() => {
+          void diagnosticProvider?.refreshOpenDocuments();
+        })
+      );
+      rootsWithDiagnosticRefresh.add(rootPath);
+      void diagnosticProvider.refreshOpenDocuments();
+    };
+
+    const projectRegistry = dependencies.createProjectRegistry({
+      workspaceRoots: projectRoots,
+      discoverAngularRoot: findAngularDependencyRoot,
+      initializeRoot: async (rootPath) => {
+        await initializeProjects([rootPath], context, () => currentActivationGeneration === activationGeneration);
+      },
+      registerProviders: () => {
+        diagnosticProvider = registerProvidersAndCommands(context);
+        for (const rootPath of projectIndexers.keys()) {
+          attachDiagnosticRefresh(rootPath);
+        }
+      },
+      onDidInitializeRoot: attachDiagnosticRefresh,
+      onError: (error) => {
+        logger.error("Error discovering or initializing Angular project:", error as Error);
+      },
+    });
+    context.subscriptions.push(projectRegistry);
+    void projectRegistry
+      .start({
+        openDocuments: vscode.workspace.textDocuments,
+        initialRoots: projectRoots,
+        onDidOpenDocument: (listener) =>
+          vscode.workspace.onDidOpenTextDocument((document) => {
+            listener(document);
+          }),
+      })
+      .catch((error) => {
+        logger.error("Error starting Angular project discovery:", error as Error);
+      });
+
     logger.info("✅ Angular Auto-Import: Extension activated successfully");
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
@@ -154,12 +214,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 /**
+ * Caches the `@angular/core` manifest check per directory.
+ *
+ * Root discovery runs on every opened document and walks each parent directory,
+ * so an uncached check would re-read the same `package.json` files on every open.
+ * Entries are dropped by {@link invalidateAngularProjectCache} when a manifest changes.
+ */
+const angularProjectCache = new Map<string, Promise<boolean>>();
+
+/**
+ * Drops cached manifest checks so a newly installed (or removed) `@angular/core`
+ * is picked up without reloading the window.
+ * @param packageJsonPath - The manifest that changed. Clears the whole cache when omitted.
+ */
+export function invalidateAngularProjectCache(packageJsonPath?: string): void {
+  if (packageJsonPath === undefined) {
+    angularProjectCache.clear();
+    return;
+  }
+  angularProjectCache.delete(path.dirname(path.resolve(packageJsonPath)));
+}
+
+/**
  * Checks if a directory is an Angular project by looking for `@angular/core` in `package.json`.
  * @param projectRoot - The absolute path to the project root.
  * @returns A promise that resolves to `true` if it's an Angular project, `false` otherwise.
  */
 async function isAngularProject(projectRoot: string): Promise<boolean> {
-  const packageJsonPath = path.join(projectRoot, "package.json");
+  const packageRoot = path.resolve(projectRoot);
+  let pendingCheck = angularProjectCache.get(packageRoot);
+  if (!pendingCheck) {
+    pendingCheck = readAngularCoreDependency(packageRoot);
+    angularProjectCache.set(packageRoot, pendingCheck);
+  }
+  return pendingCheck;
+}
+
+/**
+ * Reads a single `package.json` and reports whether it declares `@angular/core`.
+ * @param packageRoot - The absolute path to the directory holding the manifest.
+ * @returns A promise that resolves to `true` when the manifest declares Angular.
+ * @internal
+ */
+async function readAngularCoreDependency(packageRoot: string): Promise<boolean> {
+  const packageJsonPath = path.join(packageRoot, "package.json");
   try {
     if (!fs.existsSync(packageJsonPath)) {
       return false;
@@ -170,8 +268,207 @@ async function isAngularProject(projectRoot: string): Promise<boolean> {
     const devDependencies = packageJson.devDependencies || {};
     return !!dependencies["@angular/core"] || !!devDependencies["@angular/core"];
   } catch (error) {
-    logger.error(`Error checking for Angular project in ${projectRoot}:`, error as Error);
+    logger.error(`Error checking for Angular project in ${packageRoot}:`, error as Error);
     return false;
+  }
+}
+
+/** Returns whether candidatePath is rootPath itself or one of its descendants. */
+export function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const relativePath = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return (
+    relativePath === "" ||
+    (!path.isAbsolute(relativePath) && !relativePath.startsWith(`..${path.sep}`) && relativePath !== "..")
+  );
+}
+
+/** Finds the most specific known project root containing a document. */
+export function findDeepestContainingProjectRoot(filePath: string, roots: Iterable<string>): string | undefined {
+  let deepestRoot: string | undefined;
+
+  for (const root of roots) {
+    const normalizedRoot = path.resolve(root);
+    if (
+      isPathInside(normalizedRoot, filePath) &&
+      (deepestRoot === undefined || normalizedRoot.length > deepestRoot.length)
+    ) {
+      deepestRoot = normalizedRoot;
+    }
+  }
+
+  return deepestRoot;
+}
+
+export { findDeepestContainingProjectContext };
+
+/**
+ * Walks from a document toward a boundary and returns the nearest package that
+ * declares @angular/core.
+ */
+export async function findAngularDependencyRoot(filePath: string, searchBoundary: string): Promise<string | undefined> {
+  const boundary = path.resolve(searchBoundary);
+  const target = path.resolve(filePath);
+
+  if (!isPathInside(boundary, target)) {
+    return undefined;
+  }
+
+  const targetRelativeToBoundary = path.relative(boundary, target);
+  if (targetRelativeToBoundary.split(path.sep).includes("node_modules")) {
+    return undefined;
+  }
+
+  let currentPath: string;
+  try {
+    currentPath = (await fs.promises.stat(target)).isDirectory() ? target : path.dirname(target);
+  } catch {
+    currentPath = path.dirname(target);
+  }
+
+  while (isPathInside(boundary, currentPath)) {
+    if (await isAngularProject(currentPath)) {
+      return currentPath;
+    }
+    if (currentPath === boundary) {
+      break;
+    }
+    currentPath = path.dirname(currentPath);
+  }
+
+  return undefined;
+}
+
+type RegistryDocument = {
+  uri: { scheme: string; fsPath: string };
+  languageId: string;
+};
+
+type RegistryDocumentSource = {
+  openDocuments: Iterable<RegistryDocument>;
+  initialRoots?: Iterable<string>;
+  onDidOpenDocument(listener: (document: RegistryDocument) => void): { dispose(): void };
+};
+
+type ProjectRegistryOptions = {
+  workspaceRoots: Iterable<string>;
+  discoverAngularRoot(filePath: string, searchBoundary: string): Promise<string | undefined>;
+  initializeRoot(rootPath: string): Promise<void>;
+  registerProviders(): void;
+  onDidInitializeRoot?(rootPath: string): void;
+  onError?(error: unknown): void;
+};
+
+/** Coordinates lazy, root-keyed Angular project initialization. */
+export class ProjectRegistry {
+  private readonly workspaceRoots: string[];
+  private readonly initializedRoots = new Set<string>();
+  private readonly initializingRoots = new Map<string, Promise<void>>();
+  private readonly discoverAngularRoot: ProjectRegistryOptions["discoverAngularRoot"];
+  private readonly initializeRoot: ProjectRegistryOptions["initializeRoot"];
+  private readonly registerProviders: ProjectRegistryOptions["registerProviders"];
+  private readonly onDidInitializeRoot: ProjectRegistryOptions["onDidInitializeRoot"];
+  private readonly onError: ProjectRegistryOptions["onError"];
+  private documentSubscription: { dispose(): void } | undefined;
+  private providersRegistered = false;
+  private disposed = false;
+
+  constructor(options: ProjectRegistryOptions) {
+    this.workspaceRoots = Array.from(options.workspaceRoots, (root) => path.resolve(root));
+    this.discoverAngularRoot = options.discoverAngularRoot;
+    this.initializeRoot = options.initializeRoot;
+    this.registerProviders = options.registerProviders;
+    this.onDidInitializeRoot = options.onDidInitializeRoot;
+    this.onError = options.onError;
+  }
+
+  async start(source: RegistryDocumentSource): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    this.documentSubscription?.dispose();
+    this.documentSubscription = source.onDidOpenDocument((document) => {
+      void this.handleDocument(document).catch((error) => {
+        try {
+          this.onError?.(error);
+        } catch {
+          // Event callbacks must never create an unhandled rejection.
+        }
+      });
+    });
+    const initialRootDocuments = Array.from(
+      source.initialRoots ?? [],
+      (rootPath): RegistryDocument => ({
+        uri: { scheme: "file", fsPath: rootPath },
+        languageId: "typescript",
+      })
+    );
+    await Promise.all([
+      ...Array.from(source.openDocuments, (document) => this.handleDocument(document)),
+      ...initialRootDocuments.map((document) => this.handleDocument(document)),
+    ]);
+  }
+
+  async handleDocument(document: RegistryDocument): Promise<void> {
+    if (this.disposed || document.uri.scheme !== "file" || !["typescript", "html"].includes(document.languageId)) {
+      return;
+    }
+
+    const filePath = path.resolve(document.uri.fsPath);
+    if (filePath.split(path.sep).includes("node_modules")) {
+      return;
+    }
+
+    const boundary = findDeepestContainingProjectRoot(filePath, this.workspaceRoots);
+    if (!boundary) {
+      return;
+    }
+
+    const discoveredRoot = await this.discoverAngularRoot(filePath, boundary);
+    if (!discoveredRoot) {
+      return;
+    }
+
+    const root = path.resolve(discoveredRoot);
+    if (this.initializedRoots.has(root)) {
+      this.ensureProvidersRegistered();
+      return;
+    }
+
+    const existingInitialization = this.initializingRoots.get(root);
+    if (existingInitialization) {
+      await existingInitialization;
+      return;
+    }
+
+    const initialization = this.initializeRoot(root).then(() => {
+      if (this.disposed) {
+        return;
+      }
+      this.initializedRoots.add(root);
+      this.onDidInitializeRoot?.(root);
+      this.ensureProvidersRegistered();
+    });
+    this.initializingRoots.set(root, initialization);
+
+    try {
+      await initialization;
+    } finally {
+      this.initializingRoots.delete(root);
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.documentSubscription?.dispose();
+    this.documentSubscription = undefined;
+  }
+
+  private ensureProvidersRegistered(): void {
+    if (this.disposed || this.providersRegistered) {
+      return;
+    }
+    this.registerProviders();
+    this.providersRegistered = true;
   }
 }
 
@@ -192,6 +489,8 @@ async function isAngularProject(projectRoot: string): Promise<boolean> {
  * ```
  */
 export function deactivate(): void {
+  activationGeneration += 1;
+
   // Clear intervals
   projectIntervals.forEach((intervalId) => {
     clearInterval(intervalId);
@@ -207,6 +506,7 @@ export function deactivate(): void {
   // Clear caches
   projectTsConfigs.clear();
   TsConfigHelper.clearCache();
+  invalidateAngularProjectCache();
   clearAllTemplateCache(); // Clear template detection cache
 
   logger.info("Angular Auto-Import extension deactivated and resources cleaned up.");
@@ -283,20 +583,26 @@ export async function determineProjectRoots(config?: ExtensionConfig): Promise<s
  * await initializeProjects(roots, context);
  * ```
  */
-async function initializeProjects(projectRoots: string[], context: vscode.ExtensionContext): Promise<void> {
+async function initializeProjects(
+  projectRoots: string[],
+  context: vscode.ExtensionContext,
+  isActivationCurrent: () => boolean = () => true
+): Promise<void> {
   for (const projectRootPath of projectRoots) {
-    if (!(await isAngularProject(projectRootPath))) {
-      logger.info(`Skipping non-Angular project: ${projectRootPath}`);
+    if (projectIndexers.has(projectRootPath)) {
       continue;
+    }
+    if (!(await isAngularProject(projectRootPath))) {
+      throw new Error(`Angular project is no longer available at ${projectRootPath}`);
     }
 
     logger.info(`📁 Initializing project: ${projectRootPath}`);
+    let indexer: AngularIndexer | undefined;
 
     try {
       // Initialize TsConfig
       TsConfigHelper.clearCache(projectRootPath);
       const tsConfig = await TsConfigHelper.findAndParseTsConfig(projectRootPath);
-      projectTsConfigs.set(projectRootPath, tsConfig);
 
       if (tsConfig) {
         logger.info(`🔧 Tsconfig loaded for ${path.basename(projectRootPath)}.`);
@@ -305,17 +611,34 @@ async function initializeProjects(projectRoots: string[], context: vscode.Extens
       }
 
       // Initialize indexer
-      const indexer = new AngularIndexer();
-      projectIndexers.set(projectRootPath, indexer);
+      indexer = new AngularIndexer();
 
       await generateInitialIndexForProject(projectRootPath, indexer, context);
+
+      if (!isActivationCurrent()) {
+        throw new Error(`Project initialization was cancelled for ${projectRootPath}`);
+      }
+
+      // Publish the project atomically only after its initial index is usable.
+      projectIndexers.set(projectRootPath, indexer);
+      projectTsConfigs.set(projectRootPath, tsConfig);
 
       // Setup periodic reindexing
       if (extensionConfig.indexRefreshInterval > 0) {
         setupPeriodicReindexing(projectRootPath, indexer, extensionConfig.indexRefreshInterval, context);
       }
     } catch (error) {
+      const intervalId = projectIntervals.get(projectRootPath);
+      if (intervalId) {
+        clearInterval(intervalId);
+        projectIntervals.delete(projectRootPath);
+      }
+      projectIndexers.delete(projectRootPath);
+      projectTsConfigs.delete(projectRootPath);
+      TsConfigHelper.clearCache(projectRootPath);
+      indexer?.dispose();
       logger.error(`Error initializing project ${projectRootPath}:`, error as Error);
+      throw error;
     }
   }
 }
@@ -492,7 +815,7 @@ export function getProjectContextForDocument(document: vscode.TextDocument): Pro
  * await registerProvidersAndCommands(context);
  * ```
  */
-async function registerProvidersAndCommands(context: vscode.ExtensionContext): Promise<void> {
+function registerProvidersAndCommands(context: vscode.ExtensionContext): ReturnType<typeof registerProviders> {
   // Create provider context
   const providerContext: ProviderContext = {
     projectIndexers,
@@ -504,19 +827,6 @@ async function registerProvidersAndCommands(context: vscode.ExtensionContext): P
   // Register providers first
   const diagnosticProvider = registerProviders(context, providerContext);
 
-  // Refresh diagnostics when a project's external library index is rebuilt after
-  // a dependency manifest change, so stale "missing import" warnings clear on
-  // their own (e.g. right after installing a library like @ngx-translate/core).
-  if (diagnosticProvider) {
-    for (const indexer of projectIndexers.values()) {
-      context.subscriptions.push(
-        indexer.onDidIndexNodeModules(() => {
-          void diagnosticProvider.refreshOpenDocuments();
-        })
-      );
-    }
-  }
-
   // Create command context
   const commandContext: CommandContext = {
     projectIndexers,
@@ -527,4 +837,5 @@ async function registerProvidersAndCommands(context: vscode.ExtensionContext): P
 
   // Register commands
   registerCommands(context, commandContext);
+  return diagnosticProvider;
 }

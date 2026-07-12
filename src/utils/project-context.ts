@@ -5,11 +5,37 @@
  */
 
 import * as path from "node:path";
-import * as vscode from "vscode";
+import type * as vscode from "vscode";
 import { logger } from "../logger";
 import type { AngularIndexer } from "../services/indexer";
 import type { ProjectContext } from "../types/angular";
 import type { ProcessedTsConfig } from "../types/tsconfig";
+
+function findDeepestContainingEntry<T>(filePath: string, contexts: ReadonlyMap<string, T>): [string, T] | undefined {
+  const normalizedFilePath = path.resolve(filePath);
+  let deepestEntry: [string, T] | undefined;
+
+  for (const [rootPath, context] of contexts) {
+    const normalizedRoot = path.resolve(rootPath);
+    const relativePath = path.relative(normalizedRoot, normalizedFilePath);
+    const isInside =
+      relativePath === "" ||
+      (!path.isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`));
+    if (isInside && (!deepestEntry || normalizedRoot.length > deepestEntry[0].length)) {
+      deepestEntry = [normalizedRoot, context];
+    }
+  }
+
+  return deepestEntry;
+}
+
+/** Returns the value belonging to the deepest root that contains filePath. */
+export function findDeepestContainingProjectContext<T>(
+  filePath: string,
+  contexts: ReadonlyMap<string, T>
+): T | undefined {
+  return findDeepestContainingEntry(filePath, contexts)?.[1];
+}
 
 /**
  * Finds the project context (indexer and tsConfig) for a given document.
@@ -25,26 +51,14 @@ export function getProjectContextForDocument(
   projectIndexers: Map<string, AngularIndexer>,
   projectTsConfigs: Map<string, ProcessedTsConfig | null>
 ): ProjectContext | undefined {
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
-  if (workspaceFolder) {
-    const projectRootPath = workspaceFolder.uri.fsPath;
-    const indexer = projectIndexers.get(projectRootPath);
-    const tsConfig = projectTsConfigs.get(projectRootPath) ?? null;
-    if (indexer) {
-      return { projectRootPath, indexer, tsConfig };
-    }
-  } else {
-    for (const rootPath of projectIndexers.keys()) {
-      if (document.uri.fsPath.startsWith(rootPath + path.sep)) {
-        const indexer = projectIndexers.get(rootPath);
-        const tsConfig = projectTsConfigs.get(rootPath) ?? null;
-        if (indexer) {
-          return { projectRootPath: rootPath, indexer, tsConfig };
-        }
-      }
-    }
+  const entry = findDeepestContainingEntry(document.uri.fsPath, projectIndexers);
+  if (!entry) {
+    return undefined;
   }
-  return undefined;
+
+  const [projectRootPath, indexer] = entry;
+  const tsConfig = projectTsConfigs.get(projectRootPath) ?? null;
+  return { projectRootPath, indexer, tsConfig };
 }
 
 /**
