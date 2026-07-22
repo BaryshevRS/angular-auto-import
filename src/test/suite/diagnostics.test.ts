@@ -477,6 +477,69 @@ export class DatePlaygroundComponent {}
 
     assert.strictEqual(cache.size, 0, "import cache should be cleared after refreshOpenDocuments");
   });
+
+  it("clears diagnostics for Source Control virtual documents", async () => {
+    const filePath = path.join(testProjectPath, "src/app/review.component.ts");
+    const uri = vscode.Uri.from({ scheme: "git", path: filePath, query: JSON.stringify({ ref: "HEAD" }) });
+    const diagnostic = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), "stale review diagnostic");
+    const candidateDiagnostics = (provider as any).candidateDiagnostics as Map<string, vscode.Diagnostic[]>;
+    const diagnosticCollection = (provider as any).diagnosticCollection as vscode.DiagnosticCollection;
+    candidateDiagnostics.set(uri.toString(), [diagnostic]);
+    diagnosticCollection.set(uri, [diagnostic]);
+
+    const reviewDocument = {
+      uri,
+      fileName: filePath,
+      languageId: "typescript",
+      version: 1,
+      getText: () => "export class HistoricalSnapshot {}",
+    } as unknown as vscode.TextDocument;
+
+    await (provider as any).updateDiagnostics(reviewDocument);
+
+    assert.deepStrictEqual(provider.getDiagnosticsForDocument(uri), []);
+    assert.deepStrictEqual(
+      [...(diagnosticCollection.get(uri) || [])],
+      [],
+      "Virtual-document diagnostics should be removed"
+    );
+  });
+
+  it("uses the exact file document text when Source Control has a document with the same path", () => {
+    const filePath = path.join(testProjectPath, "src/app/exact-document.component.ts");
+    const currentText = "export class CurrentWorkingTreeComponent {}";
+    const historicalDocument = {
+      uri: vscode.Uri.from({ scheme: "git", path: filePath, query: JSON.stringify({ ref: "HEAD" }) }),
+      fileName: filePath,
+      languageId: "typescript",
+      version: 1,
+      getText: () => "export class HistoricalSnapshotComponent {}",
+    } as unknown as vscode.TextDocument;
+    const workingTreeDocument = {
+      uri: vscode.Uri.file(filePath),
+      fileName: filePath,
+      languageId: "typescript",
+      version: 2,
+      getText: () => currentText,
+    } as unknown as vscode.TextDocument;
+    (mockIndexer as any).project = sourceFile.getProject();
+    const originalTextDocuments = vscode.workspace.textDocuments;
+    Object.defineProperty(vscode.workspace, "textDocuments", {
+      configurable: true,
+      get: () => [historicalDocument, workingTreeDocument],
+    });
+
+    try {
+      const exactSourceFile = (provider as any).getSourceFile(workingTreeDocument) as import("ts-morph").SourceFile;
+
+      assert.strictEqual(exactSourceFile.getFullText(), currentText);
+    } finally {
+      Object.defineProperty(vscode.workspace, "textDocuments", {
+        configurable: true,
+        get: () => originalTextDocuments,
+      });
+    }
+  });
 });
 
 function createElement(

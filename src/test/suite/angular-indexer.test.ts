@@ -131,6 +131,20 @@ describe("AngularIndexer", function () {
       assert.ok(selectors.includes("complexButton"), "Should include complex directive");
     });
 
+    it("notifies consumers after a full reindex", async () => {
+      let changeEvents = 0;
+      const subscription = indexer.onDidChangeIndex(() => {
+        changeEvents++;
+      });
+
+      try {
+        await indexer.generateFullIndex(mockContext);
+        assert.strictEqual(changeEvents, 1, "A completed full reindex should request one diagnostics refresh");
+      } finally {
+        subscription.dispose();
+      }
+    });
+
     it("should handle standalone components correctly", async () => {
       await indexer.generateFullIndex(mockContext);
 
@@ -338,8 +352,12 @@ describe("AngularIndexer", function () {
       indexer.initializeWatcher(mockContext);
 
       let fired = 0;
+      let indexChanged = 0;
       const subscription = indexer.onDidIndexNodeModules(() => {
         fired++;
+      });
+      const indexSubscription = indexer.onDidChangeIndex(() => {
+        indexChanged++;
       });
 
       try {
@@ -348,8 +366,10 @@ describe("AngularIndexer", function () {
         };
         await indexerInternal.reindexNodeModulesAfterDependencyChange(mockContext);
         assert.strictEqual(fired, 1, "onDidIndexNodeModules should fire once after a dependency change");
+        assert.strictEqual(indexChanged, 1, "Dependency changes should also request a diagnostics refresh");
       } finally {
         subscription.dispose();
+        indexSubscription.dispose();
       }
     });
 
@@ -390,11 +410,18 @@ export class NewComponent {}
 `;
 
       try {
+        const indexChanged = new Promise<void>((resolve) => {
+          const subscription = indexer.onDidChangeIndex(() => {
+            subscription.dispose();
+            resolve();
+          });
+        });
+
         // Create new file
         fs.writeFileSync(newComponentPath, newComponentContent);
 
-        // Give the watcher time to process
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        // Wait for the watcher to finish updating the index.
+        await Promise.race([indexChanged, new Promise((resolve) => setTimeout(resolve, 1000))]);
 
         // Check if the new component was indexed
         const elements = indexer.getElements("new-component");

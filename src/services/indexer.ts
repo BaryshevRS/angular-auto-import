@@ -383,12 +383,18 @@ export class AngularIndexer {
   private dependencyWatcher: vscode.FileSystemWatcher | null = null;
   private isReindexingDependencies: boolean = false;
   private readonly _onDidIndexNodeModules = new vscode.EventEmitter<void>();
+  private readonly _onDidChangeIndex = new vscode.EventEmitter<void>();
   /**
    * Fires after `node_modules` are re-indexed because a dependency manifest
    * changed. Consumers (e.g. the diagnostic provider) can use this to refresh
    * results that depend on the external library index.
    */
   public readonly onDidIndexNodeModules: vscode.Event<void> = this._onDidIndexNodeModules.event;
+  /**
+   * Fires after the selector index changes, whether through a full reindex,
+   * dependency refresh, or an incremental project-file update.
+   */
+  public readonly onDidChangeIndex: vscode.Event<void> = this._onDidChangeIndex.event;
   private projectRootPath: string = "";
   private isIndexing: boolean = false;
 
@@ -490,6 +496,7 @@ export class AngularIndexer {
       }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File created: ${uri.fsPath}`);
       await this.updateFileIndex(uri.fsPath, context);
+      this._onDidChangeIndex.fire();
     });
 
     this.fileWatcher.onDidChange(async (uri) => {
@@ -498,6 +505,7 @@ export class AngularIndexer {
       }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File changed: ${uri.fsPath}`);
       await this.updateFileIndex(uri.fsPath, context);
+      this._onDidChangeIndex.fire();
     });
 
     this.fileWatcher.onDidDelete(async (uri) => {
@@ -511,6 +519,7 @@ export class AngularIndexer {
       if (sourceFile) {
         this.project.removeSourceFile(sourceFile);
       }
+      this._onDidChangeIndex.fire();
     });
 
     context.subscriptions.push(this.fileWatcher);
@@ -569,6 +578,7 @@ export class AngularIndexer {
       logger.info(`🔄 Dependencies changed for ${path.basename(this.projectRootPath)}, re-indexing libraries...`);
       await this.indexNodeModules(context);
       this._onDidIndexNodeModules.fire();
+      this._onDidChangeIndex.fire();
     } catch (error) {
       logger.error("[DependencyWatcher] Error re-indexing libraries after dependency change:", error as Error);
     } finally {
@@ -1217,6 +1227,8 @@ export class AngularIndexer {
       this.expandAllModuleExports();
 
       await this.saveIndexToWorkspace(context);
+
+      this._onDidChangeIndex.fire();
 
       // Log final memory usage and performance metrics
       logMemoryUsage("Full index completed", initialMemory);
@@ -2835,6 +2847,7 @@ export class AngularIndexer {
       this.dependencyWatcher = null;
     }
     this._onDidIndexNodeModules.dispose();
+    this._onDidChangeIndex.dispose();
     this.clearInMemoryState();
     // Note: Should we dispose the ts-morph Project as well? It doesn't have a dispose method, but we can clear its files
     removeAllSourceFiles(this.project, "dispose");

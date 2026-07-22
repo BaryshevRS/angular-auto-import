@@ -6,19 +6,31 @@
 /**
  * Debounces a function, ensuring it's only called after a specified delay since the last invocation.
  *
- * @template T - The type of the function to debounce.
- * @param {T} func - The function to debounce.
+ * @template Args - The argument tuple accepted by the function.
+ * @param func - The function to debounce.
  * @param {number} delay - The delay in milliseconds before the function is invoked.
- * @returns {(this: This, ...args: Parameters<T>) => void} The debounced function.
+ * @returns The debounced function with a method for cancelling a pending invocation.
  */
+type DebouncedFunction<Args extends unknown[]> = ((...args: Args) => void) & { cancel(): void };
+
 export function debounce<Args extends unknown[]>(
   func: (...args: Args) => unknown,
   delay: number
-): (...args: Args) => void {
+): DebouncedFunction<Args> {
   let timeout: NodeJS.Timeout | undefined;
 
-  return function (this: ThisParameterType<typeof func>, ...args: Args): void {
+  const debounced = function (this: ThisParameterType<typeof func>, ...args: Args): void {
     clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), delay);
+    timeout = setTimeout(() => {
+      timeout = undefined;
+      func.apply(this, args);
+    }, delay);
+  } as DebouncedFunction<Args>;
+
+  debounced.cancel = (): void => {
+    clearTimeout(timeout);
+    timeout = undefined;
   };
+
+  return debounced;
 }

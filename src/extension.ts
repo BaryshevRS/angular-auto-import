@@ -26,6 +26,7 @@ import { type ProviderContext, registerProviders } from "./providers";
 import { AngularIndexer } from "./services";
 import * as TsConfigHelper from "./services/tsconfig";
 import type { ProcessedTsConfig, ProjectContext } from "./types";
+import { debounce } from "./utils/debounce";
 import { findDeepestContainingProjectContext, getProjectContextForDocumentWithLogging } from "./utils/project-context";
 import { clearAllTemplateCache, clearTemplateCache } from "./utils/template-detection";
 
@@ -85,6 +86,9 @@ let extensionConfig: ExtensionConfig;
 
 /** Invalidates project initializations that outlive their activation lifecycle. */
 let activationGeneration = 0;
+
+/** Coalesces bursts from file watchers before rechecking every open document. */
+const INDEX_DIAGNOSTIC_REFRESH_DEBOUNCE_MS = 300;
 
 /**
  * Activates the Angular Auto-Import extension.
@@ -156,6 +160,10 @@ export async function activate(
     context.subscriptions.push(manifestWatcher);
 
     let diagnosticProvider: ReturnType<typeof registerProviders>;
+    const refreshDiagnosticsAfterIndexChange = debounce(() => {
+      void diagnosticProvider?.refreshOpenDocuments();
+    }, INDEX_DIAGNOSTIC_REFRESH_DEBOUNCE_MS);
+    context.subscriptions.push({ dispose: refreshDiagnosticsAfterIndexChange.cancel });
     const rootsWithDiagnosticRefresh = new Set<string>();
     const attachDiagnosticRefresh = (rootPath: string): void => {
       if (!diagnosticProvider || rootsWithDiagnosticRefresh.has(rootPath)) {
@@ -165,13 +173,9 @@ export async function activate(
       if (!indexer) {
         return;
       }
-      context.subscriptions.push(
-        indexer.onDidIndexNodeModules(() => {
-          void diagnosticProvider?.refreshOpenDocuments();
-        })
-      );
+      context.subscriptions.push(indexer.onDidChangeIndex(refreshDiagnosticsAfterIndexChange));
       rootsWithDiagnosticRefresh.add(rootPath);
-      void diagnosticProvider.refreshOpenDocuments();
+      refreshDiagnosticsAfterIndexChange();
     };
 
     const projectRegistry = dependencies.createProjectRegistry({

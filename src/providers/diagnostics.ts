@@ -277,7 +277,9 @@ export class DiagnosticProvider {
   public async forceUpdateDiagnosticsForFile(filePath: string): Promise<void> {
     try {
       // First try to find the document in active documents
-      const activeDocument = vscode.workspace.textDocuments.find((doc) => doc.fileName === filePath);
+      const activeDocument = vscode.workspace.textDocuments.find(
+        (doc) => doc.uri.scheme === "file" && doc.fileName === filePath
+      );
 
       if (activeDocument) {
         // Force refresh ts-morph project with current document content
@@ -298,13 +300,13 @@ export class DiagnosticProvider {
         }
 
         // Use the active document directly
-        this.updateDiagnostics(activeDocument);
+        await this.updateDiagnostics(activeDocument);
         // Force updated diagnostics for active document
       } else {
         // Fallback to opening the document
         const uri = vscode.Uri.file(filePath);
         const document = await vscode.workspace.openTextDocument(uri);
-        this.updateDiagnostics(document);
+        await this.updateDiagnostics(document);
         // Force updated diagnostics for document
       }
     } catch (error) {
@@ -317,6 +319,16 @@ export class DiagnosticProvider {
    */
   private async updateDiagnostics(document: vscode.TextDocument): Promise<void> {
     const startTime = process.hrtime.bigint();
+
+    // Source Control diff editors expose the historical side as a virtual
+    // document (for example, with the `git` scheme). Diagnostics for those
+    // immutable snapshots cannot be fixed and are keyed separately by VS Code,
+    // so keeping them produces stale markers after the real file or index
+    // changes. All other providers in this extension are file-only as well.
+    if (document.uri.scheme !== "file") {
+      this.clearDiagnostics(document);
+      return;
+    }
 
     const diagnosticsMode = this.context.extensionConfig.diagnosticsMode;
     if (diagnosticsMode === "disabled") {
@@ -970,9 +982,11 @@ export class DiagnosticProvider {
 
     const { project } = projCtx.indexer;
 
-    const activeDocument = vscode.workspace.textDocuments.find((doc) => doc.fileName === document.fileName);
-
-    const currentContent = activeDocument ? activeDocument.getText() : document.getText();
+    // Use the exact document being diagnosed. SCM diff editors can expose a
+    // virtual document with the same fileName as the working-tree document;
+    // looking up by fileName alone may otherwise substitute the historical
+    // snapshot and poison the shared ts-morph SourceFile.
+    const currentContent = document.getText();
 
     let sourceFile = project.getSourceFile(document.fileName);
 
@@ -1761,6 +1775,12 @@ export class DiagnosticProvider {
   }
 
   private publishFilteredDiagnostics(uri: vscode.Uri): void {
+    if (uri.scheme !== "file") {
+      this.candidateDiagnostics.delete(uri.toString());
+      this.diagnosticCollection.delete(uri);
+      return;
+    }
+
     const rawCandidateDiags = this.candidateDiagnostics.get(uri.toString()) || [];
 
     const candidateDiags: vscode.Diagnostic[] = [];

@@ -8,7 +8,7 @@
 
 import * as assert from "node:assert";
 import * as path from "node:path";
-import { generateImportStatement, isAngularFile, resolveRelativePath } from "../../utils";
+import { debounce, generateImportStatement, isAngularFile, resolveRelativePath } from "../../utils";
 
 describe("Utility Functions", function () {
   // Set timeout for all tests in this suite
@@ -246,6 +246,35 @@ describe("Utility Functions", function () {
       assert.doesNotThrow(() => {
         resolveRelativePath(123 as any, {} as any);
       }, "resolveRelativePath should not throw for invalid type inputs");
+    });
+  });
+
+  describe("debounce", () => {
+    it("coalesces a burst into one trailing invocation", async () => {
+      let calls = 0;
+      const debounced = debounce(() => {
+        calls++;
+      }, 10);
+
+      debounced();
+      debounced();
+      debounced();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.strictEqual(calls, 1);
+    });
+
+    it("can cancel a pending invocation", async () => {
+      let calls = 0;
+      const debounced = debounce(() => {
+        calls++;
+      }, 10);
+
+      debounced();
+      debounced.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.strictEqual(calls, 0);
     });
   });
 });

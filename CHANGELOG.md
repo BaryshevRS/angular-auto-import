@@ -4,6 +4,15 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.8.0] - 2026-07-22
+
+### Fixed
+- **Source Control review diagnostics**: historical `git:` snapshots no longer retain stale diagnostics or replace the working-tree content used for analysis
+- **Diagnostics after indexing**: open files are refreshed after full reindexing and incremental component, directive, pipe, or dependency index updates
+
+### Improved
+- **Diagnostics refresh performance**: bursts of index changes are coalesced into a single refresh across all project roots, avoiding repeated analysis of every open document during branch switches, formatting, and dependency installs
+
 ## [2.7.0] - 2026-07-12
 
 ### Fixed
