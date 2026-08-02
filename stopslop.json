@@ -6,7 +6,8 @@
   "ignore": [
     "src/test/**",
     "src/e2e/**",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "esbuild.js"
   ],
   "knip": {
     "entry": [

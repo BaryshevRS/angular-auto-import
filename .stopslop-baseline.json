@@ -35,21 +35,6 @@
       "kind": "god-class",
       "file": "src/services/indexer.ts",
       "symbol": "AngularIndexer"
-    },
-    {
-      "kind": "orphan-feature",
-      "file": "src/utils/angular.ts",
-      "symbol": "generateImportStatement"
-    },
-    {
-      "kind": "orphan-feature",
-      "file": "src/utils/angular.ts",
-      "symbol": "isAngularFile"
-    },
-    {
-      "kind": "orphan-feature",
-      "file": "src/utils/angular.ts",
-      "symbol": "resolveRelativePath"
     }
   ]
 }

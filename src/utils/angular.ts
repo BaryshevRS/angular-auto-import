@@ -13,7 +13,6 @@ import { STANDARD_ANGULAR_ELEMENTS } from "../config";
 import { logger } from "../logger";
 import type { AngularIndexer } from "../services";
 import { AngularElementData } from "../types";
-import { getRelativeFilePath } from "./path";
 
 /**
  * Converts a string from kebab-case or camelCase to PascalCase.
@@ -524,51 +523,6 @@ async function getBestMatchUsingAngularMatcher(
   } catch (error) {
     logger.error("Error using Angular SelectorMatcher:", error as Error);
     return candidates[0];
-  }
-}
-
-/**
- * Checks if a file path corresponds to an Angular file type (component, directive, or pipe).
- *
- * @param filePath The path of the file to check.
- * @returns `true` if the file is an Angular file, `false` otherwise.
- */
-export function isAngularFile(filePath: string): boolean {
-  if (!filePath || typeof filePath !== "string") {
-    return false;
-  }
-
-  return /\.(component|directive|pipe)\.ts$/.test(filePath);
-}
-
-/**
- * Generates an import statement for a given symbol and path.
- *
- * @param name The name of the symbol to import (e.g., 'MyComponent').
- * @param path The path to import from (e.g., './my-component').
- * @returns The generated import statement.
- */
-export function generateImportStatement(name: string, path: string): string {
-  return `import { ${name} } from '${path}';`;
-}
-
-/**
- * Resolves the relative path from one file to another.
- *
- * @param from The absolute path of the file to import from.
- * @param to The absolute path of the file to import to.
- * @returns The relative path from `from` to `to`.
- */
-export function resolveRelativePath(from: string, to: string): string {
-  if (!from || !to) {
-    return "";
-  }
-
-  try {
-    const toNoExt = to.replace(/\.ts$/, "");
-    return getRelativeFilePath(from, toNoExt);
-  } catch (_error) {
-    return "";
   }
 }
 
