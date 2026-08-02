@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "findings": [
+    {
+      "kind": "cognitive-complexity",
+      "file": "esbuild.js",
+      "symbol": "setup"
+    },
+    {
+      "kind": "cognitive-complexity",
+      "file": "src/commands/index.ts",
+      "symbol": "registerCommands"
+    },
+    {
+      "kind": "cognitive-complexity",
+      "file": "src/extension.ts",
+      "symbol": "initializeProjects"
+    },
+    {
+      "kind": "cognitive-complexity",
+      "file": "src/providers/diagnostics.ts",
+      "symbol": "DiagnosticProvider.activate"
+    },
+    {
+      "kind": "cognitive-complexity",
+      "file": "src/providers/diagnostics.ts",
+      "symbol": "DiagnosticProvider.parseCompleteTemplate"
+    },
+    {
+      "kind": "god-class",
+      "file": "src/providers/diagnostics.ts",
+      "symbol": "DiagnosticProvider"
+    },
+    {
+      "kind": "god-class",
+      "file": "src/services/indexer.ts",
+      "symbol": "AngularIndexer"
+    },
+    {
+      "kind": "orphan-feature",
+      "file": "src/utils/angular.ts",
+      "symbol": "generateImportStatement"
+    },
+    {
+      "kind": "orphan-feature",
+      "file": "src/utils/angular.ts",
+      "symbol": "isAngularFile"
+    },
+    {
+      "kind": "orphan-feature",
+      "file": "src/utils/angular.ts",
+      "symbol": "resolveRelativePath"
+    }
+  ]
+}

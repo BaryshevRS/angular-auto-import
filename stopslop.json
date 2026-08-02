@@ -1,0 +1,27 @@
+{
+  "$schema": "https://unpkg.com/stopslop/schema.json",
+  "duplicates": {
+    "minTokens": 100
+  },
+  "ignore": [
+    "src/test/**",
+    "src/e2e/**",
+    "**/*.test.ts"
+  ],
+  "knip": {
+    "entry": [
+      "src/extension.ts",
+      "src/test/suite/**/*.ts",
+      "src/e2e/**/*.ts",
+      "src/test/runTest.ts"
+    ],
+    "project": [
+      "src/**/*.ts"
+    ],
+    "ignore": [
+      "src/test/fixtures/**",
+      "src/e2e/projects/**",
+      "typedoc.json"
+    ]
+  }
+}

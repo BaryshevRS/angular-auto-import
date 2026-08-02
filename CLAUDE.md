@@ -21,7 +21,7 @@ pnpm run package
 pnpm run check-types
 
 # Linting and formatting
-pnpm run lint          # Full lint check (biome + knip + types)  
+pnpm run lint          # Full lint check (biome + StopSlop + types)
 
 # Testing
 pnpm run test          # Run VS Code extension tests
@@ -100,7 +100,7 @@ Settings are defined in `package.json` under `contributes.configuration`:
 ### Code Quality Tools
 
 - **Biome**: Linting, formatting, and style enforcement
-- **Knip**: Dead code elimination and dependency analysis  
+- **StopSlop**: Complexity, duplication, and dead-code analysis (via Clone Alert and Knip)
 - **TypeDoc**: API documentation generation
 - **ESBuild**: Fast bundling with VS Code-specific optimizations
 
