@@ -25,19 +25,13 @@ import { createVsCodeFileSystem } from "../adapters/vscode/file-system";
 import { createVsCodeProgressHost } from "../adapters/vscode/progress";
 import { isLibraryExcluded } from "../config/excluded-libraries";
 import type { CacheStore } from "../core/cache";
+import { AngularElementIndex, type ComponentToModuleMap } from "../core/element-index";
 import { Emitter, type EventSource } from "../core/events";
 import type { FileSystem } from "../core/file-system";
 import type { ProgressHost, ProgressReporter } from "../core/progress";
 import { logger } from "../logger";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
-import {
-  createElementComparator,
-  debounce,
-  findAngularDependencies,
-  getLibraryEntryPoints,
-  isStandalone,
-  parseAngularSelector,
-} from "../utils";
+import { debounce, findAngularDependencies, getLibraryEntryPoints, isStandalone, parseAngularSelector } from "../utils";
 
 /**
  * Glob (relative to the project root) matching dependency manifests and lock files.
@@ -74,198 +68,6 @@ const PROJECT_SOURCE_EXCLUDE_GLOB = `{${[
   "**/*.spec.ts",
   "**/*.test.ts",
 ].join(",")}}`;
-
-/**
- * Represents a node in a Trie data structure for storing selectors.
- * @internal
- */
-class TrieNode {
-  public children: Map<string, TrieNode> = new Map();
-  public elements: AngularElementData[] = [];
-}
-
-/**
- * A Trie-based data structure for efficient searching of Angular selectors.
- * @internal
- */
-class SelectorTrie {
-  private root: TrieNode = new TrieNode();
-
-  public insert(selector: string, elementData: AngularElementData): void {
-    let currentNode = this.root;
-    for (const char of selector) {
-      if (!currentNode.children.has(char)) {
-        currentNode.children.set(char, new TrieNode());
-      }
-      const nextNode = currentNode.children.get(char);
-      if (!nextNode) {
-        throw new Error("Unexpected missing node in trie insertion");
-      }
-      currentNode = nextNode;
-    }
-    // Avoid adding duplicate elements for the same selector
-    if (!currentNode.elements.some((el) => el.name === elementData.name && el.path === elementData.path)) {
-      currentNode.elements.push(elementData);
-    }
-  }
-
-  public searchWithSelectors(prefix: string): { selector: string; element: AngularElementData }[] {
-    let currentNode = this.root;
-    for (const char of prefix) {
-      if (!currentNode.children.has(char)) {
-        return [];
-      }
-      const nextNode = currentNode.children.get(char);
-      if (!nextNode) {
-        return [];
-      }
-      currentNode = nextNode;
-    }
-    // We found the node for the prefix. Now collect everything underneath it.
-    // The collector needs the prefix to build the full selectors.
-    return this.collectAllElementsWithSelectors(currentNode, prefix);
-  }
-
-  public find(selector: string): AngularElementData | undefined {
-    let currentNode = this.root;
-    for (const char of selector) {
-      if (!currentNode.children.has(char)) {
-        return undefined;
-      }
-      const nextNode = currentNode.children.get(char);
-      if (!nextNode) {
-        return undefined;
-      }
-      currentNode = nextNode;
-    }
-    // No elements recorded for this selector
-    if (currentNode.elements.length === 0) {
-      return undefined;
-    }
-
-    // Fast-path if there is a single candidate
-    if (currentNode.elements.length === 1) {
-      return currentNode.elements[0];
-    }
-
-    // Heuristics for choosing the best candidate when multiple elements share the selector.
-
-    // 1. Prefer elements whose *original* selector list contains the searched selector exactly.
-    const exactMatches = currentNode.elements.filter((el) => {
-      return el.originalSelector
-        .split(",")
-        .map((s) => s.trim())
-        .some((part) => part === selector);
-    });
-
-    const candidatePool = exactMatches.length > 0 ? exactMatches : currentNode.elements;
-
-    // 2. Sort candidates to apply additional preferences:
-    //    a) Prefer components over directives over pipes.
-    //    b) Prefer shorter original selector strings (less specific, e.g., no attribute constraints).
-    //    c) Deterministic fallback – alphabetical by class name.
-    // Sort using shared element comparator (without PascalCase matching for backward compatibility)
-    candidatePool.sort(createElementComparator());
-
-    return candidatePool[0];
-  }
-
-  public findAll(selector: string): AngularElementData[] {
-    let currentNode = this.root;
-    for (const char of selector) {
-      if (!currentNode.children.has(char)) {
-        return [];
-      }
-      const nextNode = currentNode.children.get(char);
-      if (!nextNode) {
-        return [];
-      }
-      currentNode = nextNode;
-    }
-    return currentNode.elements;
-  }
-
-  public getAllSelectors(): string[] {
-    const selectors: string[] = [];
-    this.collectSelectors(this.root, "", selectors);
-    return selectors;
-  }
-
-  private collectSelectors(node: TrieNode, prefix: string, selectors: string[]): void {
-    if (node.elements.length > 0) {
-      selectors.push(prefix);
-    }
-    for (const [char, childNode] of node.children.entries()) {
-      this.collectSelectors(childNode, prefix + char, selectors);
-    }
-  }
-
-  public remove(selector: string, elementPath: string, elementName?: string): void {
-    let currentNode = this.root;
-    for (const char of selector) {
-      if (!currentNode.children.has(char)) {
-        return; // Selector doesn't exist
-      }
-      const nextNode = currentNode.children.get(char);
-      if (!nextNode) {
-        return; // Selector doesn't exist
-      }
-      currentNode = nextNode;
-    }
-    // Remove the element if it matches the path and optionally the name
-    currentNode.elements = currentNode.elements.filter((el) => {
-      const isPathMatch = path.resolve(el.path) === path.resolve(elementPath);
-      if (!isPathMatch) {
-        return true; // Path doesn't match, keep it.
-      }
-      // Path matches. If elementName is provided, we must also match its name to remove.
-      if (elementName) {
-        return el.name !== elementName; // Keep if name is different.
-      }
-      // Path matches and no name provided, means we remove all elements from this path for the given selector.
-      return false;
-    });
-  }
-
-  public getAllElements(): AngularElementData[] {
-    return this.collectAllElements(this.root);
-  }
-
-  private collectAllElements(node: TrieNode): AngularElementData[] {
-    let results: AngularElementData[] = [...node.elements];
-    for (const childNode of node.children.values()) {
-      results = results.concat(this.collectAllElements(childNode));
-    }
-    return results;
-  }
-
-  private collectAllElementsWithSelectors(
-    node: TrieNode,
-    currentSelector: string
-  ): { selector: string; element: AngularElementData }[] {
-    const results: { selector: string; element: AngularElementData }[] = [];
-
-    if (node.elements.length > 0) {
-      for (const element of node.elements) {
-        results.push({ selector: currentSelector, element });
-      }
-    }
-
-    for (const [char, childNode] of node.children.entries()) {
-      results.push(...this.collectAllElementsWithSelectors(childNode, currentSelector + char));
-    }
-
-    return results;
-  }
-
-  public clear(): void {
-    this.root = new TrieNode();
-  }
-
-  public get size(): number {
-    return this.getAllSelectors().length;
-  }
-}
 
 /**
  * Helper function to safely remove source files from ts-morph project
@@ -331,11 +133,6 @@ function withValidSourceFile<T>(
 }
 
 /**
- * Type alias for component-to-module map structure
- */
-type ComponentToModuleMap = Map<string, { moduleName: string; importPath: string; exportCount: number }>;
-
-/**
  * Helper function to parse ɵmod property from Angular module classes
  * @param classDecl - The class declaration to parse
  * @returns The exports tuple if found, null otherwise
@@ -369,16 +166,11 @@ export class AngularIndexer {
    * The ts-morph project instance.
    */
   project: Project;
-  private fileCache: Map<string, FileElementsInfo> = new Map();
-  private readonly selectorTrie: SelectorTrie = new SelectorTrie();
-
-  private projectModuleMap: ComponentToModuleMap = new Map();
   /**
-   * Index of external modules and their exported entities.
-   * Key: module name (e.g., "MatTableModule")
-   * Value: Set of exported entity names (e.g., Set(["MatTable", "MatHeaderCell", ...]))
+   * Selectors, per-file element records, and module maps. The runtime below only
+   * fills and queries this state; it owns scanning, watching, and persistence.
    */
-  private readonly externalModuleExportsIndex: Map<string, Set<string>> = new Map();
+  private readonly index = new AngularElementIndex();
   /**
    * The file watcher for the project.
    */
@@ -438,17 +230,6 @@ export class AngularIndexer {
       // Consider adding compilerOptions from tsconfig if available for more accurate parsing,
       // but this might slow down initialization. For now, default is fine.
     });
-  }
-
-  /**
-   * Clears all in-memory state (file cache, selector trie, module maps)
-   * @internal
-   */
-  private clearInMemoryState(): void {
-    this.fileCache.clear();
-    this.selectorTrie.clear();
-    this.projectModuleMap.clear();
-    this.externalModuleExportsIndex.clear();
   }
 
   /**
@@ -1012,7 +793,7 @@ export class AngularIndexer {
   } {
     const stats = fs.statSync(filePath);
     const lastModified = stats.mtime.getTime();
-    const cachedFile = this.fileCache.get(filePath);
+    const cachedFile = this.index.files.get(filePath);
     const content = fs.readFileSync(filePath, "utf-8");
     const hash = this.generateHash(content);
 
@@ -1029,7 +810,7 @@ export class AngularIndexer {
         ...cachedFile,
         lastModified: lastModified,
       };
-      this.fileCache.set(filePath, updatedCache);
+      this.index.files.set(filePath, updatedCache);
     }
   }
 
@@ -1041,7 +822,7 @@ export class AngularIndexer {
     for (const oldElement of cachedFile.elements) {
       const individualSelectors = await parseAngularSelector(oldElement.selector);
       for (const selector of individualSelectors) {
-        this.selectorTrie.remove(selector, cachedFile.filePath, oldElement.name);
+        this.index.selectors.remove(selector, cachedFile.filePath, oldElement.name);
       }
     }
   }
@@ -1058,7 +839,7 @@ export class AngularIndexer {
       hash: hash,
       elements: parsedElements,
     };
-    this.fileCache.set(filePath, fileElementsInfo);
+    this.index.files.set(filePath, fileElementsInfo);
 
     for (const parsed of parsedElements) {
       await this.indexSingleElement(parsed, filePath);
@@ -1083,7 +864,7 @@ export class AngularIndexer {
     });
 
     for (const selector of individualSelectors) {
-      this.selectorTrie.insert(selector, elementData);
+      this.index.selectors.insert(selector, elementData);
       logger.info(`Updated index for ${this.projectRootPath}: ${selector} (${parsed.type}) -> ${parsed.path}`);
     }
   }
@@ -1098,7 +879,7 @@ export class AngularIndexer {
     let moduleToImport: string | undefined;
 
     if (!parsed.isStandalone) {
-      const moduleInfo = this.projectModuleMap.get(parsed.name);
+      const moduleInfo = this.index.componentModules.get(parsed.name);
       if (moduleInfo) {
         importPath = moduleInfo.importPath;
         importName = moduleInfo.moduleName;
@@ -1127,7 +908,7 @@ export class AngularIndexer {
   }
 
   private async handleNoElementsFound(filePath: string): Promise<void> {
-    this.fileCache.delete(filePath);
+    this.index.files.delete(filePath);
     this.removeSourceFileFromProject(filePath);
     logger.info(`No Angular elements found in ${filePath} for ${this.projectRootPath}`);
   }
@@ -1140,16 +921,16 @@ export class AngularIndexer {
    */
   private async removeFromIndex(filePath: string, context: vscode.ExtensionContext): Promise<void> {
     // Remove from file cache
-    const fileInfo = this.fileCache.get(filePath);
+    const fileInfo = this.index.files.get(filePath);
     if (fileInfo) {
       for (const element of fileInfo.elements) {
         const individualSelectors = await parseAngularSelector(element.selector);
         for (const selector of individualSelectors) {
-          this.selectorTrie.remove(selector, filePath, element.name);
+          this.index.selectors.remove(selector, filePath, element.name);
           logger.info(`Removed from index for ${this.projectRootPath}: ${selector} from ${filePath}`);
         }
       }
-      this.fileCache.delete(filePath);
+      this.index.files.delete(filePath);
     }
 
     // Remove from ts-morph project with error handling
@@ -1171,7 +952,7 @@ export class AngularIndexer {
   ): Promise<Map<string, AngularElementData>> {
     if (this.isIndexing) {
       logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Already indexing, skipping...`);
-      return new Map(this.selectorTrie.getAllElements().map((e) => [e.originalSelector, e]));
+      return new Map(this.index.selectors.getAllElements().map((e) => [e.originalSelector, e]));
     }
 
     const timerName = `generateFullIndex:${path.basename(this.projectRootPath)}`;
@@ -1191,7 +972,7 @@ export class AngularIndexer {
 
       // Clear existing ts-morph project files before full scan to avoid stale data
       removeAllSourceFiles(this.project, "full index");
-      this.clearInMemoryState();
+      this.index.clear();
 
       progress?.report({ message: "Discovering project files..." });
       const projectTsFiles = await this.fileSystem.findFiles({
@@ -1233,7 +1014,7 @@ export class AngularIndexer {
         );
       }
 
-      const totalElements = this.selectorTrie.getAllElements().length;
+      const totalElements = this.index.selectors.getAllElements().length;
       logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Indexed ${totalElements} elements.`);
 
       await this.indexNodeModules(context, progress);
@@ -1250,7 +1031,7 @@ export class AngularIndexer {
       // Log final memory usage and performance metrics
       logMemoryUsage("Full index completed", initialMemory);
 
-      return new Map(this.selectorTrie.getAllElements().map((e) => [e.originalSelector, e]));
+      return new Map(this.index.selectors.getAllElements().map((e) => [e.originalSelector, e]));
     } finally {
       this.isIndexing = false;
       logger.stopTimer(timerName);
@@ -1325,13 +1106,13 @@ export class AngularIndexer {
             this.projectRootPath
           )}): Cache references a missing file (${staleFile}). Discarding cache and forcing a full reindex.`
         );
-        this.clearInMemoryState();
+        this.index.clear();
         return false;
       }
 
       logger.info(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Loaded ${
-          this.selectorTrie.size
+          this.index.selectors.size
         } elements from workspace cache.`
       );
       return true;
@@ -1356,7 +1137,7 @@ export class AngularIndexer {
    */
   private findStaleCachedProjectFile(): string | null {
     const nodeModulesPath = path.join(this.projectRootPath, "node_modules");
-    for (const filePath of this.fileCache.keys()) {
+    for (const filePath of this.index.files.keys()) {
       // External library files live under node_modules and are refreshed by the
       // dependency watcher; skip them to avoid unnecessary full reindexes.
       if (filePath.startsWith(nodeModulesPath)) {
@@ -1393,11 +1174,11 @@ export class AngularIndexer {
     }
 
     // Convert old ComponentInfo format to new FileElementsInfo format if needed
-    this.fileCache = this.convertCacheFormat(workspaceData.storedCache);
+    this.index.replaceFiles(this.convertCacheFormat(workspaceData.storedCache));
 
     // Load index data
-    this.selectorTrie.clear();
-    this.externalModuleExportsIndex.clear();
+    this.index.selectors.clear();
+    this.index.moduleExports.clear();
 
     for (const [key, value] of Object.entries(workspaceData.storedIndex)) {
       await this.loadIndexElement(key, value);
@@ -1444,7 +1225,7 @@ export class AngularIndexer {
 
     // Index under all its selectors
     for (const selector of elementData.selectors) {
-      this.selectorTrie.insert(selector, elementData);
+      this.index.selectors.insert(selector, elementData);
     }
   }
 
@@ -1462,7 +1243,7 @@ export class AngularIndexer {
           };
           return [key, entry];
         });
-      this.projectModuleMap = new Map(moduleMapEntries);
+      this.index.replaceComponentModules(new Map(moduleMapEntries));
     }
   }
 
@@ -1472,9 +1253,9 @@ export class AngularIndexer {
     }
 
     // Convert stored string arrays back to Sets
-    this.externalModuleExportsIndex.clear();
+    this.index.moduleExports.clear();
     for (const [moduleName, exports] of Object.entries(workspaceData.storedExternalModulesExports)) {
-      this.externalModuleExportsIndex.set(moduleName, new Set(exports));
+      this.index.moduleExports.set(moduleName, new Set(exports));
     }
   }
 
@@ -1490,18 +1271,18 @@ export class AngularIndexer {
     }
     try {
       const cacheStore = createVsCodeCacheStore(context.workspaceState);
-      await cacheStore.set(this.workspaceFileCacheKey, Object.fromEntries(this.fileCache));
+      await cacheStore.set(this.workspaceFileCacheKey, Object.fromEntries(this.index.files));
 
       const serializableTrie = Object.fromEntries(
-        this.selectorTrie.getAllElements().map((el) => [el.originalSelector, el])
+        this.index.selectors.getAllElements().map((el) => [el.originalSelector, el])
       );
 
       await cacheStore.set(this.workspaceIndexCacheKey, serializableTrie);
-      await cacheStore.set(this.workspaceModulesCacheKey, Object.fromEntries(this.projectModuleMap));
+      await cacheStore.set(this.workspaceModulesCacheKey, Object.fromEntries(this.index.componentModules));
 
       // Serialize external modules exports (convert Sets to arrays)
       const serializableExternalModules = Object.fromEntries(
-        Array.from(this.externalModuleExportsIndex.entries()).map(([moduleName, exportsSet]) => [
+        Array.from(this.index.moduleExports.entries()).map(([moduleName, exportsSet]) => [
           moduleName,
           Array.from(exportsSet),
         ])
@@ -1532,7 +1313,7 @@ export class AngularIndexer {
     }
     try {
       // Clear in-memory state
-      this.clearInMemoryState();
+      this.index.clear();
       removeAllSourceFiles(this.project, "clearCache");
 
       // Clear persisted state
@@ -1554,10 +1335,7 @@ export class AngularIndexer {
    * @returns An array of `AngularElementData` objects.
    */
   getElements(selector: string): AngularElementData[] {
-    if (typeof selector !== "string" || !selector) {
-      return [];
-    }
-    return this.selectorTrie.findAll(selector);
+    return this.index.getElements(selector);
   }
 
   /**
@@ -1566,68 +1344,7 @@ export class AngularIndexer {
    * @returns A Set of exported entity names or undefined if module not found.
    */
   getExternalModuleExports(moduleName: string): Set<string> | undefined {
-    if (typeof moduleName !== "string" || !moduleName) {
-      return undefined;
-    }
-    return this.externalModuleExportsIndex.get(moduleName);
-  }
-
-  /**
-   * Checks if an exported element is a module.
-   * An element is considered a module if it exists as a key in the externalModuleExportsIndex.
-   * @param name The name of the element to check.
-   * @returns True if the element is a module, false otherwise.
-   * @internal
-   */
-  private isModule(name: string): boolean {
-    return this.externalModuleExportsIndex.has(name);
-  }
-
-  /**
-   * Recursively expands module exports to include transitive exports.
-   * For example, if ChipsModule exports InputTextModule, and InputTextModule exports InputText,
-   * this method will ensure ChipsModule's exports include both InputTextModule and InputText.
-   * @param moduleName The name of the module being processed.
-   * @param directExports The direct exports of the module.
-   * @param visited Set of already visited modules to prevent infinite recursion.
-   * @returns A Set containing all direct and transitive exports.
-   * @internal
-   */
-  private expandModuleExportsRecursive(
-    moduleName: string,
-    directExports: Set<string>,
-    visited: Set<string>
-  ): Set<string> {
-    // Protect against circular dependencies
-    if (visited.has(moduleName)) {
-      return new Set<string>();
-    }
-    visited.add(moduleName);
-
-    const result = new Set<string>();
-
-    // Process each direct export
-    for (const exportedItem of directExports) {
-      // Always add the item itself
-      result.add(exportedItem);
-
-      // If the exported item is a module, recursively expand its exports
-      if (this.isModule(exportedItem)) {
-        const nestedExports = this.externalModuleExportsIndex.get(exportedItem);
-
-        if (nestedExports) {
-          // Recursively expand nested module exports
-          const expandedNested = this.expandModuleExportsRecursive(exportedItem, nestedExports, visited);
-
-          // Add all expanded exports to the result
-          for (const item of expandedNested) {
-            result.add(item);
-          }
-        }
-      }
-    }
-
-    return result;
+    return this.index.getModuleExports(moduleName);
   }
 
   /**
@@ -1645,35 +1362,25 @@ export class AngularIndexer {
   private expandAllModuleExports(): void {
     const expandedIndex = new Map<string, Set<string>>();
 
-    logger.info(
-      `[AngularIndexer] Starting module export expansion for ${this.externalModuleExportsIndex.size} modules`
-    );
+    logger.info(`[AngularIndexer] Starting module export expansion for ${this.index.moduleExports.size} modules`);
 
     // Process each module in the index
-    for (const [moduleName, directExports] of this.externalModuleExportsIndex) {
-      // Create a fresh visited set for each module's expansion
-      const visited = new Set<string>();
-
+    for (const [moduleName, directExports] of this.index.moduleExports) {
       logger.debug(
         `[AngularIndexer] Expanding ${moduleName}: direct exports = [${Array.from(directExports).join(", ")}]`
       );
 
-      // Recursively expand the module's exports
-      const expandedExports = this.expandModuleExportsRecursive(moduleName, directExports, visited);
+      // Recursively expand the module's exports, with a fresh visited set per module
+      const expandedExports = this.index.expandModuleExports(moduleName, directExports, new Set<string>());
 
       logger.debug(
         `[AngularIndexer] Expanded ${moduleName}: transitive exports = [${Array.from(expandedExports).join(", ")}]`
       );
 
-      // Store the expanded exports
       expandedIndex.set(moduleName, expandedExports);
     }
 
-    // Update the index in place (can't replace readonly Map)
-    this.externalModuleExportsIndex.clear();
-    for (const [moduleName, expandedExports] of expandedIndex) {
-      this.externalModuleExportsIndex.set(moduleName, expandedExports);
-    }
+    this.index.replaceModuleExports(expandedIndex);
 
     logger.info(`[AngularIndexer] Expanded ${expandedIndex.size} module exports to include transitive dependencies`);
   }
@@ -1916,7 +1623,7 @@ export class AngularIndexer {
       return;
     }
     logger.debug(`[Indexer] Indexing ${moduleFilePaths.length} project NgModules for ${this.projectRootPath}...`);
-    this.projectModuleMap.clear();
+    this.index.componentModules.clear();
 
     for (const file of moduleFilePaths) {
       try {
@@ -1939,7 +1646,7 @@ export class AngularIndexer {
         }
       }
     }
-    logger.debug(`[Indexer] Found ${this.projectModuleMap.size} component-to-module mappings in project.`);
+    logger.debug(`[Indexer] Found ${this.index.componentModules.size} component-to-module mappings in project.`);
   }
 
   /**
@@ -2027,7 +1734,7 @@ export class AngularIndexer {
    * Stores module exports in the index.
    */
   private storeModuleExports(moduleName: string, exportedIdentifiers: string[]): void {
-    this.externalModuleExportsIndex.set(moduleName, new Set(exportedIdentifiers));
+    this.index.moduleExports.set(moduleName, new Set(exportedIdentifiers));
     logger.debug(
       `[ProjectModules] Indexed module ${moduleName} with ${exportedIdentifiers.length} exports: ${exportedIdentifiers.join(", ")}`
     );
@@ -2041,7 +1748,7 @@ export class AngularIndexer {
     const exportCount = exportedIdentifiers.length;
 
     for (const componentName of exportedIdentifiers) {
-      const existing = this.projectModuleMap.get(componentName);
+      const existing = this.index.componentModules.get(componentName);
       const newCandidate = { moduleName, importPath: newImportPath, exportCount };
 
       if (existing) {
@@ -2059,10 +1766,10 @@ export class AngularIndexer {
         );
 
         if (newScore > existingScore) {
-          this.projectModuleMap.set(componentName, newCandidate);
+          this.index.componentModules.set(componentName, newCandidate);
         }
       } else {
-        this.projectModuleMap.set(componentName, newCandidate);
+        this.index.componentModules.set(componentName, newCandidate);
       }
     }
   }
@@ -2203,7 +1910,7 @@ export class AngularIndexer {
 
     // Store the accumulated exports in the external modules index
     if (moduleExports.size > 0) {
-      this.externalModuleExportsIndex.set(className, moduleExports);
+      this.index.moduleExports.set(className, moduleExports);
       logger.debug(
         `[ExternalModules] Indexed module ${className} with ${moduleExports.size} exports: ${Array.from(moduleExports).join(", ")}`
       );
@@ -2723,7 +2430,7 @@ export class AngularIndexer {
     });
 
     for (const sel of individualSelectors) {
-      this.selectorTrie.insert(sel, elementData);
+      this.index.selectors.insert(sel, elementData);
     }
 
     const via = exportingModule ? `via ${exportingModule.moduleName}` : "directly";
@@ -2751,7 +2458,7 @@ export class AngularIndexer {
       return currentImportPath; // Should not happen with valid components, but as a safeguard.
     }
 
-    const existingCandidates = this.selectorTrie.findAll(representativeSelector);
+    const existingCandidates = this.index.selectors.findAll(representativeSelector);
     const existingElement = existingCandidates.find((c) => c.name === className);
 
     if (existingElement) {
@@ -2770,7 +2477,7 @@ export class AngularIndexer {
       );
       for (const sel of existingElement.selectors) {
         // Use the precise remove operation.
-        this.selectorTrie.remove(sel, existingElement.path, existingElement.name);
+        this.index.selectors.remove(sel, existingElement.path, existingElement.name);
       }
     }
 
@@ -2833,7 +2540,7 @@ export class AngularIndexer {
    * @returns An array of selectors.
    */
   getAllSelectors(): string[] {
-    return this.selectorTrie.getAllSelectors();
+    return this.index.getAllSelectors();
   }
 
   /**
@@ -2842,7 +2549,7 @@ export class AngularIndexer {
    * @returns An array of objects containing the selector and the corresponding `AngularElementData`.
    */
   searchWithSelectors(prefix: string): { selector: string; element: AngularElementData }[] {
-    return this.selectorTrie.searchWithSelectors(prefix);
+    return this.index.searchWithSelectors(prefix);
   }
 
   /**
@@ -2859,7 +2566,7 @@ export class AngularIndexer {
     }
     this._onDidIndexNodeModules.dispose();
     this._onDidChangeIndex.dispose();
-    this.clearInMemoryState();
+    this.index.clear();
     // Note: Should we dispose the ts-morph Project as well? It doesn't have a dispose method, but we can clear its files
     removeAllSourceFiles(this.project, "dispose");
   }

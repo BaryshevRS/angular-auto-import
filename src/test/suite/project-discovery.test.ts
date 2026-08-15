@@ -2,19 +2,17 @@ import * as assert from "node:assert";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { findDeepestContainingProjectRoot, isPathInside } from "../../core/project-registry";
 import * as extensionModule from "../../extension";
 
 type DependencyRootApi = {
   findAngularDependencyRoot(filePath: string, searchBoundary: string): Promise<string | undefined>;
-  findDeepestContainingProjectRoot(filePath: string, roots: Iterable<string>): string | undefined;
-  isPathInside(rootPath: string, candidatePath: string): boolean;
   invalidateAngularProjectCache(packageJsonPath?: string): void;
 };
 
 // Keep the RED tests type-checkable before the new public API is exported. At runtime,
 // an absent helper still fails clearly and directs the implementation to the expected API.
-const { findAngularDependencyRoot, findDeepestContainingProjectRoot, isPathInside, invalidateAngularProjectCache } =
-  extensionModule as unknown as DependencyRootApi;
+const { findAngularDependencyRoot, invalidateAngularProjectCache } = extensionModule as unknown as DependencyRootApi;
 
 /** Counts manifest reads performed while running `run`, so cached lookups are observable. */
 async function countManifestReads(run: () => Promise<void>): Promise<number> {

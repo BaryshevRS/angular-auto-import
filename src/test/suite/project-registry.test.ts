@@ -1,57 +1,21 @@
 import * as assert from "node:assert";
 import * as path from "node:path";
-import * as extensionModule from "../../extension";
+import { ProjectRegistry, type RegistryDocument, type RegistryDocumentSource } from "../../core/project-registry";
 
-type TestDocument = {
-  uri: {
-    scheme: string;
-    fsPath: string;
-  };
-  languageId: string;
-};
-
-type DocumentSource = {
-  openDocuments: Iterable<TestDocument>;
-  onDidOpenDocument(listener: (document: TestDocument) => void): { dispose(): void };
-};
-
-type ProjectRegistryOptions = {
-  workspaceRoots: Iterable<string>;
-  discoverAngularRoot(filePath: string, searchBoundary: string): Promise<string | undefined>;
-  initializeRoot(rootPath: string): Promise<void>;
-  registerProviders(): void;
-  onDidInitializeRoot?(rootPath: string): void;
-  onError?(error: unknown): void;
-};
-
-type ProjectRegistryInstance = {
-  start(source: DocumentSource): Promise<void>;
-  handleDocument(document: TestDocument): Promise<void>;
-  dispose(): void;
-};
-
-type ProjectRegistryConstructor = new (options: ProjectRegistryOptions) => ProjectRegistryInstance;
-
-// Keep this RED slice type-checkable before the new lifecycle API is exported.
-const { ProjectRegistry } = extensionModule as unknown as {
-  // biome-ignore lint/style/useNamingConvention: Public class export follows TypeScript naming conventions.
-  ProjectRegistry: ProjectRegistryConstructor;
-};
-
-function document(filePath: string, languageId = "typescript", scheme = "file"): TestDocument {
+function document(filePath: string, languageId = "typescript", scheme = "file"): RegistryDocument {
   return {
     uri: { scheme, fsPath: filePath },
     languageId,
   };
 }
 
-function createDocumentSource(openDocuments: Iterable<TestDocument> = []): {
-  source: DocumentSource;
-  emit(documentToOpen: TestDocument): void;
+function createDocumentSource(openDocuments: Iterable<RegistryDocument> = []): {
+  source: RegistryDocumentSource;
+  emit(documentToOpen: RegistryDocument): void;
   getSubscriptionCount(): number;
   getDisposeCount(): number;
 } {
-  let listener: ((openedDocument: TestDocument) => void) | undefined;
+  let listener: ((openedDocument: RegistryDocument) => void) | undefined;
   let subscriptionCount = 0;
   let disposeCount = 0;
 

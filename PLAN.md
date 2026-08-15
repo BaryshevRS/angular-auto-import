@@ -189,8 +189,12 @@ Exit criteria:
   - [x] Replace `AngularIndexer`'s VS Code event emitters with shared `EventSource` and `Disposable` core contracts.
   - [x] Route persisted index reads, writes, and deletes through a shared `CacheStore` and VS Code workspace-state adapter.
   - [x] Add filesystem and progress ports alongside their first extracted runtime consumers: `AngularIndexer` now discovers, reads, and reports through injected `FileSystem`/`ProgressHost` ports instead of `workspace.findFiles`, `workspace.fs`, and `window.withProgress`.
-- [ ] Split `AngularIndexer` into pure index/query state and project runtime concerns such as scanning, watching, persistence, and progress.
-- [ ] Move `ProjectRegistry` out of the extension entry point without changing its behavior.
+- [x] Split `AngularIndexer` into pure index/query state and project runtime concerns such as scanning, watching, persistence, and progress.
+  - [x] Extract the selector trie and element/module lookup state into an editor-agnostic index module (`core/selector-trie`, `core/element-index`).
+  - [x] Leave scanning, watching, persistence, and progress in a project runtime that owns that index.
+- [x] Move `ProjectRegistry` out of the extension entry point without changing its behavior.
+  - [x] Move the registry, its document/source contracts, and root-containment helpers into core.
+  - [x] Re-point registry and discovery tests at the core module instead of the extension entry point.
 - [ ] Extract completion context detection/ranking so it returns plain completion DTOs.
 - [ ] Extract diagnostics so parsing and missing-import checks return plain diagnostic DTOs with offsets/ranges.
 - [ ] Extract an `ImportPlanner` that accepts document text and requested elements and returns a versioned edit plan.
