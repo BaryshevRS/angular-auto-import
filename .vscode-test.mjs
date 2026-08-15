@@ -62,6 +62,20 @@ export default defineConfig({
         reporter: 'spec',
       },
     },
+    {
+      label: 'lsp-spike',
+      files: 'out/test/lsp/**/*.test.js',
+      workspaceFolder: './src/test/fixtures/simple-project',
+      env: {
+        AAI_LSP_SPIKE: '1',
+      },
+      mocha: {
+        ui: 'bdd',
+        timeout: 20000,
+        color: true,
+        reporter: 'spec',
+      },
+    },
     ...e2eTests,
     ...generateTests,
     // Legacy aliases pointing to v19 (default version)

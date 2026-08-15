@@ -22,6 +22,7 @@ import * as vscode from "vscode";
 import { type CommandContext, registerCommands } from "./commands";
 import { type ExtensionConfig, getConfiguration, onConfigurationChanged } from "./config";
 import { logger } from "./logger";
+import { isLspSpikeEnabled, startLspSpike, stopLspSpike } from "./lsp/client";
 import { type ProviderContext, registerProviders } from "./providers";
 import { AngularIndexer } from "./services";
 import * as TsConfigHelper from "./services/tsconfig";
@@ -125,6 +126,13 @@ export async function activate(
   logger.initialize(context);
   try {
     logger.info("🚀 Angular Auto-Import: Starting activation...");
+
+    if (isLspSpikeEnabled()) {
+      logger.info("🧪 Angular Auto-Import: Starting isolated LSP spike mode...");
+      await startLspSpike(context);
+      logger.info("✅ Angular Auto-Import: LSP spike mode activated.");
+      return;
+    }
 
     // Initialize configuration
     extensionConfig = getConfiguration();
@@ -492,8 +500,10 @@ export class ProjectRegistry {
  * deactivate();
  * ```
  */
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   activationGeneration += 1;
+
+  await stopLspSpike();
 
   // Clear intervals
   projectIntervals.forEach((intervalId) => {

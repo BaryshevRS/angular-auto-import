@@ -7,6 +7,7 @@
 
 import type { SourceFile } from "ts-morph";
 import * as vscode from "vscode";
+import { toDocumentView } from "../adapters/vscode/document";
 import { STANDARD_ANGULAR_ELEMENTS } from "../config";
 import { AngularElementData, type Element, type ProcessedTsConfig } from "../types";
 import { getTsDocument, isStandalone, LruCache, switchFileType } from "../utils";
@@ -86,7 +87,10 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
 
     // For TypeScript files, ensure we are inside a template string
     // Pass the ts-morph project for robust AST-based detection
-    if (document.languageId === "typescript" && !isInsideTemplateString(document, position, projCtx.indexer.project)) {
+    if (
+      document.languageId === "typescript" &&
+      !isInsideTemplateString(toDocumentView(document), position, projCtx.indexer.project)
+    ) {
       return new vscode.CompletionList([], true);
     }
 

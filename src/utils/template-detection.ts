@@ -11,7 +11,7 @@
  */
 
 import { type NoSubstitutionTemplateLiteral, type StringLiteral, SyntaxKind } from "ts-morph";
-import type * as vscode from "vscode";
+import { type DocumentPosition, type DocumentView, fileUriToPath } from "../core/document";
 
 /**
  * Represents a range of a template string.
@@ -44,14 +44,14 @@ const templateCache = new Map<string, CacheEntry>();
  * Check if a position is inside an Angular template string.
  * Uses a hybrid approach: tries ts-morph AST parsing first (robust), falls back to regex (fast).
  *
- * @param document The VS Code text document.
+ * @param document The editor-agnostic text document.
  * @param position The position to check.
  * @param project Optional ts-morph Project for AST-based detection.
  * @returns `true` if the position is inside a template string, `false` otherwise.
  */
 export function isInsideTemplateString(
-  document: vscode.TextDocument,
-  position: vscode.Position,
+  document: DocumentView,
+  position: DocumentPosition,
   project?: import("ts-morph").Project
 ): boolean {
   // Try AST-based detection first if project is available (more robust)
@@ -73,19 +73,19 @@ export function isInsideTemplateString(
  * Robust template detection using ts-morph AST parsing.
  * This approach handles all edge cases correctly (whitespace, comments, multiline, etc.)
  *
- * @param document The VS Code text document.
+ * @param document The editor-agnostic text document.
  * @param position The position to check.
  * @param project The ts-morph Project instance.
  * @returns `true` if inside template, `false` if not, `undefined` if detection failed.
  * @internal
  */
 function isInsideTemplateStringUsingAst(
-  document: vscode.TextDocument,
-  position: vscode.Position,
+  document: DocumentView,
+  position: DocumentPosition,
   project: import("ts-morph").Project
 ): boolean | undefined {
   try {
-    const sourceFile = project.getSourceFile(document.fileName);
+    const sourceFile = project.getSourceFile(fileUriToPath(document.uri));
     if (!sourceFile) {
       return undefined;
     }
@@ -256,12 +256,12 @@ function extractTemplatePropertyRange(
  * Extract all template string ranges from an Angular component file.
  * Uses caching to avoid re-parsing the same document version.
  *
- * @param document The VS Code text document.
+ * @param document The editor-agnostic text document.
  * @returns An array of template string ranges.
  * @internal
  */
-function getTemplateStringRanges(document: vscode.TextDocument): TemplateStringRange[] {
-  const cacheKey = document.uri.toString();
+function getTemplateStringRanges(document: DocumentView): TemplateStringRange[] {
+  const cacheKey = document.uri;
   const currentVersion = document.version;
 
   // Check cache first

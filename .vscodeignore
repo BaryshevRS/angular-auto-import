@@ -24,6 +24,7 @@ biome.json
 knip.json
 typedoc.json
 CLAUDE.md
+PLAN.md
 .env
 .c8rc.json
 sonar-project.properties
