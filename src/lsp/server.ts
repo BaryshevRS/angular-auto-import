@@ -1,5 +1,4 @@
 import {
-  CompletionItemKind,
   createConnection,
   type InitializeParams,
   type InitializeResult,
@@ -7,6 +6,7 @@ import {
   TextDocuments,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { toLspCompletionKind } from "../adapters/lsp/language-types";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
 
 type SpikeInitializationOptions = {
@@ -60,7 +60,7 @@ connection.onCompletion((params) => {
   return [
     {
       label: "aai-lsp-spike",
-      kind: CompletionItemKind.Class,
+      kind: toLspCompletionKind("class"),
       insertText: "lsp-spike",
       detail: runtimeDependenciesLoaded
         ? "Angular Auto Import LSP spike (runtime dependencies loaded)"

@@ -18,8 +18,10 @@ import {
   SyntaxKind,
 } from "ts-morph";
 import * as vscode from "vscode";
+import { toVsCodeDiagnosticSeverity } from "../adapters/vscode/language-types";
 import { getStandardModuleExports } from "../config/standard-modules";
 import { knownTags } from "../consts";
+import type { CoreDiagnosticSeverity } from "../core/language-types";
 import { logger } from "../logger";
 import type { AngularIndexer } from "../services";
 import type {
@@ -615,7 +617,7 @@ export class DiagnosticProvider {
   private async checkElement(
     element: ParsedHtmlFullElement,
     indexer: AngularIndexer,
-    severity: vscode.DiagnosticSeverity,
+    severity: CoreDiagnosticSeverity,
     sourceFile: SourceFile,
     // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
     CssSelector: any,
@@ -692,7 +694,7 @@ export class DiagnosticProvider {
   private async processCandidateElement(
     element: ParsedHtmlFullElement,
     candidate: AngularElementData,
-    severity: vscode.DiagnosticSeverity,
+    severity: CoreDiagnosticSeverity,
     sourceFile: SourceFile,
     processedCandidates: Set<string>,
     // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
@@ -727,7 +729,7 @@ export class DiagnosticProvider {
   private processPipeCandidate(
     element: ParsedHtmlFullElement,
     candidate: AngularElementData,
-    severity: vscode.DiagnosticSeverity,
+    severity: CoreDiagnosticSeverity,
     sourceFile: SourceFile,
     processedCandidates: Set<string>
   ): vscode.Diagnostic | null {
@@ -744,7 +746,7 @@ export class DiagnosticProvider {
   private processNonPipeCandidate(
     element: ParsedHtmlFullElement,
     candidate: AngularElementData,
-    severity: vscode.DiagnosticSeverity,
+    severity: CoreDiagnosticSeverity,
     sourceFile: SourceFile,
     processedCandidates: Set<string>,
     // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
@@ -964,10 +966,10 @@ export class DiagnosticProvider {
     element: ParsedHtmlFullElement,
     candidate: AngularElementData,
     specificSelector: string,
-    severity: vscode.DiagnosticSeverity
+    severity: CoreDiagnosticSeverity
   ): vscode.Diagnostic {
     const message = `'${element.name}' is part of a known ${candidate.type}, but it is not imported.`;
-    const diagnostic = new vscode.Diagnostic(element.range, message, severity);
+    const diagnostic = new vscode.Diagnostic(element.range, message, toVsCodeDiagnosticSeverity(severity));
 
     diagnostic.code = `missing-${candidate.type}-import:${specificSelector}`;
     diagnostic.source = "angular-auto-import";
@@ -1761,16 +1763,16 @@ export class DiagnosticProvider {
     return node && typeof node === "object" && "children" in node && Array.isArray(node.children);
   }
 
-  private getSeverityFromConfig(severityLevel: string): vscode.DiagnosticSeverity {
+  private getSeverityFromConfig(severityLevel: string): CoreDiagnosticSeverity {
     switch (severityLevel.toLowerCase()) {
       case "error":
-        return vscode.DiagnosticSeverity.Error;
+        return "error";
       case "warning":
-        return vscode.DiagnosticSeverity.Warning;
+        return "warning";
       case "info":
-        return vscode.DiagnosticSeverity.Information;
+        return "information";
       default:
-        return vscode.DiagnosticSeverity.Warning;
+        return "warning";
     }
   }
 

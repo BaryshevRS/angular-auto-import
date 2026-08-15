@@ -8,7 +8,9 @@
 import type { SourceFile } from "ts-morph";
 import * as vscode from "vscode";
 import { toDocumentView } from "../adapters/vscode/document";
+import { fromVsCodeRange, toVsCodeCompletionKind, toVsCodeRange } from "../adapters/vscode/language-types";
 import { STANDARD_ANGULAR_ELEMENTS } from "../config";
+import type { CoreCompletionKind, CoreRange } from "../core/language-types";
 import { AngularElementData, type Element, type ProcessedTsConfig } from "../types";
 import { getTsDocument, isStandalone, LruCache, switchFileType } from "../utils";
 import { getProjectContextForDocument } from "../utils/project-context";
@@ -18,7 +20,7 @@ import type { ProviderContext } from "./index";
 interface CompletionContextData {
   context: "tag" | "attribute" | "pipe" | "structural-directive" | "none";
   filterText: string;
-  replacementRange: vscode.Range | undefined;
+  replacementRange: CoreRange | undefined;
   triggerChar: "[" | "*" | undefined;
   linePrefix: string;
   hasAttributeContext: boolean;
@@ -30,7 +32,7 @@ interface PotentialSuggestion {
   insertText: string;
   element: AngularElementData;
   relevance: number;
-  kind: vscode.CompletionItemKind;
+  kind: CoreCompletionKind;
   originalBestSelector: string;
 }
 
@@ -240,7 +242,8 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
       }
     }
 
-    const replacementRange = document.getWordRangeAtPosition(position, /[\w-]+/);
+    const wordRange = document.getWordRangeAtPosition(position, /[\w-]+/);
+    const replacementRange = wordRange ? fromVsCodeRange(wordRange) : undefined;
     return {
       context,
       filterText,
@@ -597,11 +600,11 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
     element: AngularElementData,
     selectors: string[],
     contextData: CompletionContextData
-  ): { relevance: number; selector: string; insertText: string; itemKind: vscode.CompletionItemKind } {
+  ): { relevance: number; selector: string; insertText: string; itemKind: CoreCompletionKind } {
     let bestRelevance = 0;
     let bestSelector = "";
     let bestInsertText = "";
-    let bestItemKind = vscode.CompletionItemKind.Class;
+    let bestItemKind: CoreCompletionKind = "class";
 
     for (const elementSelector of selectors) {
       const match = this.evaluateSelectorMatch(element, elementSelector, contextData);
@@ -628,7 +631,7 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
     element: AngularElementData,
     elementSelector: string,
     contextData: CompletionContextData
-  ): { relevance: number; insertText: string; itemKind: vscode.CompletionItemKind } {
+  ): { relevance: number; insertText: string; itemKind: CoreCompletionKind } {
     // Determine if this is an element or attribute selector
     const selectorIsElement = this.isElementSelector(elementSelector);
 
@@ -649,7 +652,7 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
       return this.evaluateDirectiveMatch(element, elementSelector, contextData, isElementSelector);
     }
 
-    return { relevance: 0, insertText: elementSelector, itemKind: vscode.CompletionItemKind.Class };
+    return { relevance: 0, insertText: elementSelector, itemKind: "class" };
   }
 
   /**
@@ -658,15 +661,15 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
   private evaluatePipeMatch(
     elementSelector: string,
     contextData: CompletionContextData
-  ): { relevance: number; insertText: string; itemKind: vscode.CompletionItemKind } {
+  ): { relevance: number; insertText: string; itemKind: CoreCompletionKind } {
     if (elementSelector.toLowerCase().startsWith(contextData.filterText.toLowerCase())) {
       return {
         relevance: 2,
         insertText: elementSelector,
-        itemKind: vscode.CompletionItemKind.Function,
+        itemKind: "function",
       };
     }
-    return { relevance: 0, insertText: elementSelector, itemKind: vscode.CompletionItemKind.Function };
+    return { relevance: 0, insertText: elementSelector, itemKind: "function" };
   }
 
   /**
@@ -677,7 +680,7 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
     elementSelector: string,
     contextData: CompletionContextData,
     isElementSelector: boolean
-  ): { relevance: number; insertText: string; itemKind: vscode.CompletionItemKind } {
+  ): { relevance: number; insertText: string; itemKind: CoreCompletionKind } {
     return this.evaluateElementOrAttributeMatch(element, elementSelector, contextData, isElementSelector);
   }
 
@@ -689,7 +692,7 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
     elementSelector: string,
     contextData: CompletionContextData,
     isElementSelector: boolean
-  ): { relevance: number; insertText: string; itemKind: vscode.CompletionItemKind } {
+  ): { relevance: number; insertText: string; itemKind: CoreCompletionKind } {
     return this.evaluateElementOrAttributeMatch(element, elementSelector, contextData, isElementSelector);
   }
 
@@ -701,20 +704,20 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
     elementSelector: string,
     contextData: CompletionContextData,
     isElementSelector: boolean
-  ): { relevance: number; insertText: string; itemKind: vscode.CompletionItemKind } {
+  ): { relevance: number; insertText: string; itemKind: CoreCompletionKind } {
     if (isElementSelector && contextData.hasTagContext) {
       if (elementSelector.toLowerCase().startsWith(contextData.filterText.toLowerCase())) {
         return {
           relevance: 2,
           insertText: elementSelector,
-          itemKind: vscode.CompletionItemKind.Class,
+          itemKind: "class",
         };
       }
     } else if (!isElementSelector && contextData.hasAttributeContext) {
       return this.evaluateAttributeMatch(element, elementSelector, contextData);
     }
 
-    return { relevance: 0, insertText: elementSelector, itemKind: vscode.CompletionItemKind.Class };
+    return { relevance: 0, insertText: elementSelector, itemKind: "class" };
   }
 
   /**
@@ -758,18 +761,15 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
     element: AngularElementData,
     elementSelector: string,
     contextData: CompletionContextData
-  ): { relevance: number; insertText: string; itemKind: vscode.CompletionItemKind } {
+  ): { relevance: number; insertText: string; itemKind: CoreCompletionKind } {
     const attrName = this.extractAttributeName(elementSelector);
 
     if (!attrName.toLowerCase().startsWith(contextData.filterText.toLowerCase())) {
-      return { relevance: 0, insertText: elementSelector, itemKind: vscode.CompletionItemKind.Class };
+      return { relevance: 0, insertText: elementSelector, itemKind: "class" };
     }
 
     const insertText = this.formatAttributeInsertText(attrName, contextData);
-    const itemKind =
-      contextData.context === "structural-directive"
-        ? vscode.CompletionItemKind.Keyword
-        : vscode.CompletionItemKind.Property;
+    const itemKind: CoreCompletionKind = contextData.context === "structural-directive" ? "keyword" : "property";
 
     let relevance = 2;
     relevance += this.calculateClassNameRelevance(element.name, attrName);
@@ -895,14 +895,14 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
     const { element, kind, relevance, originalBestSelector, insertText } = suggestion;
 
     const label = isSharedSelector ? `${insertText}:${element.name}` : insertText;
-    const item = new vscode.CompletionItem(label, kind);
+    const item = new vscode.CompletionItem(label, toVsCodeCompletionKind(kind));
 
     const attrName = this.extractAttributeName(originalBestSelector);
     item.filterText = attrName;
     item.insertText = insertText;
 
     if (contextData.replacementRange) {
-      item.range = contextData.replacementRange;
+      item.range = toVsCodeRange(contextData.replacementRange);
     }
 
     this.setCompletionItemDetails(item, element, originalBestSelector);
@@ -988,12 +988,12 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
   ): {
     shouldInclude: boolean;
     insertText: string;
-    itemKind: vscode.CompletionItemKind;
+    itemKind: CoreCompletionKind;
     relevance: number;
   } {
     let shouldInclude = false;
     let insertText = stdSelector;
-    let itemKind = vscode.CompletionItemKind.Class;
+    let itemKind: CoreCompletionKind = "class";
     let relevance = 0;
 
     if (stdElement.type === "directive" && contextData.hasAttributeContext) {
@@ -1001,16 +1001,13 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
       if (attrName.toLowerCase().startsWith(contextData.filterText.toLowerCase())) {
         shouldInclude = true;
         insertText = this.formatAttributeInsertText(attrName, contextData);
-        itemKind =
-          contextData.context === "structural-directive"
-            ? vscode.CompletionItemKind.Keyword
-            : vscode.CompletionItemKind.Property;
+        itemKind = contextData.context === "structural-directive" ? "keyword" : "property";
         relevance = 3;
       }
     } else if (stdElement.type === "pipe" && contextData.hasPipeContext) {
       if (stdSelector.toLowerCase().startsWith(contextData.filterText.toLowerCase())) {
         shouldInclude = true;
-        itemKind = vscode.CompletionItemKind.Function;
+        itemKind = "function";
         relevance = 2;
       }
     }
@@ -1024,15 +1021,15 @@ export class CompletionProvider implements vscode.CompletionItemProvider, vscode
   private createStandardElementCompletionItem(
     stdSelector: string,
     stdElement: Element,
-    match: { insertText: string; itemKind: vscode.CompletionItemKind; relevance: number },
+    match: { insertText: string; itemKind: CoreCompletionKind; relevance: number },
     contextData: CompletionContextData
   ): vscode.CompletionItem {
-    const item = new vscode.CompletionItem(stdSelector, match.itemKind);
+    const item = new vscode.CompletionItem(stdSelector, toVsCodeCompletionKind(match.itemKind));
     item.insertText = match.insertText;
     item.filterText = this.extractAttributeName(stdSelector);
 
     if (contextData.replacementRange) {
-      item.range = contextData.replacementRange;
+      item.range = toVsCodeRange(contextData.replacementRange);
     }
 
     item.detail = `Angular Auto-Import: ${stdElement.type} (standalone)`;
