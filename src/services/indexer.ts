@@ -21,6 +21,7 @@ import {
 } from "ts-morph";
 import * as vscode from "vscode";
 import { isLibraryExcluded } from "../config/excluded-libraries";
+import { Emitter, type EventSource } from "../core/events";
 import { logger } from "../logger";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
 import {
@@ -382,19 +383,19 @@ export class AngularIndexer {
    */
   private dependencyWatcher: vscode.FileSystemWatcher | null = null;
   private isReindexingDependencies: boolean = false;
-  private readonly _onDidIndexNodeModules = new vscode.EventEmitter<void>();
-  private readonly _onDidChangeIndex = new vscode.EventEmitter<void>();
+  private readonly _onDidIndexNodeModules = new Emitter<void>();
+  private readonly _onDidChangeIndex = new Emitter<void>();
   /**
    * Fires after `node_modules` are re-indexed because a dependency manifest
    * changed. Consumers (e.g. the diagnostic provider) can use this to refresh
    * results that depend on the external library index.
    */
-  public readonly onDidIndexNodeModules: vscode.Event<void> = this._onDidIndexNodeModules.event;
+  public readonly onDidIndexNodeModules: EventSource<void> = this._onDidIndexNodeModules.event;
   /**
    * Fires after the selector index changes, whether through a full reindex,
    * dependency refresh, or an incremental project-file update.
    */
-  public readonly onDidChangeIndex: vscode.Event<void> = this._onDidChangeIndex.event;
+  public readonly onDidChangeIndex: EventSource<void> = this._onDidChangeIndex.event;
   private projectRootPath: string = "";
   private isIndexing: boolean = false;
 
