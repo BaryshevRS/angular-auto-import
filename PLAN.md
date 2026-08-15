@@ -187,7 +187,8 @@ Exit criteria:
   - [x] Add explicit range/kind/severity DTOs and mappings at active runtime boundaries; defer unused LSP range/severity converters until their first handlers move.
 - [ ] Add `FileSystem`, `CacheStore`, `ProgressReporter`, event, and disposable ports where the current core touches VS Code.
   - [x] Replace `AngularIndexer`'s VS Code event emitters with shared `EventSource` and `Disposable` core contracts.
-  - [ ] Add filesystem, cache, and progress ports alongside their first extracted runtime consumers.
+  - [x] Route persisted index reads, writes, and deletes through a shared `CacheStore` and VS Code workspace-state adapter.
+  - [ ] Add filesystem and progress ports alongside their first extracted runtime consumers.
 - [ ] Split `AngularIndexer` into pure index/query state and project runtime concerns such as scanning, watching, persistence, and progress.
 - [ ] Move `ProjectRegistry` out of the extension entry point without changing its behavior.
 - [ ] Extract completion context detection/ranking so it returns plain completion DTOs.

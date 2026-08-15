@@ -20,7 +20,9 @@ import {
   type TypeReferenceNode,
 } from "ts-morph";
 import * as vscode from "vscode";
+import { createVsCodeCacheStore } from "../adapters/vscode/cache-store";
 import { isLibraryExcluded } from "../config/excluded-libraries";
+import type { CacheStore } from "../core/cache";
 import { Emitter, type EventSource } from "../core/events";
 import { logger } from "../logger";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
@@ -1281,7 +1283,7 @@ export class AngularIndexer {
     }
 
     try {
-      const workspaceData = this.retrieveWorkspaceData(context);
+      const workspaceData = this.retrieveWorkspaceData(createVsCodeCacheStore(context.workspaceState));
       if (!workspaceData.storedCache || !workspaceData.storedIndex) {
         logNoCacheFound(this.projectRootPath);
         return false;
@@ -1352,16 +1354,14 @@ export class AngularIndexer {
     return null;
   }
 
-  private retrieveWorkspaceData(context: vscode.ExtensionContext) {
+  private retrieveWorkspaceData(cacheStore: CacheStore) {
     return {
-      storedCache: context.workspaceState.get<Record<string, FileElementsInfo | ComponentInfo>>(
-        this.workspaceFileCacheKey
+      storedCache: cacheStore.get<Record<string, FileElementsInfo | ComponentInfo>>(this.workspaceFileCacheKey),
+      storedIndex: cacheStore.get<Record<string, AngularElementData>>(this.workspaceIndexCacheKey),
+      storedModules: cacheStore.get<Record<string, { moduleName: string; importPath: string; exportCount?: number }>>(
+        this.workspaceModulesCacheKey
       ),
-      storedIndex: context.workspaceState.get<Record<string, AngularElementData>>(this.workspaceIndexCacheKey),
-      storedModules: context.workspaceState.get<
-        Record<string, { moduleName: string; importPath: string; exportCount?: number }>
-      >(this.workspaceModulesCacheKey),
-      storedExternalModulesExports: context.workspaceState.get<Record<string, string[]>>(
+      storedExternalModulesExports: cacheStore.get<Record<string, string[]>>(
         this.workspaceExternalModulesExportsCacheKey
       ),
     };
@@ -1474,14 +1474,15 @@ export class AngularIndexer {
       return;
     }
     try {
-      await context.workspaceState.update(this.workspaceFileCacheKey, Object.fromEntries(this.fileCache));
+      const cacheStore = createVsCodeCacheStore(context.workspaceState);
+      await cacheStore.set(this.workspaceFileCacheKey, Object.fromEntries(this.fileCache));
 
       const serializableTrie = Object.fromEntries(
         this.selectorTrie.getAllElements().map((el) => [el.originalSelector, el])
       );
 
-      await context.workspaceState.update(this.workspaceIndexCacheKey, serializableTrie);
-      await context.workspaceState.update(this.workspaceModulesCacheKey, Object.fromEntries(this.projectModuleMap));
+      await cacheStore.set(this.workspaceIndexCacheKey, serializableTrie);
+      await cacheStore.set(this.workspaceModulesCacheKey, Object.fromEntries(this.projectModuleMap));
 
       // Serialize external modules exports (convert Sets to arrays)
       const serializableExternalModules = Object.fromEntries(
@@ -1490,7 +1491,7 @@ export class AngularIndexer {
           Array.from(exportsSet),
         ])
       );
-      await context.workspaceState.update(this.workspaceExternalModulesExportsCacheKey, serializableExternalModules);
+      await cacheStore.set(this.workspaceExternalModulesExportsCacheKey, serializableExternalModules);
     } catch (error) {
       logger.error(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Error saving index to workspace:`,
@@ -1520,10 +1521,11 @@ export class AngularIndexer {
       removeAllSourceFiles(this.project, "clearCache");
 
       // Clear persisted state
-      await context.workspaceState.update(this.workspaceFileCacheKey, undefined);
-      await context.workspaceState.update(this.workspaceIndexCacheKey, undefined);
-      await context.workspaceState.update(this.workspaceModulesCacheKey, undefined);
-      await context.workspaceState.update(this.workspaceExternalModulesExportsCacheKey, undefined);
+      const cacheStore = createVsCodeCacheStore(context.workspaceState);
+      await cacheStore.delete(this.workspaceFileCacheKey);
+      await cacheStore.delete(this.workspaceIndexCacheKey);
+      await cacheStore.delete(this.workspaceModulesCacheKey);
+      await cacheStore.delete(this.workspaceExternalModulesExportsCacheKey);
 
       logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): All caches cleared.`);
     } catch (error) {
