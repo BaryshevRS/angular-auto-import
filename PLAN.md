@@ -196,6 +196,8 @@ Exit criteria:
   - [x] Move the registry, its document/source contracts, and root-containment helpers into core.
   - [x] Re-point registry and discovery tests at the core module instead of the extension entry point.
 - [ ] Extract completion context detection/ranking so it returns plain completion DTOs.
+  - [x] Move template context detection onto `DocumentView` and return a plain context DTO (`core/completion-context`).
+  - [ ] Move selector matching/ranking behind plain completion DTOs the providers map to editor items.
 - [ ] Extract diagnostics so parsing and missing-import checks return plain diagnostic DTOs with offsets/ranges.
 - [ ] Extract an `ImportPlanner` that accepts document text and requested elements and returns a versioned edit plan.
 - [ ] Keep the current VS Code providers working through adapters.

@@ -19,13 +19,6 @@ export function toVsCodeRange(range: CoreRange): vscode.Range {
   return new vscode.Range(range.start.line, range.start.character, range.end.line, range.end.character);
 }
 
-export function fromVsCodeRange(range: vscode.Range): CoreRange {
-  return {
-    start: { line: range.start.line, character: range.start.character },
-    end: { line: range.end.line, character: range.end.character },
-  };
-}
-
 export function toVsCodeCompletionKind(kind: CoreCompletionKind): vscode.CompletionItemKind {
   return completionKinds[kind];
 }

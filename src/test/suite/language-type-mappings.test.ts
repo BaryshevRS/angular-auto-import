@@ -3,7 +3,6 @@ import * as vscode from "vscode";
 import { CompletionItemKind } from "vscode-languageserver/node";
 import { toLspCompletionKind } from "../../adapters/lsp/language-types";
 import {
-  fromVsCodeRange,
   toVsCodeCompletionKind,
   toVsCodeDiagnosticSeverity,
   toVsCodeRange,
@@ -20,7 +19,13 @@ describe("language type mappings", () => {
     const vscodeRange = toVsCodeRange(range);
 
     assert.ok(vscodeRange instanceof vscode.Range);
-    assert.deepStrictEqual(fromVsCodeRange(vscodeRange), range);
+    assert.deepStrictEqual(
+      {
+        start: { line: vscodeRange.start.line, character: vscodeRange.start.character },
+        end: { line: vscodeRange.end.line, character: vscodeRange.end.character },
+      },
+      range
+    );
   });
 
   it("maps every core completion kind to VS Code and LSP enums", () => {
