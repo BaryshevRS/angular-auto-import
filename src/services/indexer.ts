@@ -21,9 +21,13 @@ import {
 } from "ts-morph";
 import * as vscode from "vscode";
 import { createVsCodeCacheStore } from "../adapters/vscode/cache-store";
+import { createVsCodeFileSystem } from "../adapters/vscode/file-system";
+import { createVsCodeProgressHost } from "../adapters/vscode/progress";
 import { isLibraryExcluded } from "../config/excluded-libraries";
 import type { CacheStore } from "../core/cache";
 import { Emitter, type EventSource } from "../core/events";
+import type { FileSystem } from "../core/file-system";
+import type { ProgressHost, ProgressReporter } from "../core/progress";
 import { logger } from "../logger";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
 import {
@@ -418,7 +422,16 @@ export class AngularIndexer {
    */
   public workspaceExternalModulesExportsCacheKey: string = "";
 
-  constructor() {
+  /**
+   * File access and progress presentation are injected so the indexer can run
+   * under the language server, which has neither `workspace.findFiles` nor
+   * notification progress. The Extension Host adapters stay the default while
+   * both runtimes exist.
+   */
+  constructor(
+    private readonly fileSystem: FileSystem = createVsCodeFileSystem(),
+    private readonly progressHost: ProgressHost = createVsCodeProgressHost()
+  ) {
     this.project = new Project({
       useInMemoryFileSystem: false, // Keep this as false for real file system interaction
       skipAddingFilesFromTsConfig: true,
@@ -1154,7 +1167,7 @@ export class AngularIndexer {
    */
   async generateFullIndex(
     context: vscode.ExtensionContext,
-    progress?: vscode.Progress<{ message?: string; increment?: number }>
+    progress?: ProgressReporter
   ): Promise<Map<string, AngularElementData>> {
     if (this.isIndexing) {
       logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Already indexing, skipping...`);
@@ -1181,10 +1194,11 @@ export class AngularIndexer {
       this.clearInMemoryState();
 
       progress?.report({ message: "Discovering project files..." });
-      const projectTsFiles = await vscode.workspace.findFiles(
-        new vscode.RelativePattern(this.projectRootPath, "**/*.ts"),
-        PROJECT_SOURCE_EXCLUDE_GLOB
-      );
+      const projectTsFiles = await this.fileSystem.findFiles({
+        root: this.projectRootPath,
+        include: "**/*.ts",
+        exclude: PROJECT_SOURCE_EXCLUDE_GLOB,
+      });
       logger.info(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Found ${projectTsFiles.length} project files.`
       );
@@ -1192,8 +1206,8 @@ export class AngularIndexer {
       progress?.report({ message: "Filtering project files..." });
       const candidateFiles = await this._filterRelevantFiles(projectTsFiles);
 
-      const moduleFiles = candidateFiles.filter((uri) => uri.fsPath.endsWith(".module.ts"));
-      const componentFiles = candidateFiles.filter((uri) => !uri.fsPath.endsWith(".module.ts"));
+      const moduleFiles = candidateFiles.filter((filePath) => filePath.endsWith(".module.ts"));
+      const componentFiles = candidateFiles.filter((filePath) => !filePath.endsWith(".module.ts"));
 
       logger.info(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Found ${
@@ -1209,8 +1223,8 @@ export class AngularIndexer {
       for (let i = 0; i < componentFiles.length; i += batchSize) {
         const batch = componentFiles.slice(i, i + batchSize);
         // Sequentially process files in a batch to avoid overwhelming ts-morph or fs
-        for (const file of batch) {
-          await this.updateFileIndex(file.fsPath, context);
+        for (const filePath of batch) {
+          await this.updateFileIndex(filePath, context);
         }
         logger.info(
           `AngularIndexer (${path.basename(this.projectRootPath)}): Indexed component batch ${
@@ -1245,30 +1259,31 @@ export class AngularIndexer {
 
   /**
    * Quickly filters a list of files to find ones that likely contain Angular declarations.
-   * @param uris An array of file URIs to filter.
-   * @returns A promise that resolves to a filtered array of file URIs.
+   * @param filePaths An array of absolute file paths to filter.
+   * @param readFile Reader override used by tests; defaults to the injected file system.
+   * @returns A promise that resolves to a filtered array of absolute file paths.
    * @internal
    */
   private async _filterRelevantFiles(
-    uris: vscode.Uri[],
-    readFile: (uri: vscode.Uri) => Promise<Uint8Array> = async (uri) => vscode.workspace.fs.readFile(uri)
-  ): Promise<vscode.Uri[]> {
+    filePaths: string[],
+    readFile: (filePath: string) => Promise<string> = (filePath) => this.fileSystem.readFile(filePath)
+  ): Promise<string[]> {
     const angularDecoratorRegex = /@(Component|Directive|Pipe|NgModule)\s*\(/;
     const { default: pLimit } = await import("p-limit");
     const limit = pLimit(FILE_FILTER_CONCURRENCY);
-    const results = await limit.map(uris, async (uri) => {
+    const results = await limit.map(filePaths, async (filePath) => {
       try {
-        const content = await readFile(uri);
-        if (angularDecoratorRegex.test(content.toString())) {
-          return uri;
+        const content = await readFile(filePath);
+        if (angularDecoratorRegex.test(content)) {
+          return filePath;
         }
       } catch (error) {
-        logger.error(`Could not read file ${uri.fsPath} during filtering:`, error as Error);
+        logger.error(`Could not read file ${filePath} during filtering:`, error as Error);
       }
       return null;
     });
 
-    return results.filter((uri): uri is vscode.Uri => uri !== null);
+    return results.filter((filePath): filePath is string => filePath !== null);
   }
 
   /**
@@ -1668,10 +1683,7 @@ export class AngularIndexer {
    * @param context The extension context.
    * @param progress Optional progress reporter to use instead of creating a new one.
    */
-  public async indexNodeModules(
-    context: vscode.ExtensionContext,
-    progress?: vscode.Progress<{ message?: string; increment?: number }>
-  ): Promise<void> {
+  public async indexNodeModules(context: vscode.ExtensionContext, progress?: ProgressReporter): Promise<void> {
     const timerName = `indexNodeModules:${path.basename(this.projectRootPath)}`;
     logger.startTimer(timerName);
 
@@ -1681,7 +1693,7 @@ export class AngularIndexer {
       `Starting node_modules index - Memory: ${Math.round(initialMemory.memoryUsage.heapUsed / 1024 / 1024)}MB`
     );
 
-    const indexingLogic = async (progressReporter: vscode.Progress<{ message?: string; increment?: number }>) => {
+    const indexingLogic = async (progressReporter: ProgressReporter) => {
       try {
         if (!this.projectRootPath) {
           logger.error("AngularIndexer.indexNodeModules: projectRootPath not set.");
@@ -1725,12 +1737,8 @@ export class AngularIndexer {
     if (progress) {
       await indexingLogic(progress);
     } else {
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Angular Auto-Import: Indexing libraries from node_modules...`,
-          cancellable: false,
-        },
+      await this.progressHost.withProgress(
+        "Angular Auto-Import: Indexing libraries from node_modules...",
         indexingLogic
       );
     }
@@ -1900,24 +1908,24 @@ export class AngularIndexer {
 
   /**
    * Indexes all NgModules in the project.
-   * @param moduleFileUris An array of module file URIs to index.
+   * @param moduleFilePaths An array of absolute module file paths to index.
    * @internal
    */
-  private async indexProjectModules(moduleFileUris: vscode.Uri[]): Promise<void> {
+  private async indexProjectModules(moduleFilePaths: string[]): Promise<void> {
     if (!this.projectRootPath) {
       return;
     }
-    logger.debug(`[Indexer] Indexing ${moduleFileUris.length} project NgModules for ${this.projectRootPath}...`);
+    logger.debug(`[Indexer] Indexing ${moduleFilePaths.length} project NgModules for ${this.projectRootPath}...`);
     this.projectModuleMap.clear();
 
-    for (const file of moduleFileUris) {
+    for (const file of moduleFilePaths) {
       try {
-        const sourceFile = this.project.addSourceFileAtPath(file.fsPath);
+        const sourceFile = this.project.addSourceFileAtPath(file);
         // Check if the sourceFile is still valid before processing
         sourceFile.getFilePath(); // This will throw if the node is forgotten
         this._processProjectModuleFile(sourceFile);
       } catch (error) {
-        logger.warn(`[Indexer] Could not process project module file ${file.fsPath}: ${(error as Error).message}`);
+        logger.warn(`[Indexer] Could not process project module file ${file}: ${(error as Error).message}`);
       }
     }
 
@@ -1926,7 +1934,7 @@ export class AngularIndexer {
       const result = withValidSourceFile(sourceFile, () => sourceFile.getFilePath(), "project module processing");
       if (result.success && result.result) {
         const filePath = result.result;
-        if (filePath.endsWith(".module.ts") && !moduleFileUris.some((f) => f.fsPath === filePath)) {
+        if (filePath.endsWith(".module.ts") && !moduleFilePaths.includes(filePath)) {
           this._processProjectModuleFile(sourceFile);
         }
       }

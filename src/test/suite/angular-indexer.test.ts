@@ -221,20 +221,15 @@ describe("AngularIndexer", function () {
         maxActiveReads = Math.max(maxActiveReads, activeReads);
         await new Promise<void>((resolve) => pendingReads.push(resolve));
         activeReads--;
-        return Buffer.from("@Component({})");
+        return "@Component({})";
       };
 
-      const uris = Array.from({ length: 40 }, (_, index) =>
-        vscode.Uri.file(path.join(testProjectPath, `candidate-${index}.ts`))
-      );
+      const filePaths = Array.from({ length: 40 }, (_, index) => path.join(testProjectPath, `candidate-${index}.ts`));
       const filtering = (
         indexer as unknown as {
-          _filterRelevantFiles(
-            files: vscode.Uri[],
-            fileReader: (uri: vscode.Uri) => Promise<Uint8Array>
-          ): Promise<vscode.Uri[]>;
+          _filterRelevantFiles(files: string[], fileReader: (filePath: string) => Promise<string>): Promise<string[]>;
         }
-      )._filterRelevantFiles(uris, readFile);
+      )._filterRelevantFiles(filePaths, readFile);
 
       await new Promise<void>((resolve) => setImmediate(resolve));
       assert.ok(maxActiveReads > 0, "Filtering should start reading files");
@@ -248,7 +243,7 @@ describe("AngularIndexer", function () {
       }
 
       const result = await filtering;
-      assert.strictEqual(result.length, uris.length, "All matching files should be returned");
+      assert.strictEqual(result.length, filePaths.length, "All matching files should be returned");
     });
   });
 

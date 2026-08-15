@@ -8,7 +8,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { toProgressReporter } from "../adapters/vscode/progress";
 import type { ExtensionConfig } from "../config";
+import type { ProgressReporter } from "../core/progress";
 import { logger } from "../logger";
 import type { DiagnosticProvider } from "../providers/diagnostics";
 import type { AngularIndexer } from "../services";
@@ -754,7 +756,7 @@ async function reindexSingleProject(
         TsConfigHelper.clearCache(projectRootPath);
         const newTsConfig = await TsConfigHelper.findAndParseTsConfig(projectRootPath);
         commandContext.projectTsConfigs.set(projectRootPath, newTsConfig);
-        await generateIndexForProject(projectRootPath, indexer, context, progress);
+        await generateIndexForProject(projectRootPath, indexer, context, toProgressReporter(progress));
         const newSize = Array.from(indexer.getAllSelectors()).length;
         return { newSize, success: true };
       }
@@ -889,7 +891,7 @@ async function generateIndexForProject(
   projectRootPath: string,
   indexer: AngularIndexer,
   context: vscode.ExtensionContext,
-  progress?: vscode.Progress<{ message?: string; increment?: number }>
+  progress?: ProgressReporter
 ): Promise<void> {
   // Generating index for project
   indexer.ensureCacheKeys(projectRootPath);
