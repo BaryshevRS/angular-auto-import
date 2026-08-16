@@ -18,84 +18,19 @@ import {
   SyntaxKind,
 } from "ts-morph";
 import * as vscode from "vscode";
-import { toVsCodeDiagnosticSeverity } from "../adapters/vscode/language-types";
+import { toDocumentView } from "../adapters/vscode/document";
+import { toVsCodeDiagnosticSeverity, toVsCodeRange } from "../adapters/vscode/language-types";
 import { getStandardModuleExports } from "../config/standard-modules";
-import { knownTags } from "../consts";
 import type { CoreDiagnosticSeverity } from "../core/language-types";
+import { findMissingImports, type MissingImportContext, type MissingImportDiagnostic } from "../core/missing-imports";
+import { type ScannedTemplateElement, scanTemplate } from "../core/template-scan";
 import { logger } from "../logger";
 import type { AngularIndexer } from "../services";
-import type {
-  AngularElementData,
-  ControlFlowNode,
-  ParsedHtmlElement,
-  TemplateAstNode,
-  TmplAstBoundAttribute,
-  TmplAstBoundEvent,
-  TmplAstBoundText,
-  TmplAstElement,
-  TmplAstReference,
-  TmplAstTemplate,
-} from "../types";
+import type { AngularElementData, TemplateAstNode } from "../types";
 import { getAngularElements, getTsDocument, isStandalone, switchFileType } from "../utils";
 import { debounce } from "../utils/debounce";
 import { findDeepestContainingProjectContext, getProjectContextForDocument } from "../utils/project-context";
 import type { ProviderContext } from "./index";
-
-/**
- * Context for template document parsing
- */
-interface TemplateDocumentContext {
-  /** VS Code document being parsed */
-  document: vscode.TextDocument;
-  /** Offset in the document */
-  offset: number;
-  /** Text content */
-  text: string;
-}
-
-/**
- * Angular AST node constructors
- */
-interface AstConstructors {
-  /** Element node constructor */
-  tmplAstElement: new (
-    ...args: unknown[]
-  ) => TmplAstElement;
-  /** Template node constructor */
-  tmplAstTemplate: new (
-    ...args: unknown[]
-  ) => TmplAstTemplate;
-  /** Bound event node constructor */
-  tmplAstBoundEvent: new (
-    ...args: unknown[]
-  ) => TmplAstBoundEvent;
-  /** Reference node constructor */
-  tmplAstReference: new (
-    ...args: unknown[]
-  ) => TmplAstReference;
-  /** Bound attribute node constructor */
-  tmplAstBoundAttribute: new (
-    ...args: unknown[]
-  ) => TmplAstBoundAttribute;
-  /** Bound text node constructor */
-  tmplAstBoundText: new (
-    ...args: unknown[]
-  ) => TmplAstBoundText;
-}
-
-/**
- * Processing context for template parsing
- */
-interface ProcessingContext {
-  /** Array to collect parsed elements */
-  elements: ParsedHtmlElement[];
-  /** Angular indexer instance */
-  indexer: AngularIndexer;
-  /** Visit callback for traversing AST */
-  visit: (nodesList: TemplateAstNode[]) => void;
-  /** Extract pipes from expression callback */
-  extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void;
-}
 
 /**
  * Provides diagnostics for Angular templates.
@@ -470,31 +405,35 @@ export class DiagnosticProvider {
       return;
     }
 
-    const { CssSelector, SelectorMatcher } = this.compiler;
-
     const { indexer } = projCtx;
-    const diagnostics: vscode.Diagnostic[] = [];
     const severity = this.getSeverityFromConfig(this.context.extensionConfig.diagnosticsSeverity);
 
     // Parse the template to get all elements and their full context
     const parsedElements = this.parseCompleteTemplate(templateText, document, offset, indexer);
+    const missingImports = findMissingImports(
+      parsedElements,
+      severity,
+      this.createMissingImportContext(indexer, sourceFile)
+    );
 
-    for (const element of parsedElements) {
-      const elementDiagnostics = await this.checkElement(
-        element,
-        indexer,
-        severity,
-        sourceFile,
-        CssSelector,
-        SelectorMatcher
-      );
-      if (elementDiagnostics.length > 0) {
-        diagnostics.push(...elementDiagnostics);
-      }
-    }
-
-    this.candidateDiagnostics.set(document.uri.toString(), diagnostics);
+    this.candidateDiagnostics.set(document.uri.toString(), missingImports.map(toVsCodeDiagnostic));
     this.publishFilteredDiagnostics(document.uri);
+  }
+
+  /**
+   * Wires the missing-import analysis to this project's index and the component's source file.
+   */
+  private createMissingImportContext(indexer: AngularIndexer, sourceFile: SourceFile): MissingImportContext {
+    const { CssSelector, SelectorMatcher } = this.compiler;
+
+    return {
+      findCandidates: (name) => getAngularElements(name, indexer),
+      isImported: (candidate) => this.isElementImported(sourceFile, candidate),
+      getComponentImportNames: () => this.getComponentImportNames(sourceFile),
+      getNamedImportSpecifiers: (importName) => this.getNamedImportModuleSpecifiers(sourceFile, importName),
+      getExternalModuleExports: (moduleName) => indexer.getExternalModuleExports(moduleName),
+      selectors: { cssSelector: CssSelector, selectorMatcher: SelectorMatcher },
+    };
   }
 
   private parseCompleteTemplate(
@@ -502,16 +441,14 @@ export class DiagnosticProvider {
     document: vscode.TextDocument,
     offset: number,
     indexer: AngularIndexer
-  ): ParsedHtmlFullElement[] {
+  ): ScannedTemplateElement[] {
     const parseTemplateStartTime = process.hrtime.bigint();
-    const elements: ParsedHtmlFullElement[] = [];
     try {
       if (!this.compiler) {
         logger.warn("[DiagnosticProvider] @angular/compiler not loaded yet, skipping template parsing.");
-        return elements;
+        return [];
       }
       const {
-        parseTemplate,
         TmplAstBoundAttribute,
         TmplAstBoundEvent,
         TmplAstElement,
@@ -519,461 +456,72 @@ export class DiagnosticProvider {
         TmplAstTemplate,
         TmplAstBoundText,
       } = this.compiler;
-      type ParseResult = ReturnType<typeof parseTemplate>;
-      type TemplateNode = ParseResult["nodes"][0];
 
-      const currentVersion = document.version;
-      const cacheKey = document.uri.toString();
-      const cached = this.templateCache.get(cacheKey);
-      let nodes: TemplateNode[];
+      const elements = scanTemplate({
+        nodes: this.getTemplateNodes(text, document),
+        document: toDocumentView(document),
+        offset,
+        text,
+        lookup: indexer,
+        constructors: {
+          tmplAstElement: TmplAstElement,
+          tmplAstTemplate: TmplAstTemplate,
+          tmplAstBoundEvent: TmplAstBoundEvent,
+          tmplAstReference: TmplAstReference,
+          tmplAstBoundAttribute: TmplAstBoundAttribute,
+          tmplAstBoundText: TmplAstBoundText,
+        },
+        onError: (message, error) => logger.error(`[DiagnosticProvider] ${message}`, error),
+      });
 
-      if (cached && cached.version === currentVersion) {
-        logger.debug(`[DiagnosticProvider] Template cache HIT for ${document.fileName}`);
-        nodes = cached.nodes as TemplateNode[];
-      } else {
-        logger.debug(`[DiagnosticProvider] Template cache MISS for ${document.fileName}`);
-        try {
-          // Use alwaysAttemptHtmlToR3AstConversion to parse templates with syntax errors
-          // This option ensures we get partial AST even if template HTML is invalid
-          const parsed = parseTemplate(text, document.uri.fsPath, {
-            alwaysAttemptHtmlToR3AstConversion: true,
-            collectCommentNodes: true,
-          });
-
-          nodes = parsed.nodes;
-
-          // Log parse errors if they exist, but continue with partial AST
-          if (parsed.errors && parsed.errors.length > 0) {
-            logger.debug(
-              `[DiagnosticProvider] Template has parse errors for ${document.fileName}, but continuing with partial AST:`,
-              parsed.errors
-            );
-          }
-        } catch (parseError) {
-          // Fallback for unexpected parsing exceptions
-          logger.error(
-            `[DiagnosticProvider] Unexpected error parsing template ${document.fileName}:`,
-            parseError as Error
-          );
-          nodes = [];
-        }
-
-        this.templateCache.set(cacheKey, { version: currentVersion, nodes });
-      }
-
-      const extractPipesFromExpression = (expression: unknown, nodeOffset: number = 0) => {
-        if (!expression || typeof expression !== "object" || !("sourceSpan" in expression) || !expression.sourceSpan) {
-          return;
-        }
-
-        try {
-          const expr = expression as { sourceSpan: { start: number; end: number } };
-          const expressionText = text.slice(expr.sourceSpan.start, expr.sourceSpan.end);
-          const pipes = this._findPipesInExpression(
-            expressionText,
-            document,
-            offset + nodeOffset,
-            expr.sourceSpan.start
-          );
-          for (const pipe of pipes) {
-            elements.push({ ...pipe, isAttribute: false, attributes: [] });
-          }
-        } catch (e) {
-          logger.error("[DiagnosticProvider] Error extracting pipes from expression:", e as Error);
-        }
-      };
-
-      const visit = (nodesList: TemplateNode[]) => {
-        for (const node of nodesList) {
-          this.processTemplateNode(
-            node,
-            { elements, indexer, visit, extractPipesFromExpression },
-            { document, offset, text },
-            {
-              tmplAstElement: TmplAstElement,
-              tmplAstTemplate: TmplAstTemplate,
-              tmplAstBoundEvent: TmplAstBoundEvent,
-              tmplAstReference: TmplAstReference,
-              tmplAstBoundAttribute: TmplAstBoundAttribute,
-              tmplAstBoundText: TmplAstBoundText,
-            }
-          );
-        }
-      };
-
-      visit(nodes);
-      // Log duration for parsing template
-      const parseTemplateEndTime = process.hrtime.bigint();
-      const parseTemplateDuration = Number(parseTemplateEndTime - parseTemplateStartTime) / 1_000_000;
-      logger.debug(
-        `[DiagnosticProvider] parseCompleteTemplate for ${document.fileName} took ${parseTemplateDuration.toFixed(2)} ms`
-      );
+      this.logOperationDuration("parseCompleteTemplate", document.fileName, parseTemplateStartTime);
+      return elements;
     } catch (e) {
       logger.error(`[DiagnosticProvider] Failed to parse template: ${document.uri.fsPath}`, e as Error);
+      return [];
     }
-    return elements;
-  }
-
-  private async checkElement(
-    element: ParsedHtmlFullElement,
-    indexer: AngularIndexer,
-    severity: CoreDiagnosticSeverity,
-    sourceFile: SourceFile,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    CssSelector: any,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    SelectorMatcher: any
-  ): Promise<vscode.Diagnostic[]> {
-    const checkElementStartTime = process.hrtime.bigint();
-    const diagnostics: vscode.Diagnostic[] = [];
-    const processedCandidatesThisCall = new Set<string>();
-
-    const candidates = getAngularElements(element.name, indexer);
-    if (
-      element.type === "pipe" &&
-      this.hasPipeSelectorMatchingImportedModule(element.name, candidates, indexer, sourceFile)
-    ) {
-      this.logOperationDuration("checkElement", element.name, checkElementStartTime);
-      return diagnostics;
-    }
-
-    for (const candidate of candidates) {
-      if (!this.shouldProcessCandidate(candidate, processedCandidatesThisCall)) {
-        continue;
-      }
-
-      const diagnostic = await this.processCandidateElement(
-        element,
-        candidate,
-        severity,
-        sourceFile,
-        processedCandidatesThisCall,
-        CssSelector,
-        SelectorMatcher
-      );
-
-      if (
-        diagnostic &&
-        candidate.type !== "pipe" &&
-        !this.candidateNameMatchesSelector(element.name, candidate.name) &&
-        this.hasImportedAlternativeMatch(element, candidate, indexer, sourceFile, CssSelector, SelectorMatcher)
-      ) {
-        continue;
-      }
-
-      if (
-        diagnostic &&
-        candidate.type === "pipe" &&
-        this.hasImportedPipeAlternativeMatch(element, candidate, indexer, sourceFile)
-      ) {
-        continue;
-      }
-
-      if (diagnostic) {
-        diagnostics.push(diagnostic);
-      }
-    }
-
-    this.logOperationDuration("checkElement", element.name, checkElementStartTime);
-    return diagnostics;
   }
 
   /**
-   * Checks if a candidate should be processed.
+   * Parses the template, reusing the cached AST while the document version is unchanged.
    */
-  private shouldProcessCandidate(
-    candidate: AngularElementData | null,
-    processedCandidates: Set<string>
-  ): candidate is AngularElementData {
-    return Boolean(candidate && !processedCandidates.has(candidate.name));
-  }
+  private getTemplateNodes(text: string, document: vscode.TextDocument): TemplateAstNode[] {
+    const currentVersion = document.version;
+    const cacheKey = document.uri.toString();
+    const cached = this.templateCache.get(cacheKey);
 
-  /**
-   * Processes a single candidate element.
-   */
-  private async processCandidateElement(
-    element: ParsedHtmlFullElement,
-    candidate: AngularElementData,
-    severity: CoreDiagnosticSeverity,
-    sourceFile: SourceFile,
-    processedCandidates: Set<string>,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    CssSelector: any,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    SelectorMatcher: any
-  ): Promise<vscode.Diagnostic | null> {
-    if (candidate.type === "pipe") {
-      // Only process pipe candidates if the element is actually a pipe usage (not a property binding)
-      // This prevents false positives when an @Input() and a @Pipe() share the same name
-      if (element.type === "pipe") {
-        return this.processPipeCandidate(element, candidate, severity, sourceFile, processedCandidates);
-      }
-      // Skip pipe candidates for non-pipe elements (like property bindings)
-      return null;
+    if (cached && cached.version === currentVersion) {
+      logger.debug(`[DiagnosticProvider] Template cache HIT for ${document.fileName}`);
+      return cached.nodes as TemplateAstNode[];
     }
 
-    return this.processNonPipeCandidate(
-      element,
-      candidate,
-      severity,
-      sourceFile,
-      processedCandidates,
-      CssSelector,
-      SelectorMatcher
-    );
-  }
+    logger.debug(`[DiagnosticProvider] Template cache MISS for ${document.fileName}`);
+    let nodes: TemplateAstNode[];
+    try {
+      // Use alwaysAttemptHtmlToR3AstConversion to parse templates with syntax errors
+      // This option ensures we get partial AST even if template HTML is invalid
+      const parsed = this.compiler.parseTemplate(text, document.uri.fsPath, {
+        alwaysAttemptHtmlToR3AstConversion: true,
+        collectCommentNodes: true,
+      });
 
-  /**
-   * Processes a pipe candidate.
-   */
-  private processPipeCandidate(
-    element: ParsedHtmlFullElement,
-    candidate: AngularElementData,
-    severity: CoreDiagnosticSeverity,
-    sourceFile: SourceFile,
-    processedCandidates: Set<string>
-  ): vscode.Diagnostic | null {
-    processedCandidates.add(candidate.name);
-    if (!this.isElementImported(sourceFile, candidate)) {
-      return this.createMissingImportDiagnostic(element, candidate, element.name, severity);
-    }
-    return null;
-  }
+      nodes = parsed.nodes;
 
-  /**
-   * Processes a non-pipe candidate (component/directive).
-   */
-  private processNonPipeCandidate(
-    element: ParsedHtmlFullElement,
-    candidate: AngularElementData,
-    severity: CoreDiagnosticSeverity,
-    sourceFile: SourceFile,
-    processedCandidates: Set<string>,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    CssSelector: any,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    SelectorMatcher: any
-  ): vscode.Diagnostic | null {
-    const matchedSelectors = this.getMatchedSelectors(element, candidate, CssSelector, SelectorMatcher);
-
-    if (matchedSelectors.length === 0) {
-      return null;
+      // Log parse errors if they exist, but continue with partial AST
+      if (parsed.errors && parsed.errors.length > 0) {
+        logger.debug(
+          `[DiagnosticProvider] Template has parse errors for ${document.fileName}, but continuing with partial AST:`,
+          parsed.errors
+        );
+      }
+    } catch (parseError) {
+      // Fallback for unexpected parsing exceptions
+      logger.error(`[DiagnosticProvider] Unexpected error parsing template ${document.fileName}:`, parseError as Error);
+      nodes = [];
     }
 
-    // The last matched selector is considered the most specific one by Angular's engine.
-    const specificSelector = matchedSelectors[matchedSelectors.length - 1];
-    processedCandidates.add(candidate.name);
-
-    if (!this.isElementImported(sourceFile, candidate)) {
-      return this.createMissingImportDiagnostic(element, candidate, specificSelector, severity);
-    }
-    return null;
-  }
-
-  /**
-   * Suppresses false positives when one template token matches multiple Angular elements
-   * but at least one of those matches is already imported.
-   */
-  private hasImportedAlternativeMatch(
-    element: ParsedHtmlFullElement,
-    candidate: AngularElementData,
-    indexer: AngularIndexer,
-    sourceFile: SourceFile,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    CssSelector: any,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    SelectorMatcher: any
-  ): boolean {
-    const alternatives = getAngularElements(element.name, indexer);
-
-    for (const alternative of alternatives) {
-      if (alternative.type === "pipe" || (alternative.name === candidate.name && alternative.path === candidate.path)) {
-        continue;
-      }
-
-      if (!this.candidateNameMatchesSelector(element.name, alternative.name)) {
-        continue;
-      }
-
-      const matchedSelectors = this.getMatchedSelectors(element, alternative, CssSelector, SelectorMatcher);
-      if (matchedSelectors.length === 0) {
-        continue;
-      }
-
-      if (this.isElementImported(sourceFile, alternative)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Suppresses pipe diagnostics when another pipe with the same selector is already available.
-   */
-  private hasImportedPipeAlternativeMatch(
-    element: ParsedHtmlFullElement,
-    candidate: AngularElementData,
-    indexer: AngularIndexer,
-    sourceFile: SourceFile
-  ): boolean {
-    if (element.type !== "pipe") {
-      return false;
-    }
-
-    const alternatives = getAngularElements(element.name, indexer);
-    for (const alternative of alternatives) {
-      if (alternative.type !== "pipe") {
-        continue;
-      }
-
-      if (alternative.name === candidate.name && alternative.path === candidate.path) {
-        continue;
-      }
-
-      if (this.isElementImported(sourceFile, alternative)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Fallback for external libraries whose NgModule exports were not indexed.
-   * Angular makes NgModule exports available through standalone component imports,
-   * so a `TranslateModule` imported from the same package as a `translate` pipe is
-   * treated as sufficient only when no explicit export data exists to verify it.
-   */
-  private hasPipeSelectorMatchingImportedModule(
-    pipeName: string,
-    candidates: AngularElementData[],
-    indexer: AngularIndexer,
-    sourceFile: SourceFile
-  ): boolean {
-    const normalizedPipeName = this.normalizeSelectorForNameMatch(pipeName);
-    if (!normalizedPipeName) {
-      return false;
-    }
-
-    for (const importName of this.getComponentImportNames(sourceFile)) {
-      if (!importName.endsWith("Module") || this.normalizeCandidateName(importName) !== normalizedPipeName) {
-        continue;
-      }
-
-      if (getStandardModuleExports(importName) ?? indexer.getExternalModuleExports(importName)) {
-        continue;
-      }
-
-      const moduleSpecifiers = this.getNamedImportModuleSpecifiers(sourceFile, importName);
-      if (moduleSpecifiers.length === 0) {
-        continue;
-      }
-
-      if (candidates.some((candidate) => candidate.type === "pipe" && moduleSpecifiers.includes(candidate.path))) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private getNamedImportModuleSpecifiers(sourceFile: SourceFile, importName: string): string[] {
-    const moduleSpecifiers: string[] = [];
-
-    for (const declaration of sourceFile.getImportDeclarations()) {
-      if (!declaration.getNamedImports().some((namedImport) => namedImport.getName() === importName)) {
-        continue;
-      }
-
-      moduleSpecifiers.push(declaration.getModuleSpecifierValue());
-    }
-
-    return moduleSpecifiers;
-  }
-
-  private getComponentImportNames(sourceFile: SourceFile): string[] {
-    const importNames = new Set<string>();
-
-    for (const classDeclaration of sourceFile.getClasses()) {
-      const importsArray = this.getComponentImportsArray(classDeclaration);
-      if (!importsArray) {
-        continue;
-      }
-
-      for (const element of importsArray.getElements()) {
-        if (element.isKind(SyntaxKind.Identifier)) {
-          importNames.add(element.getText().trim());
-        }
-      }
-    }
-
-    return [...importNames];
-  }
-
-  private candidateNameMatchesSelector(selectorName: string, candidateName: string): boolean {
-    const normalizedSelector = this.normalizeSelectorForNameMatch(selectorName);
-    const normalizedCandidate = this.normalizeCandidateName(candidateName);
-
-    if (!normalizedSelector || !normalizedCandidate) {
-      return false;
-    }
-
-    return normalizedCandidate.startsWith(normalizedSelector);
-  }
-
-  private normalizeSelectorForNameMatch(selectorName: string): string {
-    return selectorName.replace(/[^a-zA-Z0-9]+/g, "").toLowerCase();
-  }
-
-  private normalizeCandidateName(candidateName: string): string {
-    return candidateName
-      .replace(/(Component|Directive|Pipe|Module)$/u, "")
-      .replace(/[^a-zA-Z0-9]+/g, "")
-      .toLowerCase();
-  }
-
-  /**
-   * Gets matched selectors for an element and candidate.
-   */
-  private getMatchedSelectors(
-    element: ParsedHtmlFullElement,
-    candidate: AngularElementData,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    CssSelector: any,
-    // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-    SelectorMatcher: any
-  ): string[] {
-    const matcher = new SelectorMatcher();
-    const individualSelectors = CssSelector.parse(candidate.originalSelector);
-    matcher.addSelectables(individualSelectors);
-
-    const templateCssSelector = new CssSelector();
-    templateCssSelector.setElement(element.tagName);
-    for (const attr of element.attributes) {
-      templateCssSelector.addAttribute(attr.name, attr.value ?? "");
-    }
-
-    const matchedSelectors: string[] = [];
-    matcher.match(templateCssSelector, (selector: string) => {
-      matchedSelectors.push(selector.toString());
-    });
-
-    return matchedSelectors;
-  }
-
-  private createMissingImportDiagnostic(
-    element: ParsedHtmlFullElement,
-    candidate: AngularElementData,
-    specificSelector: string,
-    severity: CoreDiagnosticSeverity
-  ): vscode.Diagnostic {
-    const message = `'${element.name}' is part of a known ${candidate.type}, but it is not imported.`;
-    const diagnostic = new vscode.Diagnostic(element.range, message, toVsCodeDiagnosticSeverity(severity));
-
-    diagnostic.code = `missing-${candidate.type}-import:${specificSelector}`;
-    diagnostic.source = "angular-auto-import";
-    return diagnostic;
+    this.templateCache.set(cacheKey, { version: currentVersion, nodes });
+    return nodes;
   }
 
   private getSourceFile(document: vscode.TextDocument): SourceFile | undefined {
@@ -1087,28 +635,47 @@ export class DiagnosticProvider {
     );
   }
 
-  private _findPipesInExpression(
-    expressionText: string,
-    document: vscode.TextDocument,
-    baseOffset: number,
-    valueOffset: number
-  ): ParsedHtmlElement[] {
-    const pipeElements: ParsedHtmlElement[] = [];
-    const pipeRegex = /\|\s*([a-zA-Z][a-zA-Z0-9_-]*)/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = pipeRegex.exec(expressionText))) {
-      const pipeName = match[1];
-      const pipeOffsetInExpression = match.index + match[0].indexOf(pipeName);
-      const start = document.positionAt(baseOffset + valueOffset + pipeOffsetInExpression);
-      const end = document.positionAt(baseOffset + valueOffset + pipeOffsetInExpression + pipeName.length);
-      pipeElements.push({ type: "pipe", name: pipeName, range: new vscode.Range(start, end), tagName: "pipe" });
-    }
-    return pipeElements;
-  }
-
   private getProjectContextForDocument(document: vscode.TextDocument) {
     return getProjectContextForDocument(document, this.context.projectIndexers, this.context.projectTsConfigs);
+  }
+
+  /**
+   * Returns the module specifiers of every top-level named import of `importName`.
+   */
+  private getNamedImportModuleSpecifiers(sourceFile: SourceFile, importName: string): string[] {
+    const moduleSpecifiers: string[] = [];
+
+    for (const declaration of sourceFile.getImportDeclarations()) {
+      if (!declaration.getNamedImports().some((namedImport) => namedImport.getName() === importName)) {
+        continue;
+      }
+
+      moduleSpecifiers.push(declaration.getModuleSpecifierValue());
+    }
+
+    return moduleSpecifiers;
+  }
+
+  /**
+   * Returns every identifier listed in a `@Component({ imports: [...] })` in this file.
+   */
+  private getComponentImportNames(sourceFile: SourceFile): string[] {
+    const importNames = new Set<string>();
+
+    for (const classDeclaration of sourceFile.getClasses()) {
+      const importsArray = this.getComponentImportsArray(classDeclaration);
+      if (!importsArray) {
+        continue;
+      }
+
+      for (const element of importsArray.getElements()) {
+        if (element.isKind(SyntaxKind.Identifier)) {
+          importNames.add(element.getText().trim());
+        }
+      }
+    }
+
+    return [...importNames];
   }
 
   private isElementImported(sourceFile: SourceFile, element: AngularElementData): boolean {
@@ -1301,468 +868,6 @@ export class DiagnosticProvider {
     return false;
   }
 
-  /**
-   * Processes a template AST node
-   * @param node The template node to process
-   * @param processingCtx Processing context with callbacks and data structures
-   * @param docCtx Document context for parsing
-   * @param astCtors AST node constructors
-   */
-  private processTemplateNode(
-    node: TemplateAstNode,
-    processingCtx: ProcessingContext,
-    docCtx: TemplateDocumentContext,
-    astCtors: AstConstructors
-  ): void {
-    // Handle all types of control flow expressions
-    if (this.isControlFlowNode(node)) {
-      this.processControlFlowNode(node, processingCtx.visit, processingCtx.extractPipesFromExpression);
-      return;
-    }
-
-    if (node instanceof astCtors.tmplAstElement || node instanceof astCtors.tmplAstTemplate) {
-      this.processElementOrTemplateNode(node, processingCtx, docCtx, astCtors);
-    }
-
-    if (node instanceof astCtors.tmplAstBoundText) {
-      this.processBoundTextNode(node, processingCtx.elements, docCtx.document, docCtx.offset, docCtx.text);
-    }
-
-    // Handle regular children for non-control-flow nodes
-    if (this.hasChildren(node) && !this.isControlFlowNode(node)) {
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      processingCtx.visit(node.children);
-    }
-  }
-
-  /**
-   * Detects control flow nodes using duck typing instead of constructor name matching.
-   * This is more robust than `node.constructor.name` which can break when bundled with esbuild.
-   */
-  private isControlFlowNode(node: TemplateAstNode): boolean {
-    const n = node as Record<string, unknown>;
-    // IfBlock/SwitchBlock: has `branches` array
-    if (Array.isArray(n.branches)) {
-      return true;
-    }
-    // ForLoopBlock: has `trackBy` and `contextVariables`
-    if (n.trackBy !== undefined && n.contextVariables !== undefined) {
-      return true;
-    }
-    // SwitchBlock in Angular 20/21 used `cases`; Angular 22 exposes `groups`.
-    if (Array.isArray(n.cases)) {
-      return true;
-    }
-    if (Array.isArray(n.groups)) {
-      return true;
-    }
-    // DeferredBlock: has `placeholder`, `loading`, or `error` sub-blocks
-    if (n.placeholder !== undefined || n.loading !== undefined || n.error !== undefined) {
-      return true;
-    }
-    return false;
-  }
-
-  private processControlFlowNode(
-    controlFlowNode: ControlFlowNode,
-    visit: (nodesList: TemplateAstNode[]) => void,
-    extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void
-  ): void {
-    // Check for pipes in main expression (condition/iterator)
-    if (controlFlowNode.expression) {
-      extractPipesFromExpression(controlFlowNode.expression);
-    }
-
-    // Handle branches and cases
-    this.processControlFlowBranchesAndCases(controlFlowNode, visit, extractPipesFromExpression);
-
-    // Handle main children
-    if (controlFlowNode.children && Array.isArray(controlFlowNode.children)) {
-      visit(controlFlowNode.children);
-    }
-
-    // Handle special blocks
-    this.processControlFlowSpecialBlocks(controlFlowNode, visit);
-  }
-
-  private processControlFlowBranchesAndCases(
-    controlFlowNode: ControlFlowNode,
-    visit: (nodesList: TemplateAstNode[]) => void,
-    extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void
-  ): void {
-    // Handle branches (@if/@else/@else if)
-    this.processBranchesArray(controlFlowNode.branches, visit, extractPipesFromExpression);
-
-    // Handle cases (@switch)
-    this.processCasesArray(controlFlowNode.cases, visit, extractPipesFromExpression);
-
-    // Handle grouped switch cases (@switch in Angular 22+)
-    this.processGroupsArray(controlFlowNode.groups, visit, extractPipesFromExpression);
-  }
-
-  private processBranchesArray(
-    branches: unknown,
-    visit: (nodesList: TemplateAstNode[]) => void,
-    extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void
-  ): void {
-    if (!branches || !Array.isArray(branches)) {
-      return;
-    }
-
-    for (const branch of branches) {
-      this.processBranchOrCase(branch, visit, extractPipesFromExpression);
-    }
-  }
-
-  private processCasesArray(
-    cases: unknown,
-    visit: (nodesList: TemplateAstNode[]) => void,
-    extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void
-  ): void {
-    if (!cases || !Array.isArray(cases)) {
-      return;
-    }
-
-    for (const caseBlock of cases) {
-      this.processBranchOrCase(caseBlock, visit, extractPipesFromExpression);
-    }
-  }
-
-  private processGroupsArray(
-    groups: unknown,
-    visit: (nodesList: TemplateAstNode[]) => void,
-    extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void
-  ): void {
-    if (!groups || !Array.isArray(groups)) {
-      return;
-    }
-
-    for (const group of groups) {
-      const switchGroup = group as { cases?: Array<{ expression?: unknown }>; children?: TemplateAstNode[] };
-      if (Array.isArray(switchGroup.cases)) {
-        for (const caseBlock of switchGroup.cases) {
-          if (caseBlock.expression) {
-            extractPipesFromExpression(caseBlock.expression);
-          }
-        }
-      }
-      if (Array.isArray(switchGroup.children)) {
-        visit(switchGroup.children);
-      }
-    }
-  }
-
-  private processBranchOrCase(
-    item: { expression?: unknown; children?: TemplateAstNode[] },
-    visit: (nodesList: TemplateAstNode[]) => void,
-    extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void
-  ): void {
-    if (item.expression) {
-      extractPipesFromExpression(item.expression);
-    }
-    if (item.children && Array.isArray(item.children)) {
-      visit(item.children);
-    }
-  }
-
-  private processControlFlowSpecialBlocks(
-    controlFlowNode: ControlFlowNode,
-    visit: (nodesList: TemplateAstNode[]) => void
-  ): void {
-    // Handle @for empty block
-    const emptyBlock = controlFlowNode.empty as { children?: TemplateAstNode[] };
-    if (emptyBlock?.children && Array.isArray(emptyBlock.children)) {
-      visit(emptyBlock.children);
-    }
-
-    // Handle @defer sub-blocks (placeholder, loading, error)
-    ["placeholder", "loading", "error"].forEach((blockType) => {
-      const block = (controlFlowNode as Record<string, unknown>)[blockType] as { children?: TemplateAstNode[] };
-      if (block?.children) {
-        visit(block.children);
-      }
-    });
-  }
-
-  /**
-   * Processes element or template nodes
-   * @param node The element or template node
-   * @param processingCtx Processing context
-   * @param docCtx Document context
-   * @param astCtors AST constructors
-   */
-  private processElementOrTemplateNode(
-    node: TmplAstElement | TmplAstTemplate,
-    processingCtx: ProcessingContext,
-    docCtx: TemplateDocumentContext,
-    astCtors: AstConstructors
-  ): void {
-    const isTemplate = node instanceof astCtors.tmplAstTemplate;
-
-    // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    const regularAttrs = [...node.attributes, ...node.inputs, ...node.outputs, ...node.references];
-
-    // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    const templateAttrs = isTemplate ? [...node.templateAttrs] : [];
-    const allAttrsList = [...regularAttrs, ...templateAttrs];
-
-    const attributes = allAttrsList.map((attr: unknown) => ({
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      name: attr.name,
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      value: "value" in attr && attr.value ? String(attr.value) : "",
-    }));
-
-    const nodeName = isTemplate ? "ng-template" : node.name;
-    const foundElements = processingCtx.indexer.getElements(nodeName);
-
-    if (!isKnownHtmlTag(nodeName)) {
-      this.addAngularElementsToList(
-        node,
-        nodeName,
-        foundElements,
-        processingCtx.elements,
-        docCtx.document,
-        docCtx.offset,
-        attributes
-      );
-    } else {
-      // For known HTML tags (like button, input, a), check if they have Angular directives
-      // by searching for compound selectors like "button[mat-button]", "input[matInput]"
-      this.checkKnownHtmlTagWithAttributes(node, nodeName, regularAttrs, attributes, processingCtx, docCtx);
-    }
-
-    // Process attributes
-    this.processAttributes(regularAttrs, templateAttrs, nodeName, attributes, processingCtx, docCtx, astCtors);
-  }
-
-  /**
-   * Checks if a known HTML tag (like button, input, a) has Angular directives
-   * by searching for compound selectors like "button[mat-button]", "input[matInput]".
-   *
-   * Note: This method is specifically for directives that use compound selectors
-   * (e.g., "button[mat-button]"). Regular attribute directives are handled by
-   * processAttributes() which already creates diagnostics with correct attribute positions.
-   */
-  private checkKnownHtmlTagWithAttributes(
-    _node: TmplAstElement | TmplAstTemplate,
-    nodeName: string,
-    regularAttrs: unknown[],
-    attributes: Array<{ name: string; value: string }>,
-    processingCtx: ProcessingContext,
-    docCtx: TemplateDocumentContext
-  ): void {
-    // A single element can have multiple directives, but we should not add the same directive instance twice.
-    const processedDirectives = new Set<unknown>();
-
-    // For each attribute, check if there's a directive with a compound selector like "button[mat-button]"
-    for (let i = 0; i < attributes.length; i++) {
-      const attr = attributes[i];
-      const attrAstNode = regularAttrs[i];
-
-      const compoundSelector = `${nodeName}[${attr.name}]`;
-      const foundCandidates = processingCtx.indexer.getElements(compoundSelector);
-
-      // Only process if we actually found a directive with this compound selector
-      if (foundCandidates.length === 0) {
-        continue;
-      }
-
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      const keySpan = attrAstNode?.keySpan ?? attrAstNode?.sourceSpan;
-      if (!keySpan) {
-        // Fallback to tag range if attribute position not available
-        continue;
-      }
-
-      // Create range for the attribute only, not the entire tag
-      const attributeRange = new vscode.Range(
-        docCtx.document.positionAt(docCtx.offset + keySpan.start.offset),
-        docCtx.document.positionAt(docCtx.offset + keySpan.end.offset)
-      );
-
-      for (const candidate of foundCandidates) {
-        const isAngularElement = candidate.type === "component" || candidate.type === "directive";
-
-        if (isAngularElement && !processedDirectives.has(candidate)) {
-          processedDirectives.add(candidate);
-
-          processingCtx.elements.push({
-            name: attr.name, // Use attribute name, not compound selector, for config matching
-            // @ts-expect-error: Complex Angular template AST node types from ts-morph
-            type: candidate.type,
-            isAttribute: true, // Mark as attribute since we're highlighting the attribute
-            range: attributeRange, // Use attribute position, not entire tag
-            tagName: nodeName,
-            attributes,
-          });
-        }
-      }
-    }
-  }
-
-  private addAngularElementsToList(
-    node: TmplAstElement | TmplAstTemplate,
-    nodeName: string,
-    foundElements: AngularElementData[],
-    elements: ParsedHtmlElement[],
-    document: vscode.TextDocument,
-    offset: number,
-    attributes: Array<{ name: string; value: string }>
-  ): void {
-    for (const candidate of foundElements) {
-      const isKnownAngularElement = candidate.type === "component" || candidate.type === "directive";
-
-      if (isKnownAngularElement) {
-        elements.push({
-          name: nodeName,
-          // @ts-expect-error: Complex Angular template AST node types from ts-morph
-          type: candidate.type,
-          isAttribute: false,
-          range: new vscode.Range(
-            // @ts-expect-error: Complex Angular template AST node types from ts-morph
-            document.positionAt(offset + node.startSourceSpan.start.offset),
-            // @ts-expect-error: Complex Angular template AST node types from ts-morph
-            document.positionAt(offset + node.startSourceSpan.end.offset)
-          ),
-          tagName: nodeName,
-          attributes,
-        });
-      }
-    }
-  }
-
-  /**
-   * Processes attributes from element or template nodes
-   * @param regularAttrs Regular attributes array
-   * @param templateAttrs Template attributes array
-   * @param nodeName Name of the node
-   * @param attributes Parsed attributes array
-   * @param processingCtx Processing context
-   * @param docCtx Document context
-   * @param astCtors AST constructors
-   */
-  private processAttributes(
-    regularAttrs: unknown[],
-    templateAttrs: unknown[],
-    nodeName: string,
-    attributes: Array<{ name: string; value: string }>,
-    processingCtx: ProcessingContext,
-    docCtx: TemplateDocumentContext,
-    astCtors: AstConstructors
-  ): void {
-    const processAttribute = (attr: unknown, isTemplateAttr: boolean) => {
-      this.processSingleAttribute(attr, isTemplateAttr, nodeName, attributes, processingCtx, docCtx, astCtors);
-    };
-
-    for (const attr of regularAttrs) {
-      processAttribute(attr, false);
-    }
-    for (const attr of templateAttrs) {
-      processAttribute(attr, true);
-    }
-  }
-
-  /**
-   * Processes a single attribute
-   * @param attr The attribute to process
-   * @param isTemplateAttr Whether this is a template attribute
-   * @param nodeName Name of the node
-   * @param attributes Parsed attributes array
-   * @param processingCtx Processing context
-   * @param docCtx Document context
-   * @param astCtors AST constructors
-   */
-  private processSingleAttribute(
-    attr: unknown,
-    isTemplateAttr: boolean,
-    nodeName: string,
-    attributes: Array<{ name: string; value: string }>,
-    processingCtx: ProcessingContext,
-    docCtx: TemplateDocumentContext,
-    astCtors: AstConstructors
-  ): void {
-    // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    const keySpan = attr.keySpan ?? attr.sourceSpan;
-    if (!keySpan) {
-      return;
-    }
-
-    // Skip event bindings, as they are not importable directives.
-    if (attr instanceof astCtors.tmplAstBoundEvent) {
-      return;
-    }
-
-    let type = "attribute";
-    if (attr instanceof astCtors.tmplAstReference) {
-      type = "template-reference";
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    } else if (isTemplateAttr || attr.name.startsWith("*")) {
-      type = "structural-directive";
-    } else if (attr instanceof astCtors.tmplAstBoundAttribute) {
-      type = "property-binding";
-    }
-
-    processingCtx.elements.push({
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      name: attr.name,
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      type: type,
-      isAttribute: true,
-      range: new vscode.Range(
-        docCtx.document.positionAt(docCtx.offset + keySpan.start.offset),
-        docCtx.document.positionAt(docCtx.offset + keySpan.end.offset)
-      ),
-      tagName: nodeName,
-      attributes,
-    });
-
-    // Check for pipes in bound attribute values (like *ngIf="expression | pipe")
-    if (attr instanceof astCtors.tmplAstBoundAttribute && attr.value) {
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      const valueSpan = attr.valueSpan || attr.sourceSpan;
-      if (valueSpan) {
-        const expressionText = docCtx.text.slice(valueSpan.start.offset, valueSpan.end.offset);
-        const pipes = this._findPipesInExpression(
-          expressionText,
-          docCtx.document,
-          docCtx.offset,
-          valueSpan.start.offset
-        );
-        for (const pipe of pipes) {
-          // @ts-expect-error: Complex Angular template AST node types from ts-morph
-          processingCtx.elements.push({ ...pipe, isAttribute: false, attributes: [] });
-        }
-      }
-    }
-  }
-
-  private processBoundTextNode(
-    node: TmplAstBoundText,
-    elements: ParsedHtmlElement[],
-    document: vscode.TextDocument,
-    offset: number,
-    text: string
-  ): void {
-    const pipes = this._findPipesInExpression(
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      text.slice(node.sourceSpan.start.offset, node.sourceSpan.end.offset),
-      document,
-      offset,
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      node.sourceSpan.start.offset
-    );
-    for (const pipe of pipes) {
-      // @ts-expect-error: Complex Angular template AST node types from ts-morph
-      elements.push({ ...pipe, isAttribute: false, attributes: [] });
-    }
-  }
-
-  private hasChildren(node: unknown): boolean {
-    // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    return node && typeof node === "object" && "children" in node && Array.isArray(node.children);
-  }
-
   private getSeverityFromConfig(severityLevel: string): CoreDiagnosticSeverity {
     switch (severityLevel.toLowerCase()) {
       case "error":
@@ -1826,12 +931,17 @@ export class DiagnosticProvider {
   }
 }
 
-function isKnownHtmlTag(tag: string): boolean {
-  return knownTags.has(tag.toLowerCase());
-}
+/**
+ * Maps a core diagnostic onto the VS Code diagnostic the editor publishes.
+ */
+function toVsCodeDiagnostic(diagnostic: MissingImportDiagnostic): vscode.Diagnostic {
+  const published = new vscode.Diagnostic(
+    toVsCodeRange(diagnostic.range),
+    diagnostic.message,
+    toVsCodeDiagnosticSeverity(diagnostic.severity)
+  );
 
-interface ParsedHtmlFullElement extends ParsedHtmlElement {
-  type: "component" | "pipe" | "attribute" | "structural-directive" | "property-binding" | "template-reference";
-  isAttribute: boolean;
-  attributes: { name: string; value: string }[];
+  published.code = diagnostic.code;
+  published.source = diagnostic.source;
+  return published;
 }

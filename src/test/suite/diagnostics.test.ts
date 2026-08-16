@@ -2,6 +2,13 @@ import * as assert from "node:assert";
 import * as path from "node:path";
 import { Project } from "ts-morph";
 import * as vscode from "vscode";
+import type { CoreRange } from "../../core/language-types";
+import {
+  findMissingImports,
+  type MissingImportContext,
+  type MissingImportDiagnostic,
+} from "../../core/missing-imports";
+import type { ScannedTemplateElement } from "../../core/template-scan";
 import { DiagnosticProvider } from "../../providers/diagnostics";
 import { AngularElementData } from "../../types";
 
@@ -11,8 +18,7 @@ describe("DiagnosticProvider", function () {
   const testProjectPath = "/test/project";
   let provider: DiagnosticProvider;
   let sourceFile: import("ts-morph").SourceFile;
-  let cssSelectorCtor: unknown;
-  let selectorMatcherCtor: unknown;
+  let compiler: unknown;
   let importedNames = new Set<string>();
 
   const indexEntries = new Map<string, AngularElementData[]>([
@@ -129,10 +135,18 @@ describe("DiagnosticProvider", function () {
   } as unknown as vscode.ExtensionContext;
 
   before(async () => {
-    const compiler = await import("@angular/compiler");
-    cssSelectorCtor = compiler.CssSelector;
-    selectorMatcherCtor = compiler.SelectorMatcher;
+    compiler = await import("@angular/compiler");
   });
+
+  /** Runs the missing-import analysis through the provider's own wiring. */
+  function checkElement(
+    element: ScannedTemplateElement,
+    indexer: unknown,
+    componentFile: import("ts-morph").SourceFile
+  ): MissingImportDiagnostic[] {
+    const context = (provider as any).createMissingImportContext(indexer, componentFile) as MissingImportContext;
+    return findMissingImports([element], "warning", context);
+  }
 
   beforeEach(() => {
     importedNames = new Set<string>();
@@ -162,6 +176,7 @@ describe("DiagnosticProvider", function () {
       },
       extensionContext: mockExtensionContext,
     });
+    (provider as any).compiler = compiler;
 
     const project = new Project({ useInMemoryFileSystem: true });
     sourceFile = project.createSourceFile(
@@ -187,14 +202,7 @@ describe("DiagnosticProvider", function () {
       { name: "nzType", value: "primary" },
     ]);
 
-    const diagnostics = await (provider as any).checkElement(
-      element,
-      mockIndexer,
-      vscode.DiagnosticSeverity.Warning,
-      sourceFile,
-      cssSelectorCtor,
-      selectorMatcherCtor
-    );
+    const diagnostics = checkElement(element, mockIndexer, sourceFile);
 
     assert.deepStrictEqual(diagnostics, [], "nz-button should not report a missing NzWaveDirective diagnostic");
   });
@@ -207,14 +215,7 @@ describe("DiagnosticProvider", function () {
       { name: "nz-dropdown", value: "" },
     ]);
 
-    const diagnostics = await (provider as any).checkElement(
-      element,
-      mockIndexer,
-      vscode.DiagnosticSeverity.Warning,
-      sourceFile,
-      cssSelectorCtor,
-      selectorMatcherCtor
-    );
+    const diagnostics = checkElement(element, mockIndexer, sourceFile);
 
     assert.strictEqual(diagnostics.length, 1, "compound directive should still produce one diagnostic");
     assert.strictEqual(
@@ -229,14 +230,7 @@ describe("DiagnosticProvider", function () {
 
     const element = createPipeElement("translate");
 
-    const diagnostics = await (provider as any).checkElement(
-      element,
-      mockIndexer,
-      vscode.DiagnosticSeverity.Warning,
-      sourceFile,
-      cssSelectorCtor,
-      selectorMatcherCtor
-    );
+    const diagnostics = checkElement(element, mockIndexer, sourceFile);
 
     assert.deepStrictEqual(
       diagnostics,
@@ -330,14 +324,7 @@ export class StandaloneTranslatePlaygroundComponent {}
       getExternalModuleExports: () => undefined,
     };
 
-    const diagnostics = await (provider as any).checkElement(
-      createPipeElement("translate"),
-      moduleBackedIndexer,
-      vscode.DiagnosticSeverity.Warning,
-      moduleSourceFile,
-      cssSelectorCtor,
-      selectorMatcherCtor
-    );
+    const diagnostics = checkElement(createPipeElement("translate"), moduleBackedIndexer, moduleSourceFile);
 
     assert.deepStrictEqual(
       diagnostics,
@@ -384,14 +371,7 @@ export class ModuleNameTranslatePlaygroundComponent {}
       getExternalModuleExports: () => undefined,
     };
 
-    const diagnostics = await (provider as any).checkElement(
-      createPipeElement("translate"),
-      workspaceOnlyIndexer,
-      vscode.DiagnosticSeverity.Warning,
-      moduleSourceFile,
-      cssSelectorCtor,
-      selectorMatcherCtor
-    );
+    const diagnostics = checkElement(createPipeElement("translate"), workspaceOnlyIndexer, moduleSourceFile);
 
     assert.strictEqual(
       diagnostics.length,
@@ -444,14 +424,7 @@ export class DatePlaygroundComponent {}
         moduleName === "DateModule" ? new Set(["UnrelatedPipe"]) : undefined,
     };
 
-    const diagnostics = await (provider as any).checkElement(
-      createPipeElement("date"),
-      dateIndexer,
-      vscode.DiagnosticSeverity.Warning,
-      moduleSourceFile,
-      cssSelectorCtor,
-      selectorMatcherCtor
-    );
+    const diagnostics = checkElement(createPipeElement("date"), dateIndexer, moduleSourceFile);
 
     assert.strictEqual(
       diagnostics.length,
@@ -546,38 +519,29 @@ function createElement(
   name: string,
   tagName: string,
   attributes: Array<{ name: string; value: string }>
-): {
-  type: "attribute";
-  name: string;
-  isAttribute: true;
-  range: vscode.Range;
-  tagName: string;
-  attributes: Array<{ name: string; value: string }>;
-} {
+): ScannedTemplateElement {
   return {
     type: "attribute",
     name,
     isAttribute: true,
-    range: new vscode.Range(0, 0, 0, name.length),
+    range: rangeOf(name),
     tagName,
     attributes,
   };
 }
 
-function createPipeElement(name: string): {
-  type: "pipe";
-  name: string;
-  isAttribute: false;
-  range: vscode.Range;
-  tagName: string;
-  attributes: Array<{ name: string; value: string }>;
-} {
+function createPipeElement(name: string): ScannedTemplateElement {
   return {
     type: "pipe",
     name,
     isAttribute: false,
-    range: new vscode.Range(0, 0, 0, name.length),
+    range: rangeOf(name),
     tagName: "pipe",
     attributes: [],
   };
+}
+
+/** A single-line range covering a name, which these tests never assert on. */
+function rangeOf(name: string): CoreRange {
+  return { start: { line: 0, character: 0 }, end: { line: 0, character: name.length } };
 }

@@ -195,10 +195,13 @@ Exit criteria:
 - [x] Move `ProjectRegistry` out of the extension entry point without changing its behavior.
   - [x] Move the registry, its document/source contracts, and root-containment helpers into core.
   - [x] Re-point registry and discovery tests at the core module instead of the extension entry point.
-- [ ] Extract completion context detection/ranking so it returns plain completion DTOs.
+- [x] Extract completion context detection/ranking so it returns plain completion DTOs.
   - [x] Move template context detection onto `DocumentView` and return a plain context DTO (`core/completion-context`).
-  - [ ] Move selector matching/ranking behind plain completion DTOs the providers map to editor items.
-- [ ] Extract diagnostics so parsing and missing-import checks return plain diagnostic DTOs with offsets/ranges.
+  - [x] Move selector matching/ranking behind plain completion DTOs the providers map to editor items (`core/completion-suggestions`); the VS Code provider only maps DTOs onto `CompletionItem`s.
+- [x] Extract diagnostics so parsing and missing-import checks return plain diagnostic DTOs with offsets/ranges.
+  - [x] Move the template AST walk into core (`core/template-scan`), returning import candidates with plain ranges; parsing, caching, and logging stay in the provider.
+  - [x] Move the missing-import checks behind plain diagnostic DTOs (`core/missing-imports`), reading the component file through an injected context; the provider maps DTOs onto `vscode.Diagnostic`.
+  - [ ] Move the ts-morph import interrogation (`isElementImported` and its cache) behind that context into core; it needs a logging port first.
 - [ ] Extract an `ImportPlanner` that accepts document text and requested elements and returns a versioned edit plan.
 - [ ] Keep the current VS Code providers working through adapters.
 - [ ] Convert suitable tests to plain Node tests; retain Electron tests only where the VS Code host is relevant.

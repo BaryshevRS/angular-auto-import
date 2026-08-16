@@ -3,7 +3,6 @@
  * @module
  */
 
-import type * as vscode from "vscode";
 import type { ProcessedTsConfig } from "./tsconfig";
 
 /**
@@ -151,26 +150,4 @@ export interface ProjectContext {
    * The processed tsconfig for the project.
    */
   tsConfig: ProcessedTsConfig | null;
-}
-
-/**
- * A base interface for HTML elements found in a template.
- */
-export interface ParsedHtmlElement {
-  /**
-   * The type of the parsed HTML element.
-   */
-  type: "component" | "pipe" | "attribute" | "structural-directive" | "property-binding" | "template-reference";
-  /**
-   * The name of the element.
-   */
-  name: string;
-  /**
-   * The range of the element in the document.
-   */
-  range: vscode.Range;
-  /**
-   * The tag name of the HTML element.
-   */
-  tagName: string;
 }
