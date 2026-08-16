@@ -10,8 +10,9 @@ import type { FileSearchQuery, FileSystem } from "../../core/file-system";
  */
 export function createVsCodeFileSystem(): FileSystem {
   return {
-    findFiles: async ({ root, include, exclude }: FileSearchQuery) => {
-      const uris = await vscode.workspace.findFiles(new vscode.RelativePattern(root, include), exclude);
+    findFiles: async (query: FileSearchQuery) => {
+      const pattern = new vscode.RelativePattern(query.root, toIncludeGlob(query));
+      const uris = await vscode.workspace.findFiles(pattern, toExcludeGlob(query));
       return uris.map((uri) => uri.fsPath);
     },
     readFile: async (filePath: string) => {
@@ -19,4 +20,25 @@ export function createVsCodeFileSystem(): FileSystem {
       return Buffer.from(content).toString("utf-8");
     },
   };
+}
+
+/** @internal */
+function toIncludeGlob({ extensions }: FileSearchQuery): string {
+  return `**/*{${extensions.join(",")}}`;
+}
+
+/**
+ * Builds the exclude glob as a flat brace list: VS Code's glob parser does not
+ * reliably expand nested braces, and a mis-parsed exclude would silently pull all of
+ * `node_modules` back in.
+ * @internal
+ */
+function toExcludeGlob(query: FileSearchQuery): string | undefined {
+  const patterns = [
+    ...(query.excludedDirectories ?? []).map((directory) => `**/${directory}/**`),
+    ...(query.excludeHiddenDirectories ? ["**/.*/**"] : []),
+    ...(query.excludedSuffixes ?? []).map((suffix) => `**/*${suffix}`),
+  ];
+
+  return patterns.length > 0 ? `{${patterns.join(",")}}` : undefined;
 }

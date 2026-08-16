@@ -19,17 +19,20 @@ import {
   type TypeChecker,
   type TypeReferenceNode,
 } from "ts-morph";
-import * as vscode from "vscode";
 
 import { createVsCodeFileSystem } from "../adapters/vscode/file-system";
+import { createVsCodeFileWatcherFactory } from "../adapters/vscode/file-watching";
 import { createVsCodeProgressHost } from "../adapters/vscode/progress";
 import { isLibraryExcluded } from "../config/excluded-libraries";
 import type { CacheStore } from "../core/cache";
 import { AngularElementIndex, type ComponentToModuleMap } from "../core/element-index";
+import type { Disposable } from "../core/events";
 import { Emitter, type EventSource } from "../core/events";
 import type { FileSystem } from "../core/file-system";
+import type { FileChange, FileWatcherFactory } from "../core/file-watching";
+import type { CoreLogger, InstrumentedLogger, PerformanceMetrics } from "../core/logging";
 import type { ProgressHost, ProgressReporter } from "../core/progress";
-import { logger } from "../logger";
+import { isProjectSourceFile, projectSourceQuery } from "../core/source-files";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
 import { debounce, findAngularDependencies, getLibraryEntryPoints, isStandalone, parseAngularSelector } from "../utils";
 
@@ -42,6 +45,9 @@ import { debounce, findAngularDependencies, getLibraryEntryPoints, isStandalone,
  */
 const DEPENDENCY_MANIFEST_GLOB = "{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock}";
 
+/** Glob (relative to the project root) matching the sources whose changes update the index. */
+const PROJECT_SOURCE_WATCH_GLOB = "**/*.ts";
+
 /**
  * Debounce delay (ms) before reacting to a dependency manifest change. Installs
  * touch these files several times, so the delay coalesces the bursts and lets
@@ -53,28 +59,13 @@ const DEPENDENCY_REINDEX_DEBOUNCE_MS = 2000;
 /** Maximum number of project source files read at the same time. */
 const FILE_FILTER_CONCURRENCY = 8;
 
-/** Directory names that never hold indexable project sources. */
-const NON_SOURCE_DIRECTORIES = ["node_modules", ".git", "dist", "out", "e2e", "bazel-out"] as const;
-
-/**
- * Project files handled by the source indexer; dependencies have their own entry-point indexer.
- *
- * Kept as a flat brace list: VS Code's glob parser does not reliably expand nested
- * braces, and a mis-parsed exclude would silently pull all of node_modules back in.
- */
-const PROJECT_SOURCE_EXCLUDE_GLOB = `{${[
-  ...NON_SOURCE_DIRECTORIES.map((directory) => `**/${directory}/**`),
-  "**/.*/**",
-  "**/*.spec.ts",
-  "**/*.test.ts",
-].join(",")}}`;
-
 /**
  * Helper function to safely remove source files from ts-morph project
  * @param project - The ts-morph Project instance
  * @param context - Context string for logging purposes
+ * @param logger - The logger to report skipped nodes through
  */
-function removeAllSourceFiles(project: Project, context: string): void {
+function removeAllSourceFiles(project: Project, context: string, logger: CoreLogger): void {
   project.getSourceFiles().forEach((sf) => {
     try {
       // Check if the sourceFile is still valid before removing
@@ -91,8 +82,9 @@ function removeAllSourceFiles(project: Project, context: string): void {
  * Helper function to log memory usage with delta
  * @param message - The log message prefix
  * @param initialMemory - The initial memory metrics
+ * @param logger - The logger the usage is reported through
  */
-function logMemoryUsage(message: string, initialMemory: ReturnType<typeof logger.getPerformanceMetrics>): void {
+function logMemoryUsage(message: string, initialMemory: PerformanceMetrics, logger: InstrumentedLogger): void {
   const finalMemory = logger.getPerformanceMetrics();
   const memoryDelta = finalMemory.memoryUsage.heapUsed - initialMemory.memoryUsage.heapUsed;
   logger.info(
@@ -103,8 +95,9 @@ function logMemoryUsage(message: string, initialMemory: ReturnType<typeof logger
 /**
  * Helper function to log when no valid cache is found
  * @param projectRootPath - The project root path
+ * @param logger - The logger to report through
  */
-function logNoCacheFound(projectRootPath: string): void {
+function logNoCacheFound(projectRootPath: string, logger: CoreLogger): void {
   logger.info(`AngularIndexer (${path.basename(projectRootPath)}): No valid cache found in workspace.`);
 }
 
@@ -115,12 +108,14 @@ function logNoCacheFound(projectRootPath: string): void {
  * @param sourceFile - The SourceFile to check
  * @param callback - The callback to execute if the SourceFile is valid
  * @param context - Context string for logging
+ * @param logger - The logger to report a forgotten node through
  * @returns true if the callback was executed, false if the node was forgotten
  */
 function withValidSourceFile<T>(
   sourceFile: SourceFile,
   callback: () => T,
-  context: string
+  context: string,
+  logger: CoreLogger
 ): { success: boolean; result?: T } {
   try {
     sourceFile.getFilePath(); // This will throw if the node is forgotten
@@ -162,8 +157,11 @@ function parseModDefinition(classDecl: ClassDeclaration): import("ts-morph").Tup
 export interface AngularIndexerOptions {
   /** Where this project's index is persisted between sessions. */
   cacheStore: CacheStore;
+  /** Where this indexer reports progress, timings, and failures. */
+  logger: InstrumentedLogger;
   fileSystem?: FileSystem;
   progressHost?: ProgressHost;
+  fileWatchers?: FileWatcherFactory;
 }
 
 /**
@@ -180,14 +178,14 @@ export class AngularIndexer {
    */
   private readonly index = new AngularElementIndex();
   /**
-   * The file watcher for the project.
+   * The source-file subscription for the project, or `null` while it is not watching.
    */
-  public fileWatcher: vscode.FileSystemWatcher | null = null;
+  public fileWatcher: Disposable | null = null;
   /**
    * Watches dependency manifests / lock files to refresh the external library
    * index when packages are installed, removed or upgraded.
    */
-  private dependencyWatcher: vscode.FileSystemWatcher | null = null;
+  private dependencyWatcher: Disposable | null = null;
   private isReindexingDependencies: boolean = false;
   private readonly _onDidIndexNodeModules = new Emitter<void>();
   private readonly _onDidChangeIndex = new Emitter<void>();
@@ -225,6 +223,8 @@ export class AngularIndexer {
   private readonly fileSystem: FileSystem;
   private readonly progressHost: ProgressHost;
   private readonly cacheStore: CacheStore;
+  private readonly logger: InstrumentedLogger;
+  private readonly fileWatchers: FileWatcherFactory;
 
   /**
    * File access, progress presentation, and persistence are injected so the indexer
@@ -237,6 +237,8 @@ export class AngularIndexer {
     this.fileSystem = options.fileSystem ?? createVsCodeFileSystem();
     this.progressHost = options.progressHost ?? createVsCodeProgressHost();
     this.cacheStore = options.cacheStore;
+    this.logger = options.logger;
+    this.fileWatchers = options.fileWatchers ?? createVsCodeFileWatcherFactory();
     this.project = new Project({
       useInMemoryFileSystem: false, // Keep this as false for real file system interaction
       skipAddingFilesFromTsConfig: true,
@@ -264,7 +266,7 @@ export class AngularIndexer {
     this.workspaceIndexCacheKey = `angularSelectorToDataIndex_${projectHash}`;
     this.workspaceModulesCacheKey = `angularModulesCache_${projectHash}`;
     this.workspaceExternalModulesExportsCacheKey = `angularExternalModulesExports_${projectHash}`;
-    logger.info(
+    this.logger.info(
       `AngularIndexer: Project root set to ${projectPath}. Cache keys: ${this.workspaceFileCacheKey}, ${this.workspaceIndexCacheKey}, ${this.workspaceModulesCacheKey}, ${this.workspaceExternalModulesExportsCacheKey}`
     );
   }
@@ -277,65 +279,63 @@ export class AngularIndexer {
    */
   public ensureCacheKeys(projectRootPath: string): void {
     if (this.workspaceFileCacheKey === "" || this.workspaceIndexCacheKey === "") {
-      logger.warn(`Cache keys not set for ${projectRootPath}, attempting to set them now`);
+      this.logger.warn(`Cache keys not set for ${projectRootPath}, attempting to set them now`);
       this.setProjectRoot(projectRootPath);
     }
   }
 
   /**
-   * Initializes the file watcher for the project to keep the index up-to-date.
-   * @param context The extension context.
+   * Starts watching the project's sources and dependency manifests so the index
+   * follows changes made outside the editor.
    */
-  initializeWatcher(context: vscode.ExtensionContext) {
+  initializeWatcher(): void {
     if (this.fileWatcher) {
       this.fileWatcher.dispose();
+      this.fileWatcher = null;
     }
     if (!this.projectRootPath) {
-      logger.error("AngularIndexer: Cannot initialize watcher, projectRootPath not set.");
+      this.logger.error("AngularIndexer: Cannot initialize watcher, projectRootPath not set.");
       return;
     }
 
-    const pattern = new vscode.RelativePattern(this.projectRootPath, "**/*.ts");
-    this.fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
-
-    // The watcher pattern cannot exclude anything, so an install or a build would
+    // The watch pattern cannot exclude anything, so an install or a build would
     // otherwise push every written .ts through a full parse and index save.
-    this.fileWatcher.onDidCreate(async (uri) => {
-      if (!this.isIndexableProjectFile(uri.fsPath)) {
-        return;
+    this.fileWatcher = this.fileWatchers.watch(
+      { root: this.projectRootPath, include: PROJECT_SOURCE_WATCH_GLOB },
+      (change) => {
+        void this.handleSourceChange(change);
       }
-      logger.info(`Watcher (${path.basename(this.projectRootPath)}): File created: ${uri.fsPath}`);
-      await this.updateFileIndex(uri.fsPath);
-      this._onDidChangeIndex.fire();
-    });
+    );
 
-    this.fileWatcher.onDidChange(async (uri) => {
-      if (!this.isIndexableProjectFile(uri.fsPath)) {
-        return;
-      }
-      logger.info(`Watcher (${path.basename(this.projectRootPath)}): File changed: ${uri.fsPath}`);
-      await this.updateFileIndex(uri.fsPath);
-      this._onDidChangeIndex.fire();
-    });
+    this.logger.info(
+      `AngularIndexer: File watcher initialized for ${this.projectRootPath} with pattern ${PROJECT_SOURCE_WATCH_GLOB}`
+    );
 
-    this.fileWatcher.onDidDelete(async (uri) => {
-      if (!this.isIndexableProjectFile(uri.fsPath)) {
-        return;
-      }
-      logger.info(`Watcher (${path.basename(this.projectRootPath)}): File deleted: ${uri.fsPath}`);
-      await this.removeFromIndex(uri.fsPath);
+    this.initializeDependencyWatcher();
+  }
+
+  /**
+   * Applies one watched source change to the index.
+   * @param change The reported change.
+   * @internal
+   */
+  private async handleSourceChange({ filePath, kind }: FileChange): Promise<void> {
+    if (!this.isIndexableProjectFile(filePath)) {
+      return;
+    }
+
+    this.logger.info(`Watcher (${path.basename(this.projectRootPath)}): File ${kind}d: ${filePath}`);
+    if (kind === "delete") {
+      await this.removeFromIndex(filePath);
       // Also remove from ts-morph project
-      const sourceFile = this.project.getSourceFile(uri.fsPath);
+      const sourceFile = this.project.getSourceFile(filePath);
       if (sourceFile) {
         this.project.removeSourceFile(sourceFile);
       }
-      this._onDidChangeIndex.fire();
-    });
-
-    context.subscriptions.push(this.fileWatcher);
-    logger.info(`AngularIndexer: File watcher initialized for ${this.projectRootPath} with pattern ${pattern.pattern}`);
-
-    this.initializeDependencyWatcher(context);
+    } else {
+      await this.updateFileIndex(filePath);
+    }
+    this._onDidChangeIndex.fire();
   }
 
   /**
@@ -343,28 +343,25 @@ export class AngularIndexer {
    * library index is refreshed automatically when packages change. This guards
    * against a stale index where a freshly installed library's elements are not
    * yet known (the cause of false "missing import" diagnostics).
-   * @param context The extension context.
    * @internal
    */
-  private initializeDependencyWatcher(context: vscode.ExtensionContext): void {
+  private initializeDependencyWatcher(): void {
     if (this.dependencyWatcher) {
       this.dependencyWatcher.dispose();
+      this.dependencyWatcher = null;
     }
-
-    const pattern = new vscode.RelativePattern(this.projectRootPath, DEPENDENCY_MANIFEST_GLOB);
-    this.dependencyWatcher = vscode.workspace.createFileSystemWatcher(pattern);
 
     const handler = debounce(() => {
       void this.reindexNodeModulesAfterDependencyChange();
     }, DEPENDENCY_REINDEX_DEBOUNCE_MS);
 
-    this.dependencyWatcher.onDidChange(handler);
-    this.dependencyWatcher.onDidCreate(handler);
-    this.dependencyWatcher.onDidDelete(handler);
+    this.dependencyWatcher = this.fileWatchers.watch(
+      { root: this.projectRootPath, include: DEPENDENCY_MANIFEST_GLOB },
+      handler
+    );
 
-    context.subscriptions.push(this.dependencyWatcher);
-    logger.info(
-      `AngularIndexer: Dependency watcher initialized for ${this.projectRootPath} with pattern ${pattern.pattern}`
+    this.logger.info(
+      `AngularIndexer: Dependency watcher initialized for ${this.projectRootPath} with pattern ${DEPENDENCY_MANIFEST_GLOB}`
     );
   }
 
@@ -376,7 +373,7 @@ export class AngularIndexer {
    */
   private async reindexNodeModulesAfterDependencyChange(): Promise<void> {
     if (this.isIndexing || this.isReindexingDependencies) {
-      logger.debug(
+      this.logger.debug(
         `[DependencyWatcher] Skipping reindex for ${path.basename(this.projectRootPath)}: indexing already in progress.`
       );
       return;
@@ -384,12 +381,12 @@ export class AngularIndexer {
 
     this.isReindexingDependencies = true;
     try {
-      logger.info(`🔄 Dependencies changed for ${path.basename(this.projectRootPath)}, re-indexing libraries...`);
+      this.logger.info(`🔄 Dependencies changed for ${path.basename(this.projectRootPath)}, re-indexing libraries...`);
       await this.indexNodeModules();
       this._onDidIndexNodeModules.fire();
       this._onDidChangeIndex.fire();
     } catch (error) {
-      logger.error("[DependencyWatcher] Error re-indexing libraries after dependency change:", error as Error);
+      this.logger.error("[DependencyWatcher] Error re-indexing libraries after dependency change:", error as Error);
     } finally {
       this.isReindexingDependencies = false;
     }
@@ -420,7 +417,7 @@ export class AngularIndexer {
    */
   private parseAngularElementsWithTsMorph(filePath: string, content: string): ComponentInfo[] {
     if (!this.projectRootPath) {
-      logger.error("AngularIndexer.parseAngularElementsWithTsMorph: projectRootPath is not set.");
+      this.logger.error("AngularIndexer.parseAngularElementsWithTsMorph: projectRootPath is not set.");
       return this.getFallbackResult(filePath, content);
     }
 
@@ -429,7 +426,7 @@ export class AngularIndexer {
       const elements = this.extractElementsFromSourceFile(sourceFile, filePath, content);
       return this.applyFallbackIfNeeded(elements, filePath, content);
     } catch (error) {
-      logger.error(`ts-morph parsing error for ${filePath} in project ${this.projectRootPath}:`, error as Error);
+      this.logger.error(`ts-morph parsing error for ${filePath} in project ${this.projectRootPath}:`, error as Error);
       return this.getFallbackResult(filePath, content);
     }
   }
@@ -468,7 +465,7 @@ export class AngularIndexer {
       sourceFile.replaceWithText(content);
       return sourceFile;
     } catch {
-      logger.warn(`SourceFile node forgotten for ${filePath}, recreating...`);
+      this.logger.warn(`SourceFile node forgotten for ${filePath}, recreating...`);
       this.project.removeSourceFile(sourceFile);
       return this.project.createSourceFile(filePath, content, {
         overwrite: true,
@@ -490,7 +487,7 @@ export class AngularIndexer {
           elements.push(elementInfo);
         }
       } catch (classError) {
-        logger.warn(`Error processing class in ${filePath}: ${(classError as Error).message}`);
+        this.logger.warn(`Error processing class in ${filePath}: ${(classError as Error).message}`);
       }
     }
 
@@ -597,7 +594,7 @@ export class AngularIndexer {
         }
       }
     } catch (error) {
-      logger.error(`Error extracting ${errorContext} selector from decorator:`, error as Error);
+      this.logger.error(`Error extracting ${errorContext} selector from decorator:`, error as Error);
     }
     return undefined;
   }
@@ -645,7 +642,7 @@ export class AngularIndexer {
         }
       }
     } catch (error) {
-      logger.error("Error extracting pipe name from decorator:", error as Error);
+      this.logger.error("Error extracting pipe name from decorator:", error as Error);
     }
 
     return { name };
@@ -662,7 +659,7 @@ export class AngularIndexer {
     // This is a fallback, ensure it's robust enough or log clearly when it's used.
     // Note: This regex approach only finds the first element, unlike the ts-morph approach
     if (!this.projectRootPath) {
-      logger.warn(
+      this.logger.warn(
         "AngularIndexer.parseAngularElementWithRegex: projectRootPath is not set. Regex parsing might be unreliable."
       );
       // Allow to proceed but with caution
@@ -740,7 +737,7 @@ export class AngularIndexer {
 
       await this.saveIndexToWorkspace();
     } catch (error) {
-      logger.error(`Error updating index for ${filePath} in project ${this.projectRootPath}:`, error as Error);
+      this.logger.error(`Error updating index for ${filePath} in project ${this.projectRootPath}:`, error as Error);
     }
   }
 
@@ -758,40 +755,26 @@ export class AngularIndexer {
    * @internal
    */
   private isIndexableProjectFile(filePath: string): boolean {
-    const relativePath = path.relative(this.projectRootPath, filePath);
-    if (relativePath === "" || path.isAbsolute(relativePath) || relativePath.startsWith("..")) {
-      return false;
-    }
-
-    const segments = relativePath.split(path.sep);
-    const fileName = segments[segments.length - 1];
-    if (fileName.endsWith(".spec.ts") || fileName.endsWith(".test.ts")) {
-      return false;
-    }
-
-    const directorySegments = segments.slice(0, -1);
-    return !directorySegments.some(
-      (segment) => (NON_SOURCE_DIRECTORIES as readonly string[]).includes(segment) || segment.startsWith(".")
-    );
+    return isProjectSourceFile(this.projectRootPath, filePath);
   }
 
   private validateFileForIndexing(filePath: string): boolean {
     if (!fs.existsSync(filePath)) {
-      logger.warn(`File not found, cannot update index: ${filePath} for project ${this.projectRootPath}`);
+      this.logger.warn(`File not found, cannot update index: ${filePath} for project ${this.projectRootPath}`);
       return false;
     }
     if (!this.projectRootPath) {
-      logger.error(`AngularIndexer.updateFileIndex: projectRootPath not set for ${filePath}. Aborting update.`);
+      this.logger.error(`AngularIndexer.updateFileIndex: projectRootPath not set for ${filePath}. Aborting update.`);
       return false;
     }
     if (!filePath.startsWith(this.projectRootPath)) {
-      logger.warn(
+      this.logger.warn(
         `AngularIndexer.updateFileIndex: File ${filePath} is outside of project root ${this.projectRootPath}. Skipping.`
       );
       return false;
     }
     if (!this.isIndexableProjectFile(filePath)) {
-      logger.debug(`AngularIndexer.updateFileIndex: Skipping non-source file ${filePath}.`);
+      this.logger.debug(`AngularIndexer.updateFileIndex: Skipping non-source file ${filePath}.`);
       return false;
     }
     return true;
@@ -877,7 +860,7 @@ export class AngularIndexer {
 
     for (const selector of individualSelectors) {
       this.index.selectors.insert(selector, elementData);
-      logger.info(`Updated index for ${this.projectRootPath}: ${selector} (${parsed.type}) -> ${parsed.path}`);
+      this.logger.info(`Updated index for ${this.projectRootPath}: ${selector} (${parsed.type}) -> ${parsed.path}`);
     }
   }
 
@@ -915,14 +898,14 @@ export class AngularIndexer {
         this.project.removeSourceFile(sourceFile);
       }
     } catch {
-      logger.warn(`SourceFile node already forgotten for ${filePath}, skipping removal`);
+      this.logger.warn(`SourceFile node already forgotten for ${filePath}, skipping removal`);
     }
   }
 
   private async handleNoElementsFound(filePath: string): Promise<void> {
     this.index.files.delete(filePath);
     this.removeSourceFileFromProject(filePath);
-    logger.info(`No Angular elements found in ${filePath} for ${this.projectRootPath}`);
+    this.logger.info(`No Angular elements found in ${filePath} for ${this.projectRootPath}`);
   }
 
   /**
@@ -939,7 +922,7 @@ export class AngularIndexer {
         const individualSelectors = await parseAngularSelector(element.selector);
         for (const selector of individualSelectors) {
           this.index.selectors.remove(selector, filePath, element.name);
-          logger.info(`Removed from index for ${this.projectRootPath}: ${selector} from ${filePath}`);
+          this.logger.info(`Removed from index for ${this.projectRootPath}: ${selector} from ${filePath}`);
         }
       }
       this.index.files.delete(filePath);
@@ -960,36 +943,32 @@ export class AngularIndexer {
    */
   async generateFullIndex(progress?: ProgressReporter): Promise<Map<string, AngularElementData>> {
     if (this.isIndexing) {
-      logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Already indexing, skipping...`);
+      this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Already indexing, skipping...`);
       return new Map(this.index.selectors.getAllElements().map((e) => [e.originalSelector, e]));
     }
 
     const timerName = `generateFullIndex:${path.basename(this.projectRootPath)}`;
-    logger.startTimer(timerName);
+    this.logger.startTimer(timerName);
 
     // Log initial memory usage
-    const initialMemory = logger.getPerformanceMetrics();
-    logger.info(`Starting full index - Memory: ${Math.round(initialMemory.memoryUsage.heapUsed / 1024 / 1024)}MB`);
+    const initialMemory = this.logger.getPerformanceMetrics();
+    this.logger.info(`Starting full index - Memory: ${Math.round(initialMemory.memoryUsage.heapUsed / 1024 / 1024)}MB`);
 
     this.isIndexing = true;
     try {
-      logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Starting full index generation...`);
+      this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Starting full index generation...`);
       if (!this.projectRootPath) {
-        logger.error("AngularIndexer.generateFullIndex: projectRootPath not set. Aborting.");
+        this.logger.error("AngularIndexer.generateFullIndex: projectRootPath not set. Aborting.");
         return new Map();
       }
 
       // Clear existing ts-morph project files before full scan to avoid stale data
-      removeAllSourceFiles(this.project, "full index");
+      removeAllSourceFiles(this.project, "full index", this.logger);
       this.index.clear();
 
       progress?.report({ message: "Discovering project files..." });
-      const projectTsFiles = await this.fileSystem.findFiles({
-        root: this.projectRootPath,
-        include: "**/*.ts",
-        exclude: PROJECT_SOURCE_EXCLUDE_GLOB,
-      });
-      logger.info(
+      const projectTsFiles = await this.fileSystem.findFiles(projectSourceQuery(this.projectRootPath));
+      this.logger.info(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Found ${projectTsFiles.length} project files.`
       );
 
@@ -999,7 +978,7 @@ export class AngularIndexer {
       const moduleFiles = candidateFiles.filter((filePath) => filePath.endsWith(".module.ts"));
       const componentFiles = candidateFiles.filter((filePath) => !filePath.endsWith(".module.ts"));
 
-      logger.info(
+      this.logger.info(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Found ${
           candidateFiles.length
         } potential Angular files (${moduleFiles.length} modules, ${componentFiles.length} components/directives/pipes).`
@@ -1016,7 +995,7 @@ export class AngularIndexer {
         for (const filePath of batch) {
           await this.updateFileIndex(filePath);
         }
-        logger.info(
+        this.logger.info(
           `AngularIndexer (${path.basename(this.projectRootPath)}): Indexed component batch ${
             Math.floor(i / batchSize) + 1
           }/${Math.ceil(componentFiles.length / batchSize)}`
@@ -1024,7 +1003,7 @@ export class AngularIndexer {
       }
 
       const totalElements = this.index.selectors.getAllElements().length;
-      logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Indexed ${totalElements} elements.`);
+      this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Indexed ${totalElements} elements.`);
 
       await this.indexNodeModules(progress);
 
@@ -1038,12 +1017,12 @@ export class AngularIndexer {
       this._onDidChangeIndex.fire();
 
       // Log final memory usage and performance metrics
-      logMemoryUsage("Full index completed", initialMemory);
+      logMemoryUsage("Full index completed", initialMemory, this.logger);
 
       return new Map(this.index.selectors.getAllElements().map((e) => [e.originalSelector, e]));
     } finally {
       this.isIndexing = false;
-      logger.stopTimer(timerName);
+      this.logger.stopTimer(timerName);
     }
   }
 
@@ -1068,7 +1047,7 @@ export class AngularIndexer {
           return filePath;
         }
       } catch (error) {
-        logger.error(`Could not read file ${filePath} during filtering:`, error as Error);
+        this.logger.error(`Could not read file ${filePath} during filtering:`, error as Error);
       }
       return null;
     });
@@ -1082,14 +1061,14 @@ export class AngularIndexer {
    */
   async loadFromWorkspace(): Promise<boolean> {
     if (!this.projectRootPath || !this.workspaceFileCacheKey || !this.workspaceIndexCacheKey) {
-      logger.error("AngularIndexer.loadFromWorkspace: projectRootPath or cache keys not set. Cannot load.");
+      this.logger.error("AngularIndexer.loadFromWorkspace: projectRootPath or cache keys not set. Cannot load.");
       return false;
     }
 
     try {
       const workspaceData = this.retrieveWorkspaceData(this.cacheStore);
       if (!workspaceData.storedCache || !workspaceData.storedIndex) {
-        logNoCacheFound(this.projectRootPath);
+        logNoCacheFound(this.projectRootPath, this.logger);
         return false;
       }
 
@@ -1109,7 +1088,7 @@ export class AngularIndexer {
       // rescan, which rebuilds the index from the current state of the filesystem.
       const staleFile = this.findStaleCachedProjectFile();
       if (staleFile) {
-        logger.warn(
+        this.logger.warn(
           `AngularIndexer (${path.basename(
             this.projectRootPath
           )}): Cache references a missing file (${staleFile}). Discarding cache and forcing a full reindex.`
@@ -1118,18 +1097,18 @@ export class AngularIndexer {
         return false;
       }
 
-      logger.info(
+      this.logger.info(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Loaded ${
           this.index.selectors.size
         } elements from workspace cache.`
       );
       return true;
     } catch (error) {
-      logger.error(
+      this.logger.error(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Error loading index from workspace:`,
         error as Error
       );
-      logNoCacheFound(this.projectRootPath);
+      logNoCacheFound(this.projectRootPath, this.logger);
       return false;
     }
   }
@@ -1273,7 +1252,7 @@ export class AngularIndexer {
    */
   private async saveIndexToWorkspace(): Promise<void> {
     if (!this.projectRootPath || !this.workspaceFileCacheKey || !this.workspaceIndexCacheKey) {
-      logger.error("AngularIndexer.saveIndexToWorkspace: projectRootPath or cache keys not set. Cannot save.");
+      this.logger.error("AngularIndexer.saveIndexToWorkspace: projectRootPath or cache keys not set. Cannot save.");
       return;
     }
     try {
@@ -1296,7 +1275,7 @@ export class AngularIndexer {
       );
       await cacheStore.set(this.workspaceExternalModulesExportsCacheKey, serializableExternalModules);
     } catch (error) {
-      logger.error(
+      this.logger.error(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Error saving index to workspace:`,
         error as Error
       );
@@ -1314,13 +1293,13 @@ export class AngularIndexer {
       !this.workspaceModulesCacheKey ||
       !this.workspaceExternalModulesExportsCacheKey
     ) {
-      logger.error("AngularIndexer.clearCache: projectRootPath or cache keys not set. Cannot clear cache.");
+      this.logger.error("AngularIndexer.clearCache: projectRootPath or cache keys not set. Cannot clear cache.");
       return;
     }
     try {
       // Clear in-memory state
       this.index.clear();
-      removeAllSourceFiles(this.project, "clearCache");
+      removeAllSourceFiles(this.project, "clearCache", this.logger);
 
       // Clear persisted state
       const cacheStore = this.cacheStore;
@@ -1329,9 +1308,12 @@ export class AngularIndexer {
       await cacheStore.delete(this.workspaceModulesCacheKey);
       await cacheStore.delete(this.workspaceExternalModulesExportsCacheKey);
 
-      logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): All caches cleared.`);
+      this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): All caches cleared.`);
     } catch (error) {
-      logger.error(`AngularIndexer (${path.basename(this.projectRootPath)}): Error clearing cache:`, error as Error);
+      this.logger.error(
+        `AngularIndexer (${path.basename(this.projectRootPath)}): Error clearing cache:`,
+        error as Error
+      );
     }
   }
 
@@ -1368,18 +1350,18 @@ export class AngularIndexer {
   private expandAllModuleExports(): void {
     const expandedIndex = new Map<string, Set<string>>();
 
-    logger.info(`[AngularIndexer] Starting module export expansion for ${this.index.moduleExports.size} modules`);
+    this.logger.info(`[AngularIndexer] Starting module export expansion for ${this.index.moduleExports.size} modules`);
 
     // Process each module in the index
     for (const [moduleName, directExports] of this.index.moduleExports) {
-      logger.debug(
+      this.logger.debug(
         `[AngularIndexer] Expanding ${moduleName}: direct exports = [${Array.from(directExports).join(", ")}]`
       );
 
       // Recursively expand the module's exports, with a fresh visited set per module
       const expandedExports = this.index.expandModuleExports(moduleName, directExports, new Set<string>());
 
-      logger.debug(
+      this.logger.debug(
         `[AngularIndexer] Expanded ${moduleName}: transitive exports = [${Array.from(expandedExports).join(", ")}]`
       );
 
@@ -1388,7 +1370,9 @@ export class AngularIndexer {
 
     this.index.replaceModuleExports(expandedIndex);
 
-    logger.info(`[AngularIndexer] Expanded ${expandedIndex.size} module exports to include transitive dependencies`);
+    this.logger.info(
+      `[AngularIndexer] Expanded ${expandedIndex.size} module exports to include transitive dependencies`
+    );
   }
 
   /**
@@ -1397,23 +1381,23 @@ export class AngularIndexer {
    */
   public async indexNodeModules(progress?: ProgressReporter): Promise<void> {
     const timerName = `indexNodeModules:${path.basename(this.projectRootPath)}`;
-    logger.startTimer(timerName);
+    this.logger.startTimer(timerName);
 
     // Log initial memory before node_modules indexing
-    const initialMemory = logger.getPerformanceMetrics();
-    logger.info(
+    const initialMemory = this.logger.getPerformanceMetrics();
+    this.logger.info(
       `Starting node_modules index - Memory: ${Math.round(initialMemory.memoryUsage.heapUsed / 1024 / 1024)}MB`
     );
 
     const indexingLogic = async (progressReporter: ProgressReporter) => {
       try {
         if (!this.projectRootPath) {
-          logger.error("AngularIndexer.indexNodeModules: projectRootPath not set.");
+          this.logger.error("AngularIndexer.indexNodeModules: projectRootPath not set.");
           return;
         }
         progressReporter.report({ message: "Finding Angular libraries..." });
         const angularDeps = await findAngularDependencies(this.projectRootPath);
-        logger.debug(`[indexNodeModules] Found ${angularDeps.length} Angular dependencies.`);
+        this.logger.debug(`[indexNodeModules] Found ${angularDeps.length} Angular dependencies.`);
 
         const totalDeps = angularDeps.length;
         let processedCount = 0;
@@ -1430,19 +1414,19 @@ export class AngularIndexer {
             continue;
           }
 
-          logger.info(`📚 Indexing library: ${dep.name} (${entryPoints.size} entry points)`);
+          this.logger.info(`📚 Indexing library: ${dep.name} (${entryPoints.size} entry points)`);
           await this._indexLibrary(entryPoints);
         }
         await this.saveIndexToWorkspace();
 
         // Log final memory usage after node_modules indexing
-        logMemoryUsage("Node modules index completed", initialMemory);
+        logMemoryUsage("Node modules index completed", initialMemory, this.logger);
 
-        logger.debug(`[indexNodeModules] Finished indexing ${processedCount} libraries.`);
+        this.logger.debug(`[indexNodeModules] Finished indexing ${processedCount} libraries.`);
       } catch (error) {
-        logger.error("[indexNodeModules] Error during node_modules indexing:", error as Error);
+        this.logger.error("[indexNodeModules] Error during node_modules indexing:", error as Error);
       } finally {
-        logger.stopTimer(timerName);
+        this.logger.stopTimer(timerName);
       }
     };
 
@@ -1527,7 +1511,7 @@ export class AngularIndexer {
     for (const [importPath, filePath] of entryPoints.entries()) {
       // Skip excluded libraries
       if (isLibraryExcluded(importPath)) {
-        logger.info(`[Indexer] Skipping excluded library: ${importPath}`);
+        this.logger.info(`[Indexer] Skipping excluded library: ${importPath}`);
         continue;
       }
 
@@ -1538,11 +1522,11 @@ export class AngularIndexer {
             sourceFile.getFilePath();
             libraryFiles.push({ importPath, sourceFile });
           } catch {
-            logger.warn(`[Indexer] SourceFile node forgotten for library file ${filePath}, skipping`);
+            this.logger.warn(`[Indexer] SourceFile node forgotten for library file ${filePath}, skipping`);
           }
         }
       } catch (error) {
-        logger.warn(`[Indexer] Could not process library file ${filePath}: ${(error as Error).message}`);
+        this.logger.warn(`[Indexer] Could not process library file ${filePath}: ${(error as Error).message}`);
       }
     }
 
@@ -1558,7 +1542,8 @@ export class AngularIndexer {
       withValidSourceFile(
         sourceFile,
         () => this.collectClassesFromSourceFile(sourceFile, allLibraryClasses),
-        "class collection"
+        "class collection",
+        this.logger
       );
     }
 
@@ -1598,7 +1583,8 @@ export class AngularIndexer {
         sourceFile,
         () =>
           this._buildComponentToModuleMap(sourceFile, importPath, componentToModuleMap, allLibraryClasses, typeChecker),
-        `module mapping for ${importPath}`
+        `module mapping for ${importPath}`,
+        this.logger
       );
     }
 
@@ -1613,7 +1599,8 @@ export class AngularIndexer {
       await withValidSourceFile(
         sourceFile,
         async () => await this._indexDeclarationsInFile(sourceFile, importPath, componentToModuleMap),
-        `declarations indexing for ${importPath}`
+        `declarations indexing for ${importPath}`,
+        this.logger
       ).result;
     }
   }
@@ -1627,7 +1614,7 @@ export class AngularIndexer {
     if (!this.projectRootPath) {
       return;
     }
-    logger.debug(`[Indexer] Indexing ${moduleFilePaths.length} project NgModules for ${this.projectRootPath}...`);
+    this.logger.debug(`[Indexer] Indexing ${moduleFilePaths.length} project NgModules for ${this.projectRootPath}...`);
     this.index.componentModules.clear();
 
     for (const file of moduleFilePaths) {
@@ -1637,13 +1624,18 @@ export class AngularIndexer {
         sourceFile.getFilePath(); // This will throw if the node is forgotten
         this._processProjectModuleFile(sourceFile);
       } catch (error) {
-        logger.warn(`[Indexer] Could not process project module file ${file}: ${(error as Error).message}`);
+        this.logger.warn(`[Indexer] Could not process project module file ${file}: ${(error as Error).message}`);
       }
     }
 
     // Process already opened files that might be modules
     for (const sourceFile of this.project.getSourceFiles()) {
-      const result = withValidSourceFile(sourceFile, () => sourceFile.getFilePath(), "project module processing");
+      const result = withValidSourceFile(
+        sourceFile,
+        () => sourceFile.getFilePath(),
+        "project module processing",
+        this.logger
+      );
       if (result.success && result.result) {
         const filePath = result.result;
         if (filePath.endsWith(".module.ts") && !moduleFilePaths.includes(filePath)) {
@@ -1651,7 +1643,7 @@ export class AngularIndexer {
         }
       }
     }
-    logger.debug(`[Indexer] Found ${this.index.componentModules.size} component-to-module mappings in project.`);
+    this.logger.debug(`[Indexer] Found ${this.index.componentModules.size} component-to-module mappings in project.`);
   }
 
   /**
@@ -1678,7 +1670,7 @@ export class AngularIndexer {
       sourceFile.getFilePath();
       return true;
     } catch {
-      logger.warn(`[Indexer] SourceFile node forgotten in _processProjectModuleFile, skipping`);
+      this.logger.warn(`[Indexer] SourceFile node forgotten in _processProjectModuleFile, skipping`);
       return false;
     }
   }
@@ -1740,7 +1732,7 @@ export class AngularIndexer {
    */
   private storeModuleExports(moduleName: string, exportedIdentifiers: string[]): void {
     this.index.moduleExports.set(moduleName, new Set(exportedIdentifiers));
-    logger.debug(
+    this.logger.debug(
       `[ProjectModules] Indexed module ${moduleName} with ${exportedIdentifiers.length} exports: ${exportedIdentifiers.join(", ")}`
     );
   }
@@ -1837,9 +1829,11 @@ export class AngularIndexer {
       this._processNgModuleClasses(classDeclarations, importPath, componentToModuleMap, allLibraryClasses, typeChecker);
     } catch (error) {
       try {
-        logger.error(`Error building module map for file ${sourceFile.getFilePath()}: ${(error as Error).message}`);
+        this.logger.error(
+          `Error building module map for file ${sourceFile.getFilePath()}: ${(error as Error).message}`
+        );
       } catch {
-        logger.error(`Error building module map for forgotten SourceFile node: ${(error as Error).message}`);
+        this.logger.error(`Error building module map for forgotten SourceFile node: ${(error as Error).message}`);
       }
     }
   }
@@ -1916,7 +1910,7 @@ export class AngularIndexer {
     // Store the accumulated exports in the external modules index
     if (moduleExports.size > 0) {
       this.index.moduleExports.set(className, moduleExports);
-      logger.debug(
+      this.logger.debug(
         `[ExternalModules] Indexed module ${className} with ${moduleExports.size} exports: ${Array.from(moduleExports).join(", ")}`
       );
     }
@@ -1945,7 +1939,7 @@ export class AngularIndexer {
     for (const element of exportsTuple.getElements()) {
       const exportedClassName = this._resolveExportedClassName(element, typeChecker);
       if (!exportedClassName) {
-        logger.debug(
+        this.logger.debug(
           `[ExternalModules] ${moduleName}: could not resolve export name from tuple entry '${element.getText()}' (skipped)`
         );
         continue;
@@ -1953,7 +1947,7 @@ export class AngularIndexer {
 
       const exportedClassDecl = allLibraryClasses.get(exportedClassName);
       if (!exportedClassDecl) {
-        logger.debug(
+        this.logger.debug(
           `[ExternalModules] ${moduleName}: export '${exportedClassName}' not found in collected library classes (skipped)`
         );
         continue;
@@ -1962,7 +1956,7 @@ export class AngularIndexer {
       if (this._isReexportedModule(exportedClassDecl)) {
         // Add the re-exported module name to parent's exports (for transitive expansion)
         moduleExports?.add(exportedClassName);
-        logger.debug(
+        this.logger.debug(
           `[ExternalModules] ${moduleName} re-exports module ${exportedClassName} (will be expanded transitively)`
         );
 
@@ -2028,7 +2022,7 @@ export class AngularIndexer {
       // TypeChecker could not resolve the symbol (e.g. WSL/Windows mounts with
       // symlinked or case-mismatched node_modules). The syntactic fallback below
       // recovers the export that would otherwise be silently dropped.
-      logger.debug(
+      this.logger.debug(
         `[ExternalModules] TypeChecker could not resolve export '${exprName.getText()}', using syntactic name '${syntacticName}'`
       );
     }
@@ -2440,7 +2434,7 @@ export class AngularIndexer {
 
     const via = exportingModule ? `via ${exportingModule.moduleName}` : "directly";
     const standaloneTag = isStandalone ? "standalone" : "non-standalone";
-    logger.info(
+    this.logger.info(
       `[NodeModulesIndexer] Indexed ${standaloneTag} ${elementType}: ${className} (${selector}) ${via} from ${finalImportPath}. Import target: ${finalImportName}`
     );
   }
@@ -2470,14 +2464,14 @@ export class AngularIndexer {
       // An element with the same name already exists. Compare import paths.
       if (currentImportPath.length >= existingElement.path.length) {
         // The existing path is shorter or equal, so we keep it and discard this new one.
-        logger.debug(
+        this.logger.debug(
           `[NodeModulesIndexer] Skipping standalone ${elementType} ${className} from ${currentImportPath} because a better candidate from ${existingElement.path} already exists.`
         );
         return null; // Signal to skip this element.
       }
 
       // The new path is shorter. Remove the old element before adding this new, better one.
-      logger.debug(
+      this.logger.debug(
         `[NodeModulesIndexer] Found better path for standalone ${elementType} ${className}. Replacing ${existingElement.path} with ${currentImportPath}.`
       );
       for (const sel of existingElement.selectors) {
@@ -2533,9 +2527,11 @@ export class AngularIndexer {
       }
     } catch (error) {
       try {
-        logger.error(`Error indexing declarations in file ${sourceFile.getFilePath()}: ${(error as Error).message}`);
+        this.logger.error(
+          `Error indexing declarations in file ${sourceFile.getFilePath()}: ${(error as Error).message}`
+        );
       } catch {
-        logger.error(`Error indexing declarations in forgotten SourceFile node: ${(error as Error).message}`);
+        this.logger.error(`Error indexing declarations in forgotten SourceFile node: ${(error as Error).message}`);
       }
     }
   }
@@ -2573,6 +2569,6 @@ export class AngularIndexer {
     this._onDidChangeIndex.dispose();
     this.index.clear();
     // Note: Should we dispose the ts-morph Project as well? It doesn't have a dispose method, but we can clear its files
-    removeAllSourceFiles(this.project, "dispose");
+    removeAllSourceFiles(this.project, "dispose", this.logger);
   }
 }

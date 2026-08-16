@@ -74,7 +74,7 @@ export function registerCommands(context: vscode.ExtensionContext, commandContex
       return;
     }
 
-    await reindexProjects(projectsToReindex, commandContext, context);
+    await reindexProjects(projectsToReindex, commandContext);
   });
   context.subscriptions.push(reindexCommand);
 
@@ -695,7 +695,7 @@ function getWebviewContent(metricsReport: string): string {
  *
  * @example
  * ```typescript
- * await generateIndexForProject('/path/to/project', indexer, context);
+ * await generateIndexForProject('/path/to/project', indexer);
  * ```
  */
 /**
@@ -725,13 +725,9 @@ function getProjectsToReindex(commandContext: CommandContext): string[] {
 /**
  * Reindexes the specified projects and shows appropriate feedback.
  */
-async function reindexProjects(
-  projectsToReindex: string[],
-  commandContext: CommandContext,
-  context: vscode.ExtensionContext
-): Promise<void> {
+async function reindexProjects(projectsToReindex: string[], commandContext: CommandContext): Promise<void> {
   for (const projectRootPath of projectsToReindex) {
-    const result = await reindexSingleProject(projectRootPath, commandContext, context);
+    const result = await reindexSingleProject(projectRootPath, commandContext);
     showReindexResult(projectRootPath, result);
   }
 }
@@ -741,8 +737,7 @@ async function reindexProjects(
  */
 async function reindexSingleProject(
   projectRootPath: string,
-  commandContext: CommandContext,
-  context: vscode.ExtensionContext
+  commandContext: CommandContext
 ): Promise<{ newSize: number; success: boolean }> {
   return vscode.window.withProgress(
     {
@@ -756,7 +751,7 @@ async function reindexSingleProject(
         TsConfigHelper.clearCache(projectRootPath);
         const newTsConfig = await TsConfigHelper.findAndParseTsConfig(projectRootPath);
         commandContext.projectTsConfigs.set(projectRootPath, newTsConfig);
-        await generateIndexForProject(projectRootPath, indexer, context, toProgressReporter(progress));
+        await generateIndexForProject(projectRootPath, indexer, toProgressReporter(progress));
         const newSize = Array.from(indexer.getAllSelectors()).length;
         return { newSize, success: true };
       }
@@ -890,7 +885,6 @@ function extractSelectorFromDiagnostic(diagnostic: vscode.Diagnostic): string | 
 async function generateIndexForProject(
   projectRootPath: string,
   indexer: AngularIndexer,
-  context: vscode.ExtensionContext,
   progress?: ProgressReporter
 ): Promise<void> {
   // Generating index for project
@@ -899,7 +893,7 @@ async function generateIndexForProject(
 
   if (!indexer.fileWatcher) {
     // Watcher was not active, initializing
-    indexer.initializeWatcher(context);
+    indexer.initializeWatcher();
   }
 }
 

@@ -229,10 +229,16 @@ Exit criteria:
   - [x] Give the server a `ProjectRuntime` per root (`lsp/project-runtime`) owning that root's tsconfig and element index, with a `ProjectRuntimeHost` creating exactly one per root and disposing it when the root leaves the workspace or the server shuts down.
 - [ ] Implement full and incremental source indexing in the server.
   - [x] Persist through the `CacheStore` port instead of `vscode.ExtensionContext`: `AngularIndexer` takes its ports at construction and no indexing method receives an editor object any more.
-  - [ ] Replace the indexer's direct host-logger import with an injected logger port (it also needs the timer/metric calls the host logger adds).
-  - [ ] Instantiate the indexer from `ProjectRuntime` and run full plus incremental indexing there.
+  - [x] Replace the indexer's direct host-logger import with an injected `InstrumentedLogger` (`core/logging`), which adds timers and process metrics over any logger; the host passes its own logger through unchanged.
+  - [x] Watch through a `FileWatcherFactory` port (`core/file-watching`) instead of `workspace.createFileSystemWatcher`, so watched-file notifications can drive the same incremental updates in the server.
+  - [ ] Port `utils/angular` (and the `config` barrel it pulls) off `vscode`; they are the indexer's last transitive editor dependency.
+  - [x] Describe searches structurally instead of as glob strings (`core/file-system`), so the server can satisfy `FileSystem` with a plain directory walk (`adapters/node/file-system`) that never enters an excluded directory; the source-file rule itself now lives once in `core/source-files` and backs both the search and the watcher predicate.
+  - [ ] Instantiate the indexer from `ProjectRuntime`, which already exposes the project's source list and its cache.
 - [ ] Implement source/dependency watched-file handling and periodic reindex.
-- [ ] Implement the versioned file cache under the provided storage directory.
+- [x] Implement the versioned file cache under the provided storage directory.
+  - [x] One JSON file per root under the client's storage directory (`lsp/file-cache-store`), loaded once at open because `CacheStore` reads synchronously, written through a temporary file so a crash cannot truncate it.
+  - [x] Reuse a cached index only when the schema version, the root, and the project fingerprint all still match; anything else starts empty and lets the caller reindex.
+  - [x] Open one cache per `ProjectRuntime`, so two roots never read each other's index.
 - [ ] Forward structured server logs to the LanguageClient output channel.
 - [ ] Add cancellation and index-generation guards around long-running indexing.
 

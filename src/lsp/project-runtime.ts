@@ -9,13 +9,22 @@
  * @module
  */
 
+import { createNodeFileSystem } from "../adapters/node/file-system";
+import type { CacheStore } from "../core/cache";
 import { AngularElementIndex } from "../core/element-index";
+import type { FileSystem } from "../core/file-system";
 import { type CoreLogger, silentLogger } from "../core/logging";
+import { projectSourceQuery } from "../core/source-files";
 import { TsConfigResolver } from "../core/tsconfig";
 import type { ProcessedTsConfig } from "../types/tsconfig";
+import { FileCacheStore } from "./file-cache-store";
 
 export interface ProjectRuntimeOptions {
   logger?: CoreLogger;
+  /** How this runtime reaches the disk; the server's own adapter by default. */
+  fileSystem?: FileSystem;
+  /** Directory the client set aside for caches; without one the runtime stays in memory. */
+  storagePath?: string;
 }
 
 /** Everything the server knows about one Angular project root. */
@@ -26,12 +35,17 @@ export class ProjectRuntime {
   readonly index = new AngularElementIndex();
   private readonly tsConfigResolver: TsConfigResolver;
   private readonly logger: CoreLogger;
+  private readonly storagePath: string | undefined;
+  private readonly fileSystem: FileSystem;
+  private persistentCache: FileCacheStore | undefined;
   private processedTsConfig: ProcessedTsConfig | null = null;
   private disposed = false;
 
   constructor(rootPath: string, options: ProjectRuntimeOptions = {}) {
     this.rootPath = rootPath;
     this.logger = options.logger ?? silentLogger;
+    this.storagePath = options.storagePath;
+    this.fileSystem = options.fileSystem ?? createNodeFileSystem();
     this.tsConfigResolver = new TsConfigResolver({ logger: this.logger });
   }
 
@@ -40,9 +54,26 @@ export class ProjectRuntime {
     return this.processedTsConfig;
   }
 
+  /**
+   * Where this project's index is persisted, or `undefined` when the client gave the
+   * server no storage directory and the index only lives for this session.
+   */
+  get cache(): CacheStore | undefined {
+    return this.persistentCache;
+  }
+
+  /**
+   * The project's indexable source files, which is what a full index reads.
+   * Excluded directories are never entered, so `node_modules` costs nothing here.
+   */
+  listSourceFiles(): Promise<string[]> {
+    return this.fileSystem.findFiles(projectSourceQuery(this.rootPath));
+  }
+
   /** Loads what the runtime needs before it can answer requests for this root. */
   async load(): Promise<void> {
     this.processedTsConfig = await this.tsConfigResolver.findAndParseTsConfig(this.rootPath);
+    await this.openCache();
     if (this.disposed) {
       return;
     }
@@ -62,11 +93,35 @@ export class ProjectRuntime {
     return this.tsConfigResolver.resolveImportPath(targetModulePathNoExt, currentFilePath, this.rootPath);
   }
 
+  /**
+   * Opens this project's persistent cache, if the client provided a place for it.
+   * A cache that no longer matches the project is simply not reused.
+   * @internal
+   */
+  private async openCache(): Promise<void> {
+    if (!this.storagePath) {
+      return;
+    }
+
+    const cache = new FileCacheStore({
+      directory: this.storagePath,
+      rootPath: this.rootPath,
+      fingerprint: { tsconfig: this.processedTsConfig?.sourceFilePath ?? "none" },
+      logger: this.logger,
+    });
+    const reused = await cache.open();
+    this.persistentCache = cache;
+    this.logger.info(
+      reused ? `Reusing the cached index for ${this.rootPath}` : `No usable cached index for ${this.rootPath}`
+    );
+  }
+
   /** Releases everything this root owns, leaving nothing behind for another root to read. */
   dispose(): void {
     this.disposed = true;
     this.index.clear();
     this.tsConfigResolver.clearCache();
     this.processedTsConfig = null;
+    this.persistentCache = undefined;
   }
 }

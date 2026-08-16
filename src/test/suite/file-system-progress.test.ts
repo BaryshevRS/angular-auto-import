@@ -9,10 +9,10 @@ import { silentProgressHost, silentProgressReporter } from "../../core/progress"
 describe("VS Code file system", () => {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
 
-  it("returns absolute paths for files matching the include glob", async () => {
+  it("returns absolute paths for the requested extensions", async () => {
     const fileSystem = createVsCodeFileSystem();
 
-    const found = await fileSystem.findFiles({ root: workspaceRoot, include: "src/app/core/*.ts" });
+    const found = await fileSystem.findFiles({ root: workspaceRoot, extensions: [".ts"] });
 
     assert.ok(found.length > 0, "Fixture core services should be discovered");
     assert.ok(
@@ -25,18 +25,25 @@ describe("VS Code file system", () => {
     );
   });
 
-  it("skips files matching the exclude glob", async () => {
+  it("skips the excluded directories, hidden directories, and suffixes", async () => {
     const fileSystem = createVsCodeFileSystem();
 
     const found = await fileSystem.findFiles({
       root: workspaceRoot,
-      include: "src/app/core/*.ts",
-      exclude: "**/index.ts",
+      extensions: [".ts"],
+      excludedDirectories: ["node_modules", "core"],
+      excludeHiddenDirectories: true,
+      excludedSuffixes: [".spec.ts"],
     });
 
+    assert.ok(found.length > 0, "Only the excluded paths should be filtered out");
     assert.ok(
-      found.every((filePath) => !filePath.endsWith(`${path.sep}index.ts`)),
-      "Excluded files should not be returned"
+      found.every((filePath) => !filePath.includes(`${path.sep}core${path.sep}`)),
+      "Files in an excluded directory should not be returned"
+    );
+    assert.ok(
+      found.every((filePath) => !filePath.endsWith(".spec.ts")),
+      "Files with an excluded suffix should not be returned"
     );
   });
 

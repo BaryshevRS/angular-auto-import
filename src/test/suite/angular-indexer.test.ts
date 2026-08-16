@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { Project, SyntaxKind } from "ts-morph";
 import * as vscode from "vscode";
 import { createVsCodeCacheStore } from "../../adapters/vscode/cache-store";
+import { logger } from "../../logger";
 import { AngularIndexer } from "../../services";
 import type { FileElementsInfo } from "../../types";
 
@@ -73,7 +74,7 @@ describe("AngularIndexer", function () {
       logPath: "",
     } as unknown as vscode.ExtensionContext;
 
-    indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
+    indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
   });
 
   afterEach(() => {
@@ -297,7 +298,7 @@ describe("AngularIndexer", function () {
     });
 
     it("should initialize file watcher", () => {
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
       assert.ok(indexer.fileWatcher, "Should have file watcher");
     });
 
@@ -326,27 +327,27 @@ describe("AngularIndexer", function () {
     });
 
     it("should dispose file watcher on dispose", () => {
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
       indexer.dispose();
       assert.strictEqual(indexer.fileWatcher, null, "File watcher should be null after dispose");
     });
 
     it("should initialize dependency watcher", () => {
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
       const depWatcher = (indexer as unknown as { dependencyWatcher: unknown }).dependencyWatcher;
       assert.ok(depWatcher, "Should have a dependency watcher");
       assert.strictEqual(typeof indexer.onDidIndexNodeModules, "function", "Should expose onDidIndexNodeModules event");
     });
 
     it("should dispose dependency watcher on dispose", () => {
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
       indexer.dispose();
       const depWatcher = (indexer as unknown as { dependencyWatcher: unknown }).dependencyWatcher;
       assert.strictEqual(depWatcher, null, "Dependency watcher should be null after dispose");
     });
 
     it("should re-index node_modules and emit event on dependency change", async () => {
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
 
       let fired = 0;
       let indexChanged = 0;
@@ -371,7 +372,7 @@ describe("AngularIndexer", function () {
     });
 
     it("should skip dependency reindex while a full index is running", async () => {
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
 
       let fired = 0;
       const subscription = indexer.onDidIndexNodeModules(() => {
@@ -393,7 +394,7 @@ describe("AngularIndexer", function () {
     });
 
     it("should handle file creation", async () => {
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
 
       const newComponentPath = path.join(testProjectPath, "src", "app", "new.component.ts");
       const newComponentContent = `
@@ -433,7 +434,7 @@ export class NewComponent {}
     it("should handle file deletion", async () => {
       indexer.setProjectRoot(testProjectPath);
       await indexer.generateFullIndex();
-      indexer.initializeWatcher(mockContext);
+      indexer.initializeWatcher();
 
       const tempComponentPath = path.join(testProjectPath, "src", "app", "temp.component.ts");
       const tempComponentContent = `
@@ -483,7 +484,7 @@ export class TempComponent {}
       assert.ok(mockWorkspaceState.has(indexCacheKey), "Should save index cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
       newIndexer.setProjectRoot(testProjectPath);
 
       const loaded = await newIndexer.loadFromWorkspace();
@@ -522,7 +523,7 @@ export class TempComponent {}
       };
       mockWorkspaceState.set(fileCacheKey, cachedFiles);
 
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
       newIndexer.setProjectRoot(testProjectPath);
 
       const loaded = await newIndexer.loadFromWorkspace();
@@ -679,7 +680,7 @@ export class TempComponent {}
     });
 
     it("should handle dispose without initialization", () => {
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
       assert.doesNotThrow(() => {
         newIndexer.dispose();
       }, "Should handle dispose without initialization");
@@ -1229,7 +1230,7 @@ export class ChipsModule {}
       assert.ok(chipsModuleExports?.has("InputText"), "Should have transitive exports before cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
       newIndexer.setProjectRoot(testProjectPath);
       const loaded = await newIndexer.loadFromWorkspace();
       assert.ok(loaded, "Should successfully load from cache");

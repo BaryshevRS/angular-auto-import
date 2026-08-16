@@ -99,6 +99,61 @@ describe("LSP project runtime", function () {
     assert.deepStrictEqual(modern.index.getAllSelectors(), []);
   });
 
+  it("lists the project's indexable sources and nothing else", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    await writeProject(root);
+    await fs.writeFile(path.join(root, "src", "app.component.ts"), "", "utf8");
+    await fs.writeFile(path.join(root, "src", "app.component.spec.ts"), "", "utf8");
+    await fs.mkdir(path.join(root, "node_modules", "lib"), { recursive: true });
+    await fs.writeFile(path.join(root, "node_modules", "lib", "index.ts"), "", "utf8");
+    const runtime = new ProjectRuntime(root);
+    await runtime.load();
+
+    const sources = await runtime.listSourceFiles();
+
+    assert.deepStrictEqual(sources, [path.join(root, "src", "app.component.ts")]);
+  });
+
+  it("keeps no persistent cache when the client gave the server no storage directory", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    await writeProject(root);
+    const runtime = new ProjectRuntime(root);
+
+    await runtime.load();
+
+    assert.strictEqual(runtime.cache, undefined);
+  });
+
+  it("persists its index under the storage directory and reads it back next session", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const storagePath = path.join(sandbox, "storage");
+    await writeProject(root);
+    const first = new ProjectRuntime(root, { storagePath });
+    await first.load();
+    await first.cache?.set("selectors", { "app-card": 1 });
+
+    const second = new ProjectRuntime(root, { storagePath });
+    await second.load();
+
+    assert.deepStrictEqual(second.cache?.get("selectors"), { "app-card": 1 });
+  });
+
+  it("does not read another root's cache", async () => {
+    const storagePath = path.join(sandbox, "storage");
+    const shopRoot = path.join(sandbox, "apps", "shop");
+    const adminRoot = path.join(sandbox, "apps", "admin");
+    await writeProject(shopRoot);
+    await writeProject(adminRoot);
+    const shop = new ProjectRuntime(shopRoot, { storagePath });
+    await shop.load();
+    await shop.cache?.set("selectors", { "app-card": 1 });
+
+    const admin = new ProjectRuntime(adminRoot, { storagePath });
+    await admin.load();
+
+    assert.strictEqual(admin.cache?.get("selectors"), undefined);
+  });
+
   it("drops the index and the parsed configuration when disposed", async () => {
     const root = path.join(sandbox, "apps", "shop");
     await writeProject(root, { "@shop/*": ["src/*"] });

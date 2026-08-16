@@ -47,7 +47,7 @@ function setupPeriodicReindexing(
     async () => {
       try {
         logger.info(`🔄 Periodic reindexing for ${path.basename(projectRootPath)}...`);
-        await generateIndexForProject(projectRootPath, indexer, context);
+        await generateIndexForProject(projectRootPath, indexer);
       } catch (error) {
         logger.error("❌ Error during periodic reindexing:", error as Error);
       }
@@ -394,9 +394,9 @@ async function initializeProjects(
       }
 
       // Initialize indexer
-      indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(context.workspaceState) });
+      indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(context.workspaceState), logger });
 
-      await generateInitialIndexForProject(projectRootPath, indexer, context);
+      await generateInitialIndexForProject(projectRootPath, indexer);
 
       if (!isActivationCurrent()) {
         throw new Error(`Project initialization was cancelled for ${projectRootPath}`);
@@ -482,19 +482,14 @@ async function handleConfigurationChange(newConfig: ExtensionConfig, context: vs
  *
  * @param projectRootPath - Absolute path to the project root directory
  * @param indexer - The Angular indexer instance for this project
- * @param context - VS Code extension context for persistence operations
  *
  * @example
  * ```typescript
  * const indexer = new AngularIndexer({ cacheStore });
- * await generateInitialIndexForProject('/path/to/project', indexer, context);
+ * await generateInitialIndexForProject('/path/to/project', indexer);
  * ```
  */
-async function generateInitialIndexForProject(
-  projectRootPath: string,
-  indexer: AngularIndexer,
-  context: vscode.ExtensionContext
-): Promise<void> {
+async function generateInitialIndexForProject(projectRootPath: string, indexer: AngularIndexer): Promise<void> {
   logger.info(`GENERATE_INITIAL_INDEX: For project ${projectRootPath}`);
   indexer.setProjectRoot(projectRootPath);
 
@@ -509,7 +504,7 @@ async function generateInitialIndexForProject(
     await indexer.generateFullIndex();
   }
 
-  indexer.initializeWatcher(context);
+  indexer.initializeWatcher();
 
   const indexSize = Array.from(indexer.getAllSelectors()).length;
   logger.info(`📊 Initial index size for ${projectRootPath}: ${indexSize} elements`);
@@ -532,26 +527,21 @@ async function generateInitialIndexForProject(
  *
  * @param projectRootPath - Absolute path to the project root directory
  * @param indexer - The Angular indexer instance for this project
- * @param context - VS Code extension context for persistence operations
  *
  * @example
  * ```typescript
  * // Called periodically or on demand
- * await generateIndexForProject('/path/to/project', existingIndexer, context);
+ * await generateIndexForProject('/path/to/project', existingIndexer);
  * ```
  */
-async function generateIndexForProject(
-  projectRootPath: string,
-  indexer: AngularIndexer,
-  context: vscode.ExtensionContext
-): Promise<void> {
+async function generateIndexForProject(projectRootPath: string, indexer: AngularIndexer): Promise<void> {
   logger.info(`GENERATE_INDEX: For project ${projectRootPath}`);
   indexer.ensureCacheKeys(projectRootPath);
   await indexer.generateFullIndex();
 
   if (!indexer.fileWatcher) {
     logger.info(`Watcher for ${projectRootPath} was not active, initializing.`);
-    indexer.initializeWatcher(context);
+    indexer.initializeWatcher();
   }
 }
 

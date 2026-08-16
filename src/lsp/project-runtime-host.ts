@@ -8,6 +8,8 @@ import { ProjectRuntime } from "./project-runtime";
 
 export interface ProjectRuntimeHostOptions {
   logger?: CoreLogger;
+  /** Directory the client set aside for caches, passed on to every runtime. */
+  storagePath?: string;
   /** Overrides how a runtime is built, for tests and for future runtime variants. */
   createRuntime?(rootPath: string, logger: CoreLogger): ProjectRuntime;
 }
@@ -25,7 +27,9 @@ export class ProjectRuntimeHost {
 
   constructor(options: ProjectRuntimeHostOptions = {}) {
     this.logger = options.logger ?? silentLogger;
-    this.createRuntime = options.createRuntime ?? ((rootPath, logger) => new ProjectRuntime(rootPath, { logger }));
+    this.createRuntime =
+      options.createRuntime ??
+      ((rootPath, logger) => new ProjectRuntime(rootPath, { logger, storagePath: options.storagePath }));
   }
 
   /**

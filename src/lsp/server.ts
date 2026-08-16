@@ -7,7 +7,7 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { toLspCompletionKind } from "../adapters/lsp/language-types";
-import type { CoreLogger } from "../core/logging";
+import { type InstrumentedLogger, withInstrumentation } from "../core/logging";
 import { resolveExtensionConfig } from "../core/settings";
 import { ProjectRuntimeHost } from "./project-runtime-host";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
@@ -29,16 +29,15 @@ const documents = new TextDocuments(TextDocument);
 let runtimeDependenciesLoaded = false;
 let environment: ServerEnvironment | undefined;
 let projects: ServerProjects | undefined;
+let runtimes: ProjectRuntimeHost | undefined;
 
 /** Routes core logs to the client's output channel until structured forwarding lands. */
-const serverLogger: CoreLogger = {
+const serverLogger: InstrumentedLogger = withInstrumentation({
   debug: (message) => connection.console.log(message),
   info: (message) => connection.console.info(message),
   warn: (message) => connection.console.warn(message),
   error: (message, error) => connection.console.error(error ? `${message}: ${error.message}` : message),
-};
-
-const runtimes = new ProjectRuntimeHost({ logger: serverLogger });
+});
 
 async function loadRuntimeDependencies(): Promise<void> {
   const [compiler, tsMorph] = await Promise.all([import("@angular/compiler"), import("ts-morph")]);
@@ -83,11 +82,16 @@ connection.onInitialized(async () => {
     });
   }
 
+  const runtimeHost = new ProjectRuntimeHost({
+    logger: serverLogger,
+    storagePath: environment.storagePath,
+  });
+  runtimes = runtimeHost;
   projects = new ServerProjects({
     workspaceRoots: environment.workspaceRoots,
     logger: serverLogger,
-    initializeRoot: (rootPath) => runtimes.create(rootPath),
-    disposeRoot: (rootPath) => runtimes.dispose(rootPath),
+    initializeRoot: (rootPath) => runtimeHost.create(rootPath),
+    disposeRoot: (rootPath) => runtimeHost.dispose(rootPath),
   });
   await projects.start(documents);
   connection.console.info(`[server] discovered ${projects.knownRoots().length} Angular project root(s)`);
@@ -96,6 +100,8 @@ connection.onInitialized(async () => {
 connection.onShutdown(() => {
   projects?.dispose();
   projects = undefined;
+  runtimes?.disposeAll();
+  runtimes = undefined;
 });
 
 connection.onDidChangeConfiguration(async (params) => {

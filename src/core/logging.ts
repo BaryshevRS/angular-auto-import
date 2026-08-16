@@ -22,3 +22,49 @@ export const silentLogger: CoreLogger = {
   warn: () => undefined,
   error: () => undefined,
 };
+
+/** Process resource usage, as long-running work reports it around its phases. */
+export interface PerformanceMetrics {
+  memoryUsage: NodeJS.MemoryUsage;
+  cpuUsage: NodeJS.CpuUsage;
+}
+
+/**
+ * Logging plus the timing and resource reporting that long-running work needs.
+ *
+ * Again the subset the extension's own logger already implements, so the Extension
+ * Host passes its logger straight through.
+ */
+export interface InstrumentedLogger extends CoreLogger {
+  startTimer(name: string): void;
+  stopTimer(name: string): void;
+  getPerformanceMetrics(): PerformanceMetrics;
+}
+
+/**
+ * Adds timing and metrics to any logger, reporting each finished timer through it.
+ * @param base The logger the timings are written to.
+ */
+export function withInstrumentation(base: CoreLogger): InstrumentedLogger {
+  const started = new Map<string, number>();
+
+  return {
+    ...base,
+    startTimer: (name) => {
+      started.set(name, Date.now());
+    },
+    stopTimer: (name) => {
+      const startedAt = started.get(name);
+      if (startedAt === undefined) {
+        base.warn(`Timer with name '${name}' was stopped but never started.`);
+        return;
+      }
+      started.delete(name);
+      base.info(`Execution time for '${name}': ${Date.now() - startedAt}ms`);
+    },
+    getPerformanceMetrics: () => ({
+      memoryUsage: process.memoryUsage(),
+      cpuUsage: process.cpuUsage(),
+    }),
+  };
+}
