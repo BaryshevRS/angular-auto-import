@@ -110,7 +110,7 @@ export function registerCommands(context: vscode.ExtensionContext, commandContex
     }
 
     for (const [, indexer] of projectIndexers) {
-      await indexer.clearCache(context);
+      await indexer.clearCache();
     }
 
     if (projectCount === 1) {
@@ -895,7 +895,7 @@ async function generateIndexForProject(
 ): Promise<void> {
   // Generating index for project
   indexer.ensureCacheKeys(projectRootPath);
-  await indexer.generateFullIndex(context, progress);
+  await indexer.generateFullIndex(progress);
 
   if (!indexer.fileWatcher) {
     // Watcher was not active, initializing

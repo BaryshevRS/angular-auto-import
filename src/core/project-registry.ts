@@ -33,6 +33,39 @@ export function findDeepestContainingProjectRoot(filePath: string, roots: Iterab
   return deepestRoot;
 }
 
+/**
+ * Finds the entry of the most specific root containing a file.
+ * @param filePath Absolute path of the file to route.
+ * @param contexts Per-root values keyed by the root path.
+ */
+export function findDeepestContainingEntry<T>(
+  filePath: string,
+  contexts: ReadonlyMap<string, T>
+): [string, T] | undefined {
+  const normalizedFilePath = path.resolve(filePath);
+  let deepestEntry: [string, T] | undefined;
+
+  for (const [rootPath, context] of contexts) {
+    const normalizedRoot = path.resolve(rootPath);
+    if (
+      isPathInside(normalizedRoot, normalizedFilePath) &&
+      (!deepestEntry || normalizedRoot.length > deepestEntry[0].length)
+    ) {
+      deepestEntry = [normalizedRoot, context];
+    }
+  }
+
+  return deepestEntry;
+}
+
+/** Returns the value belonging to the deepest root that contains filePath. */
+export function findDeepestContainingProjectContext<T>(
+  filePath: string,
+  contexts: ReadonlyMap<string, T>
+): T | undefined {
+  return findDeepestContainingEntry(filePath, contexts)?.[1];
+}
+
 /** The subset of a text document the registry needs to route it to a project root. */
 export type RegistryDocument = {
   uri: { scheme: string; fsPath: string };
@@ -50,14 +83,15 @@ export type ProjectRegistryOptions = {
   workspaceRoots: Iterable<string>;
   discoverAngularRoot(filePath: string, searchBoundary: string): Promise<string | undefined>;
   initializeRoot(rootPath: string): Promise<void>;
-  registerProviders(): void;
+  /** Called once, after the first root initializes. Runtimes without providers may omit it. */
+  registerProviders?(): void;
   onDidInitializeRoot?(rootPath: string): void;
   onError?(error: unknown): void;
 };
 
 /** Coordinates lazy, root-keyed Angular project initialization. */
 export class ProjectRegistry {
-  private readonly workspaceRoots: string[];
+  private workspaceRoots: string[];
   private readonly initializedRoots = new Set<string>();
   private readonly initializingRoots = new Map<string, Promise<void>>();
   private readonly discoverAngularRoot: ProjectRegistryOptions["discoverAngularRoot"];
@@ -103,6 +137,24 @@ export class ProjectRegistry {
       ...Array.from(source.openDocuments, (document) => this.handleDocument(document)),
       ...initialRootDocuments.map((document) => this.handleDocument(document)),
     ]);
+  }
+
+  /**
+   * Replaces the boundaries discovery searches within, for a host whose workspace
+   * folders change while it runs. Roots that already initialized stay initialized.
+   * @param roots The workspace roots known now.
+   */
+  setWorkspaceRoots(roots: Iterable<string>): void {
+    this.workspaceRoots = Array.from(roots, (root) => path.resolve(root));
+  }
+
+  /**
+   * Forgets an initialized root so a later document can initialize it again. Callers
+   * are responsible for releasing whatever `initializeRoot` created for it.
+   * @param rootPath The root to forget.
+   */
+  forgetRoot(rootPath: string): void {
+    this.initializedRoots.delete(path.resolve(rootPath));
   }
 
   async handleDocument(document: RegistryDocument): Promise<void> {
@@ -164,7 +216,7 @@ export class ProjectRegistry {
     if (this.disposed || this.providersRegistered) {
       return;
     }
-    this.registerProviders();
+    this.registerProviders?.();
     this.providersRegistered = true;
   }
 }

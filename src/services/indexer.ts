@@ -20,7 +20,7 @@ import {
   type TypeReferenceNode,
 } from "ts-morph";
 import * as vscode from "vscode";
-import { createVsCodeCacheStore } from "../adapters/vscode/cache-store";
+
 import { createVsCodeFileSystem } from "../adapters/vscode/file-system";
 import { createVsCodeProgressHost } from "../adapters/vscode/progress";
 import { isLibraryExcluded } from "../config/excluded-libraries";
@@ -158,6 +158,14 @@ function parseModDefinition(classDecl: ClassDeclaration): import("ts-morph").Tup
   return typeArgs[3].asKindOrThrow(SyntaxKind.TupleType);
 }
 
+/** Ports one indexer reads and writes through. */
+export interface AngularIndexerOptions {
+  /** Where this project's index is persisted between sessions. */
+  cacheStore: CacheStore;
+  fileSystem?: FileSystem;
+  progressHost?: ProgressHost;
+}
+
 /**
  * The main class responsible for indexing Angular elements in a project.
  */
@@ -214,16 +222,21 @@ export class AngularIndexer {
    */
   public workspaceExternalModulesExportsCacheKey: string = "";
 
+  private readonly fileSystem: FileSystem;
+  private readonly progressHost: ProgressHost;
+  private readonly cacheStore: CacheStore;
+
   /**
-   * File access and progress presentation are injected so the indexer can run
-   * under the language server, which has neither `workspace.findFiles` nor
-   * notification progress. The Extension Host adapters stay the default while
-   * both runtimes exist.
+   * File access, progress presentation, and persistence are injected so the indexer
+   * can run under the language server, which has neither `workspace.findFiles` nor
+   * notification progress nor a workspace memento. The Extension Host adapters stay
+   * the default while both runtimes exist.
+   * @param options Ports this indexer reads and writes through.
    */
-  constructor(
-    private readonly fileSystem: FileSystem = createVsCodeFileSystem(),
-    private readonly progressHost: ProgressHost = createVsCodeProgressHost()
-  ) {
+  constructor(options: AngularIndexerOptions) {
+    this.fileSystem = options.fileSystem ?? createVsCodeFileSystem();
+    this.progressHost = options.progressHost ?? createVsCodeProgressHost();
+    this.cacheStore = options.cacheStore;
     this.project = new Project({
       useInMemoryFileSystem: false, // Keep this as false for real file system interaction
       skipAddingFilesFromTsConfig: true,
@@ -292,7 +305,7 @@ export class AngularIndexer {
         return;
       }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File created: ${uri.fsPath}`);
-      await this.updateFileIndex(uri.fsPath, context);
+      await this.updateFileIndex(uri.fsPath);
       this._onDidChangeIndex.fire();
     });
 
@@ -301,7 +314,7 @@ export class AngularIndexer {
         return;
       }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File changed: ${uri.fsPath}`);
-      await this.updateFileIndex(uri.fsPath, context);
+      await this.updateFileIndex(uri.fsPath);
       this._onDidChangeIndex.fire();
     });
 
@@ -310,7 +323,7 @@ export class AngularIndexer {
         return;
       }
       logger.info(`Watcher (${path.basename(this.projectRootPath)}): File deleted: ${uri.fsPath}`);
-      await this.removeFromIndex(uri.fsPath, context);
+      await this.removeFromIndex(uri.fsPath);
       // Also remove from ts-morph project
       const sourceFile = this.project.getSourceFile(uri.fsPath);
       if (sourceFile) {
@@ -342,7 +355,7 @@ export class AngularIndexer {
     this.dependencyWatcher = vscode.workspace.createFileSystemWatcher(pattern);
 
     const handler = debounce(() => {
-      void this.reindexNodeModulesAfterDependencyChange(context);
+      void this.reindexNodeModulesAfterDependencyChange();
     }, DEPENDENCY_REINDEX_DEBOUNCE_MS);
 
     this.dependencyWatcher.onDidChange(handler);
@@ -359,10 +372,9 @@ export class AngularIndexer {
    * Re-indexes `node_modules` after a dependency manifest change and notifies
    * listeners via {@link onDidIndexNodeModules}. Skips work while a full index
    * or another dependency reindex is already running.
-   * @param context The extension context.
    * @internal
    */
-  private async reindexNodeModulesAfterDependencyChange(context: vscode.ExtensionContext): Promise<void> {
+  private async reindexNodeModulesAfterDependencyChange(): Promise<void> {
     if (this.isIndexing || this.isReindexingDependencies) {
       logger.debug(
         `[DependencyWatcher] Skipping reindex for ${path.basename(this.projectRootPath)}: indexing already in progress.`
@@ -373,7 +385,7 @@ export class AngularIndexer {
     this.isReindexingDependencies = true;
     try {
       logger.info(`🔄 Dependencies changed for ${path.basename(this.projectRootPath)}, re-indexing libraries...`);
-      await this.indexNodeModules(context);
+      await this.indexNodeModules();
       this._onDidIndexNodeModules.fire();
       this._onDidChangeIndex.fire();
     } catch (error) {
@@ -704,7 +716,7 @@ export class AngularIndexer {
    * @param context The extension context.
    * @internal
    */
-  private async updateFileIndex(filePath: string, context: vscode.ExtensionContext): Promise<void> {
+  private async updateFileIndex(filePath: string): Promise<void> {
     try {
       if (!this.validateFileForIndexing(filePath)) {
         return;
@@ -726,7 +738,7 @@ export class AngularIndexer {
         await this.handleNoElementsFound(filePath);
       }
 
-      await this.saveIndexToWorkspace(context);
+      await this.saveIndexToWorkspace();
     } catch (error) {
       logger.error(`Error updating index for ${filePath} in project ${this.projectRootPath}:`, error as Error);
     }
@@ -919,7 +931,7 @@ export class AngularIndexer {
    * @param context The extension context.
    * @internal
    */
-  private async removeFromIndex(filePath: string, context: vscode.ExtensionContext): Promise<void> {
+  private async removeFromIndex(filePath: string): Promise<void> {
     // Remove from file cache
     const fileInfo = this.index.files.get(filePath);
     if (fileInfo) {
@@ -937,19 +949,16 @@ export class AngularIndexer {
     this.removeSourceFileFromProject(filePath);
 
     if (fileInfo) {
-      await this.saveIndexToWorkspace(context);
+      await this.saveIndexToWorkspace();
     }
   }
 
   /**
    * Generates a full index of the project.
-   * @param context The extension context.
+   * @param progress Optional progress reporter for the caller's UI.
    * @returns A map of selectors to `AngularElementData` objects.
    */
-  async generateFullIndex(
-    context: vscode.ExtensionContext,
-    progress?: ProgressReporter
-  ): Promise<Map<string, AngularElementData>> {
+  async generateFullIndex(progress?: ProgressReporter): Promise<Map<string, AngularElementData>> {
     if (this.isIndexing) {
       logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Already indexing, skipping...`);
       return new Map(this.index.selectors.getAllElements().map((e) => [e.originalSelector, e]));
@@ -1005,7 +1014,7 @@ export class AngularIndexer {
         const batch = componentFiles.slice(i, i + batchSize);
         // Sequentially process files in a batch to avoid overwhelming ts-morph or fs
         for (const filePath of batch) {
-          await this.updateFileIndex(filePath, context);
+          await this.updateFileIndex(filePath);
         }
         logger.info(
           `AngularIndexer (${path.basename(this.projectRootPath)}): Indexed component batch ${
@@ -1017,14 +1026,14 @@ export class AngularIndexer {
       const totalElements = this.index.selectors.getAllElements().length;
       logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Indexed ${totalElements} elements.`);
 
-      await this.indexNodeModules(context, progress);
+      await this.indexNodeModules(progress);
 
       // Expand module exports to include transitive dependencies
       // This must happen after all modules are indexed (both project and node_modules)
       progress?.report({ message: "Expanding module exports..." });
       this.expandAllModuleExports();
 
-      await this.saveIndexToWorkspace(context);
+      await this.saveIndexToWorkspace();
 
       this._onDidChangeIndex.fire();
 
@@ -1068,18 +1077,17 @@ export class AngularIndexer {
   }
 
   /**
-   * Loads the index from the workspace state.
-   * @param context The extension context.
+   * Loads the index from the persisted cache.
    * @returns `true` if the index was loaded successfully, `false` otherwise.
    */
-  async loadFromWorkspace(context: vscode.ExtensionContext): Promise<boolean> {
+  async loadFromWorkspace(): Promise<boolean> {
     if (!this.projectRootPath || !this.workspaceFileCacheKey || !this.workspaceIndexCacheKey) {
       logger.error("AngularIndexer.loadFromWorkspace: projectRootPath or cache keys not set. Cannot load.");
       return false;
     }
 
     try {
-      const workspaceData = this.retrieveWorkspaceData(createVsCodeCacheStore(context.workspaceState));
+      const workspaceData = this.retrieveWorkspaceData(this.cacheStore);
       if (!workspaceData.storedCache || !workspaceData.storedIndex) {
         logNoCacheFound(this.projectRootPath);
         return false;
@@ -1260,17 +1268,16 @@ export class AngularIndexer {
   }
 
   /**
-   * Saves the index to the workspace state.
-   * @param context The extension context.
+   * Saves the index to the persisted cache.
    * @internal
    */
-  private async saveIndexToWorkspace(context: vscode.ExtensionContext): Promise<void> {
+  private async saveIndexToWorkspace(): Promise<void> {
     if (!this.projectRootPath || !this.workspaceFileCacheKey || !this.workspaceIndexCacheKey) {
       logger.error("AngularIndexer.saveIndexToWorkspace: projectRootPath or cache keys not set. Cannot save.");
       return;
     }
     try {
-      const cacheStore = createVsCodeCacheStore(context.workspaceState);
+      const cacheStore = this.cacheStore;
       await cacheStore.set(this.workspaceFileCacheKey, Object.fromEntries(this.index.files));
 
       const serializableTrie = Object.fromEntries(
@@ -1297,10 +1304,9 @@ export class AngularIndexer {
   }
 
   /**
-   * Clears the index from memory and the workspace state.
-   * @param context The extension context.
+   * Clears the index from memory and from the persisted cache.
    */
-  public async clearCache(context: vscode.ExtensionContext): Promise<void> {
+  public async clearCache(): Promise<void> {
     if (
       !this.projectRootPath ||
       !this.workspaceFileCacheKey ||
@@ -1317,7 +1323,7 @@ export class AngularIndexer {
       removeAllSourceFiles(this.project, "clearCache");
 
       // Clear persisted state
-      const cacheStore = createVsCodeCacheStore(context.workspaceState);
+      const cacheStore = this.cacheStore;
       await cacheStore.delete(this.workspaceFileCacheKey);
       await cacheStore.delete(this.workspaceIndexCacheKey);
       await cacheStore.delete(this.workspaceModulesCacheKey);
@@ -1387,10 +1393,9 @@ export class AngularIndexer {
 
   /**
    * Indexes all Angular libraries in `node_modules`.
-   * @param context The extension context.
    * @param progress Optional progress reporter to use instead of creating a new one.
    */
-  public async indexNodeModules(context: vscode.ExtensionContext, progress?: ProgressReporter): Promise<void> {
+  public async indexNodeModules(progress?: ProgressReporter): Promise<void> {
     const timerName = `indexNodeModules:${path.basename(this.projectRootPath)}`;
     logger.startTimer(timerName);
 
@@ -1428,7 +1433,7 @@ export class AngularIndexer {
           logger.info(`📚 Indexing library: ${dep.name} (${entryPoints.size} entry points)`);
           await this._indexLibrary(entryPoints);
         }
-        await this.saveIndexToWorkspace(context);
+        await this.saveIndexToWorkspace();
 
         // Log final memory usage after node_modules indexing
         logMemoryUsage("Node modules index completed", initialMemory);

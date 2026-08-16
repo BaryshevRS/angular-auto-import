@@ -2,17 +2,8 @@ import * as assert from "node:assert";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { AngularProjectDiscovery } from "../../core/project-discovery";
 import { findDeepestContainingProjectRoot, isPathInside } from "../../core/project-registry";
-import * as extensionModule from "../../extension";
-
-type DependencyRootApi = {
-  findAngularDependencyRoot(filePath: string, searchBoundary: string): Promise<string | undefined>;
-  invalidateAngularProjectCache(packageJsonPath?: string): void;
-};
-
-// Keep the RED tests type-checkable before the new public API is exported. At runtime,
-// an absent helper still fails clearly and directs the implementation to the expected API.
-const { findAngularDependencyRoot, invalidateAngularProjectCache } = extensionModule as unknown as DependencyRootApi;
 
 /** Counts manifest reads performed while running `run`, so cached lookups are observable. */
 async function countManifestReads(run: () => Promise<void>): Promise<number> {
@@ -53,9 +44,14 @@ describe("Angular dependency root discovery", function () {
   this.timeout(10000);
 
   let sandbox: string;
+  let discovery: AngularProjectDiscovery;
+  const findAngularDependencyRoot = (filePath: string, searchBoundary: string): Promise<string | undefined> =>
+    discovery.findRoot(filePath, searchBoundary);
+  const invalidateAngularProjectCache = (packageJsonPath?: string): void => discovery.invalidate(packageJsonPath);
 
   beforeEach(async () => {
     sandbox = await fs.mkdtemp(path.join(os.tmpdir(), "angular-auto-import-roots-"));
+    discovery = new AngularProjectDiscovery();
   });
 
   afterEach(async () => {
@@ -203,18 +199,20 @@ describe("Angular dependency root discovery", function () {
       await writeDocument(documentPath);
     }
 
-    const firstOpenReads = await countManifestReads(async () => {
-      assert.strictEqual(await findAngularDependencyRoot(documentPaths[0], sandbox), appRoot);
+    const firstPassReads = await countManifestReads(async () => {
+      for (const documentPath of documentPaths) {
+        assert.strictEqual(await findAngularDependencyRoot(documentPath, sandbox), appRoot);
+      }
     });
-    assert.ok(firstOpenReads > 0, "The first document open must read the manifest at least once");
+    assert.ok(firstPassReads > 0, "The first document open must read the manifest at least once");
 
-    const laterOpenReads = await countManifestReads(async () => {
+    const secondPassReads = await countManifestReads(async () => {
       for (const documentPath of documentPaths) {
         assert.strictEqual(await findAngularDependencyRoot(documentPath, sandbox), appRoot);
       }
     });
 
-    assert.strictEqual(laterOpenReads, 0, "Opening further documents must not re-read package.json files");
+    assert.strictEqual(secondPassReads, 0, "Reopening documents must not re-read package.json files");
   });
 
   it("does not re-read manifests while repeatedly discovering a document outside any Angular package", async () => {
@@ -252,6 +250,36 @@ describe("Angular dependency root discovery", function () {
       appRoot,
       "A manifest change must make the package discoverable without a window reload"
     );
+  });
+
+  it("answers whether a single directory is an Angular package", async () => {
+    const appRoot = path.join(sandbox, "apps", "shop");
+    const plainRoot = path.join(sandbox, "apps", "plain");
+    await writePackageJson(appRoot);
+    await writePackageJson(plainRoot, { name: "plain" });
+
+    assert.strictEqual(await discovery.isAngularProject(appRoot), true);
+    assert.strictEqual(await discovery.isAngularProject(plainRoot), false);
+    assert.strictEqual(await discovery.isAngularProject(path.join(sandbox, "missing")), false);
+  });
+
+  it("reports an unreadable manifest to the injected logger instead of failing discovery", async () => {
+    const brokenRoot = path.join(sandbox, "packages", "broken");
+    const reportedErrors: string[] = [];
+    const loggingDiscovery = new AngularProjectDiscovery({
+      logger: {
+        debug: () => undefined,
+        info: () => undefined,
+        warn: () => undefined,
+        error: (message) => reportedErrors.push(message),
+      },
+    });
+    await fs.mkdir(brokenRoot, { recursive: true });
+    await fs.writeFile(path.join(brokenRoot, "package.json"), "{ not valid JSON", "utf8");
+
+    assert.strictEqual(await loggingDiscovery.isAngularProject(brokenRoot), false);
+    assert.strictEqual(reportedErrors.length, 1);
+    assert.match(reportedErrors[0], /broken/);
   });
 });
 

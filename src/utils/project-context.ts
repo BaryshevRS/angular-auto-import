@@ -4,38 +4,14 @@
  * @module
  */
 
-import * as path from "node:path";
 import type * as vscode from "vscode";
+import { findDeepestContainingEntry } from "../core/project-registry";
 import { logger } from "../logger";
 import type { AngularIndexer } from "../services/indexer";
 import type { ProjectContext } from "../types/angular";
 import type { ProcessedTsConfig } from "../types/tsconfig";
 
-function findDeepestContainingEntry<T>(filePath: string, contexts: ReadonlyMap<string, T>): [string, T] | undefined {
-  const normalizedFilePath = path.resolve(filePath);
-  let deepestEntry: [string, T] | undefined;
-
-  for (const [rootPath, context] of contexts) {
-    const normalizedRoot = path.resolve(rootPath);
-    const relativePath = path.relative(normalizedRoot, normalizedFilePath);
-    const isInside =
-      relativePath === "" ||
-      (!path.isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`));
-    if (isInside && (!deepestEntry || normalizedRoot.length > deepestEntry[0].length)) {
-      deepestEntry = [normalizedRoot, context];
-    }
-  }
-
-  return deepestEntry;
-}
-
-/** Returns the value belonging to the deepest root that contains filePath. */
-export function findDeepestContainingProjectContext<T>(
-  filePath: string,
-  contexts: ReadonlyMap<string, T>
-): T | undefined {
-  return findDeepestContainingEntry(filePath, contexts)?.[1];
-}
+export { findDeepestContainingProjectContext } from "../core/project-registry";
 
 /**
  * Finds the project context (indexer and tsConfig) for a given document.

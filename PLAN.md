@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 started with the `initialize` handshake; representative performance measurements remain
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 in progress — the server owns the `initialize` handshake and lazy project discovery; representative performance measurements remain
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -220,9 +220,17 @@ Exit criteria:
   - [x] Move the settings shape, defaults, and coercion into core (`core/settings`); the VS Code reader and the server share one schema.
   - [x] Resolve the handshake into a `ServerEnvironment` (`lsp/server-environment`): workspace roots as paths, storage directory, settings, and the client capabilities the server acts on.
   - [x] Register `didChangeConfiguration`, pull `workspace/configuration`, and track workspace-folder changes; the client sends settings and its storage path at `initialize`.
-- [ ] Move lazy project discovery and deepest-root context selection into the server.
-- [ ] Create and dispose one project runtime per discovered Angular root.
+- [x] Move lazy project discovery and deepest-root context selection into the server.
+  - [x] Move the Angular package walk and its manifest cache into core (`core/project-discovery`); the Extension Host entry point only forwards to it.
+  - [x] Share one deepest-root selection in core (`core/project-registry`) instead of a second copy in `utils/project-context`.
+  - [x] Discover roots in the server from workspace folders and synchronized documents (`lsp/server-projects`), routing a URI to its deepest discovered root and re-scanning when workspace folders change.
+- [x] Create and dispose one project runtime per discovered Angular root.
+  - [x] Move tsconfig discovery and alias resolution into core as a per-root `TsConfigResolver` (`core/tsconfig`); the Extension Host service is now one shared instance of it.
+  - [x] Give the server a `ProjectRuntime` per root (`lsp/project-runtime`) owning that root's tsconfig and element index, with a `ProjectRuntimeHost` creating exactly one per root and disposing it when the root leaves the workspace or the server shuts down.
 - [ ] Implement full and incremental source indexing in the server.
+  - [x] Persist through the `CacheStore` port instead of `vscode.ExtensionContext`: `AngularIndexer` takes its ports at construction and no indexing method receives an editor object any more.
+  - [ ] Replace the indexer's direct host-logger import with an injected logger port (it also needs the timer/metric calls the host logger adds).
+  - [ ] Instantiate the indexer from `ProjectRuntime` and run full plus incremental indexing there.
 - [ ] Implement source/dependency watched-file handling and periodic reindex.
 - [ ] Implement the versioned file cache under the provided storage directory.
 - [ ] Forward structured server logs to the LanguageClient output channel.

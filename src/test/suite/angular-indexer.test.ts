@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Project, SyntaxKind } from "ts-morph";
 import * as vscode from "vscode";
+import { createVsCodeCacheStore } from "../../adapters/vscode/cache-store";
 import { AngularIndexer } from "../../services";
 import type { FileElementsInfo } from "../../types";
 
@@ -34,7 +35,6 @@ describe("AngularIndexer", function () {
   });
 
   beforeEach(() => {
-    indexer = new AngularIndexer();
     mockWorkspaceState.clear();
 
     // Enhanced mock extension context
@@ -72,6 +72,8 @@ describe("AngularIndexer", function () {
       globalStoragePath: "",
       logPath: "",
     } as unknown as vscode.ExtensionContext;
+
+    indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
   });
 
   afterEach(() => {
@@ -114,7 +116,7 @@ describe("AngularIndexer", function () {
     });
 
     it("should index all Angular files in project", async () => {
-      const result = await indexer.generateFullIndex(mockContext);
+      const result = await indexer.generateFullIndex();
 
       assert.ok(result instanceof Map, "Should return a Map");
       assert.ok(
@@ -138,7 +140,7 @@ describe("AngularIndexer", function () {
       });
 
       try {
-        await indexer.generateFullIndex(mockContext);
+        await indexer.generateFullIndex();
         assert.strictEqual(changeEvents, 1, "A completed full reindex should request one diagnostics refresh");
       } finally {
         subscription.dispose();
@@ -146,7 +148,7 @@ describe("AngularIndexer", function () {
     });
 
     it("should handle standalone components correctly", async () => {
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       const standaloneElements = indexer.getElements("standalone-component");
       assert.ok(standaloneElements.length > 0, "Should find standalone component");
@@ -157,7 +159,7 @@ describe("AngularIndexer", function () {
     });
 
     it("should parse complex selectors correctly", async () => {
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Test complex selector parsing
       const complexElements = indexer.getElements("complexButton");
@@ -181,7 +183,7 @@ describe("AngularIndexer", function () {
         }
 
         indexer.setProjectRoot(emptyProjectPath);
-        const result = await indexer.generateFullIndex(mockContext);
+        const result = await indexer.generateFullIndex();
 
         assert.ok(result instanceof Map, "Should return a Map");
         assert.strictEqual(result.size, 0, "Should have no elements for empty project");
@@ -199,7 +201,7 @@ describe("AngularIndexer", function () {
 
       try {
         // Should not throw an error
-        await indexer.generateFullIndex(mockContext);
+        await indexer.generateFullIndex();
 
         // Check that other files were still indexed
         const selectors = indexer.getAllSelectors();
@@ -250,7 +252,7 @@ describe("AngularIndexer", function () {
   describe("SelectorTrie Functionality", () => {
     beforeEach(async () => {
       indexer.setProjectRoot(testProjectPath);
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
     });
 
     it("should support prefix searching", () => {
@@ -291,7 +293,7 @@ describe("AngularIndexer", function () {
   describe("File Watching", () => {
     beforeEach(async () => {
       indexer.setProjectRoot(testProjectPath);
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
     });
 
     it("should initialize file watcher", () => {
@@ -430,7 +432,7 @@ export class NewComponent {}
 
     it("should handle file deletion", async () => {
       indexer.setProjectRoot(testProjectPath);
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
       indexer.initializeWatcher(mockContext);
 
       const tempComponentPath = path.join(testProjectPath, "src", "app", "temp.component.ts");
@@ -448,7 +450,7 @@ export class TempComponent {}
       fs.writeFileSync(tempComponentPath, tempComponentContent);
 
       // Force a reindex to include the new file
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Verify it's indexed
@@ -460,7 +462,7 @@ export class TempComponent {}
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Force a reindex after deletion
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Verify it's removed from index
       elements = indexer.getElements("temp-component");
@@ -471,7 +473,7 @@ export class TempComponent {}
   describe("Caching", () => {
     it("should save and load index to/from workspace state", async () => {
       indexer.setProjectRoot(testProjectPath);
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Verify data was saved
       const fileCacheKey = indexer.workspaceFileCacheKey;
@@ -481,10 +483,10 @@ export class TempComponent {}
       assert.ok(mockWorkspaceState.has(indexCacheKey), "Should save index cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer();
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
       newIndexer.setProjectRoot(testProjectPath);
 
-      const loaded = await newIndexer.loadFromWorkspace(mockContext);
+      const loaded = await newIndexer.loadFromWorkspace();
       assert.ok(loaded, "Should successfully load from cache");
 
       // Verify loaded data
@@ -499,13 +501,13 @@ export class TempComponent {}
       indexer.setProjectRoot(testProjectPath);
 
       // Try to load from empty cache
-      const loaded = await indexer.loadFromWorkspace(mockContext);
+      const loaded = await indexer.loadFromWorkspace();
       assert.strictEqual(loaded, false, "Should return false when no cache exists");
     });
 
     it("should discard cache when a cached project file no longer exists", async () => {
       indexer.setProjectRoot(testProjectPath);
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Simulate a file that was moved/deleted while the extension was not running:
       // the cached fileCache still references its old (now missing) path.
@@ -520,10 +522,10 @@ export class TempComponent {}
       };
       mockWorkspaceState.set(fileCacheKey, cachedFiles);
 
-      const newIndexer = new AngularIndexer();
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
       newIndexer.setProjectRoot(testProjectPath);
 
-      const loaded = await newIndexer.loadFromWorkspace(mockContext);
+      const loaded = await newIndexer.loadFromWorkspace();
       assert.strictEqual(loaded, false, "Should reject a cache that references a missing file");
       assert.strictEqual(
         newIndexer.getAllSelectors().length,
@@ -536,7 +538,7 @@ export class TempComponent {}
 
     it("should handle FileElementsInfo format correctly", async () => {
       indexer.setProjectRoot(testProjectPath);
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Check that the cached data uses the new FileElementsInfo format
       const fileCacheKey = indexer.workspaceFileCacheKey;
@@ -568,7 +570,7 @@ export class TempComponent {}
       // Note: Full library indexing is complex and requires actual Angular libraries
       // This test focuses on the indexing structure
 
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // The indexer should handle the presence of node_modules
       // Even if no actual Angular libraries are found, it shouldn't error
@@ -577,7 +579,7 @@ export class TempComponent {}
     });
 
     it("should index libraries only through package entry points", async () => {
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       const libraryElements = indexer.getElements("mock-icon");
       assert.ok(libraryElements.length > 0, "Entry-point indexing should find library elements");
@@ -595,7 +597,7 @@ export class TempComponent {}
         return originalUpdateFileIndex(...args);
       };
 
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       const dependencyPaths = scannedPaths.filter((filePath) => filePath.split(path.sep).includes("node_modules"));
       assert.deepStrictEqual(
@@ -606,7 +608,7 @@ export class TempComponent {}
     });
 
     it("should ignore entry points that only re-export private ɵ aliases", async () => {
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       const iconElements = indexer.getElements("mock-icon");
       const submenuElements = indexer.getElements("mock-submenu");
@@ -671,13 +673,13 @@ export class TempComponent {}
       indexer.setProjectRoot(invalidPath);
 
       // Should not throw an error
-      const result = await indexer.generateFullIndex(mockContext);
+      const result = await indexer.generateFullIndex();
       assert.ok(result instanceof Map, "Should return a Map even for invalid paths");
       assert.strictEqual(result.size, 0, "Should have no elements for invalid path");
     });
 
     it("should handle dispose without initialization", () => {
-      const newIndexer = new AngularIndexer();
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
       assert.doesNotThrow(() => {
         newIndexer.dispose();
       }, "Should handle dispose without initialization");
@@ -718,7 +720,7 @@ ProblematicComponent = Component({
 
       try {
         // Should not throw an error and should attempt fallback
-        await indexer.generateFullIndex(mockContext);
+        await indexer.generateFullIndex();
 
         // The indexer should handle this gracefully
         const selectors = indexer.getAllSelectors();
@@ -761,7 +763,7 @@ export class BulkComponent${i} {}
         indexer.setProjectRoot(testProjectPath);
 
         const startTime = Date.now();
-        await indexer.generateFullIndex(mockContext);
+        await indexer.generateFullIndex();
         const endTime = Date.now();
 
         // Should complete in reasonable time (less than 10 seconds for 10 files)
@@ -1060,7 +1062,7 @@ export class ChipsModule {}
       fs.writeFileSync(path.join(modulesPath, "chips.module.ts"), chipsModuleContent);
 
       // Index the modules
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Verify that ChipsModule exports include transitive exports from InputTextModule
       const chipsModuleExports = indexer.getExternalModuleExports("ChipsModule");
@@ -1153,7 +1155,7 @@ export class FormModule {}
       fs.writeFileSync(path.join(modulesPath, "form.module.ts"), formModuleContent);
 
       // Index the modules
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Verify nested transitive exports
       const formModuleExports = indexer.getExternalModuleExports("FormModule");
@@ -1220,16 +1222,16 @@ export class ChipsModule {}
       fs.writeFileSync(path.join(modulesPath, "chips.module.ts"), chipsModuleContent);
 
       // Index and save to cache
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Verify exports before loading from cache
       let chipsModuleExports = indexer.getExternalModuleExports("ChipsModule");
       assert.ok(chipsModuleExports?.has("InputText"), "Should have transitive exports before cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer();
+      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState) });
       newIndexer.setProjectRoot(testProjectPath);
-      const loaded = await newIndexer.loadFromWorkspace(mockContext);
+      const loaded = await newIndexer.loadFromWorkspace();
       assert.ok(loaded, "Should successfully load from cache");
 
       // Verify that transitive exports are still present after loading from cache
@@ -1300,7 +1302,7 @@ export class ModuleB {}
       fs.writeFileSync(path.join(modulesPath, "module-b.module.ts"), modulebContent);
 
       // Index should not hang or crash
-      await indexer.generateFullIndex(mockContext);
+      await indexer.generateFullIndex();
 
       // Verify that both modules were indexed and circular dependency was handled
       const moduleaExports = indexer.getExternalModuleExports("ModuleA");

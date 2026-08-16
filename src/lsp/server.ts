@@ -7,7 +7,9 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { toLspCompletionKind } from "../adapters/lsp/language-types";
+import type { CoreLogger } from "../core/logging";
 import { resolveExtensionConfig } from "../core/settings";
+import { ProjectRuntimeHost } from "./project-runtime-host";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
 import {
   applyWorkspaceFolderChange,
@@ -16,6 +18,7 @@ import {
   type ServerEnvironment,
   type ServerInitializationOptions,
 } from "./server-environment";
+import { ServerProjects } from "./server-projects";
 
 const SPIKE_MARKER = "angular-auto-import-lsp-spike";
 const SERVER_NAME = "Angular Auto Import LSP Spike";
@@ -25,6 +28,17 @@ const connection = createConnection();
 const documents = new TextDocuments(TextDocument);
 let runtimeDependenciesLoaded = false;
 let environment: ServerEnvironment | undefined;
+let projects: ServerProjects | undefined;
+
+/** Routes core logs to the client's output channel until structured forwarding lands. */
+const serverLogger: CoreLogger = {
+  debug: (message) => connection.console.log(message),
+  info: (message) => connection.console.info(message),
+  warn: (message) => connection.console.warn(message),
+  error: (message, error) => connection.console.error(error ? `${message}: ${error.message}` : message),
+};
+
+const runtimes = new ProjectRuntimeHost({ logger: serverLogger });
 
 async function loadRuntimeDependencies(): Promise<void> {
   const [compiler, tsMorph] = await Promise.all([import("@angular/compiler"), import("ts-morph")]);
@@ -49,20 +63,39 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 });
 
 connection.onInitialized(async () => {
-  if (environment?.client.configuration) {
+  if (!environment) {
+    return;
+  }
+
+  if (environment.client.configuration) {
     await connection.client.register(DidChangeConfigurationNotification.type, { section: CONFIGURATION_SECTION });
     await pullConfiguration();
   }
 
-  if (environment?.client.workspaceFolders) {
+  if (environment.client.workspaceFolders) {
     connection.workspace.onDidChangeWorkspaceFolders((event) => {
       if (!environment) {
         return;
       }
       environment.workspaceRoots = applyWorkspaceFolderChange(environment.workspaceRoots, event);
       connection.console.info(`[server] workspace roots now: ${environment.workspaceRoots.length}`);
+      void projects?.setWorkspaceRoots(environment.workspaceRoots);
     });
   }
+
+  projects = new ServerProjects({
+    workspaceRoots: environment.workspaceRoots,
+    logger: serverLogger,
+    initializeRoot: (rootPath) => runtimes.create(rootPath),
+    disposeRoot: (rootPath) => runtimes.dispose(rootPath),
+  });
+  await projects.start(documents);
+  connection.console.info(`[server] discovered ${projects.knownRoots().length} Angular project root(s)`);
+});
+
+connection.onShutdown(() => {
+  projects?.dispose();
+  projects = undefined;
 });
 
 connection.onDidChangeConfiguration(async (params) => {

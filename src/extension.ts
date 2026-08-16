@@ -19,9 +19,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { createVsCodeCacheStore } from "./adapters/vscode/cache-store";
 import { type CommandContext, registerCommands } from "./commands";
 import { type ExtensionConfig, getConfiguration, onConfigurationChanged } from "./config";
-import { isPathInside, ProjectRegistry, type ProjectRegistryOptions } from "./core/project-registry";
+import { AngularProjectDiscovery } from "./core/project-discovery";
+import { ProjectRegistry, type ProjectRegistryOptions } from "./core/project-registry";
 import { logger } from "./logger";
 import { isLspSpikeEnabled, startLspSpike, stopLspSpike } from "./lsp/client";
 import { type ProviderContext, registerProviders } from "./providers";
@@ -227,13 +229,10 @@ export async function activate(
 }
 
 /**
- * Caches the `@angular/core` manifest check per directory.
- *
- * Root discovery runs on every opened document and walks each parent directory,
- * so an uncached check would re-read the same `package.json` files on every open.
- * Entries are dropped by {@link invalidateAngularProjectCache} when a manifest changes.
+ * Discovers which Angular package owns a document, with its manifest checks cached
+ * for the lifetime of the Extension Host.
  */
-const angularProjectCache = new Map<string, Promise<boolean>>();
+const projectDiscovery = new AngularProjectDiscovery({ logger });
 
 /**
  * Drops cached manifest checks so a newly installed (or removed) `@angular/core`
@@ -241,49 +240,7 @@ const angularProjectCache = new Map<string, Promise<boolean>>();
  * @param packageJsonPath - The manifest that changed. Clears the whole cache when omitted.
  */
 export function invalidateAngularProjectCache(packageJsonPath?: string): void {
-  if (packageJsonPath === undefined) {
-    angularProjectCache.clear();
-    return;
-  }
-  angularProjectCache.delete(path.dirname(path.resolve(packageJsonPath)));
-}
-
-/**
- * Checks if a directory is an Angular project by looking for `@angular/core` in `package.json`.
- * @param projectRoot - The absolute path to the project root.
- * @returns A promise that resolves to `true` if it's an Angular project, `false` otherwise.
- */
-async function isAngularProject(projectRoot: string): Promise<boolean> {
-  const packageRoot = path.resolve(projectRoot);
-  let pendingCheck = angularProjectCache.get(packageRoot);
-  if (!pendingCheck) {
-    pendingCheck = readAngularCoreDependency(packageRoot);
-    angularProjectCache.set(packageRoot, pendingCheck);
-  }
-  return pendingCheck;
-}
-
-/**
- * Reads a single `package.json` and reports whether it declares `@angular/core`.
- * @param packageRoot - The absolute path to the directory holding the manifest.
- * @returns A promise that resolves to `true` when the manifest declares Angular.
- * @internal
- */
-async function readAngularCoreDependency(packageRoot: string): Promise<boolean> {
-  const packageJsonPath = path.join(packageRoot, "package.json");
-  try {
-    if (!fs.existsSync(packageJsonPath)) {
-      return false;
-    }
-    const packageJsonContent = await fs.promises.readFile(packageJsonPath, "utf8");
-    const packageJson = JSON.parse(packageJsonContent);
-    const dependencies = packageJson.dependencies || {};
-    const devDependencies = packageJson.devDependencies || {};
-    return !!dependencies["@angular/core"] || !!devDependencies["@angular/core"];
-  } catch (error) {
-    logger.error(`Error checking for Angular project in ${packageRoot}:`, error as Error);
-    return false;
-  }
+  projectDiscovery.invalidate(packageJsonPath);
 }
 
 export { findDeepestContainingProjectContext };
@@ -292,37 +249,8 @@ export { findDeepestContainingProjectContext };
  * Walks from a document toward a boundary and returns the nearest package that
  * declares @angular/core.
  */
-export async function findAngularDependencyRoot(filePath: string, searchBoundary: string): Promise<string | undefined> {
-  const boundary = path.resolve(searchBoundary);
-  const target = path.resolve(filePath);
-
-  if (!isPathInside(boundary, target)) {
-    return undefined;
-  }
-
-  const targetRelativeToBoundary = path.relative(boundary, target);
-  if (targetRelativeToBoundary.split(path.sep).includes("node_modules")) {
-    return undefined;
-  }
-
-  let currentPath: string;
-  try {
-    currentPath = (await fs.promises.stat(target)).isDirectory() ? target : path.dirname(target);
-  } catch {
-    currentPath = path.dirname(target);
-  }
-
-  while (isPathInside(boundary, currentPath)) {
-    if (await isAngularProject(currentPath)) {
-      return currentPath;
-    }
-    if (currentPath === boundary) {
-      break;
-    }
-    currentPath = path.dirname(currentPath);
-  }
-
-  return undefined;
+export function findAngularDependencyRoot(filePath: string, searchBoundary: string): Promise<string | undefined> {
+  return projectDiscovery.findRoot(filePath, searchBoundary);
 }
 
 /**
@@ -447,7 +375,7 @@ async function initializeProjects(
     if (projectIndexers.has(projectRootPath)) {
       continue;
     }
-    if (!(await isAngularProject(projectRootPath))) {
+    if (!(await projectDiscovery.isAngularProject(projectRootPath))) {
       throw new Error(`Angular project is no longer available at ${projectRootPath}`);
     }
 
@@ -466,7 +394,7 @@ async function initializeProjects(
       }
 
       // Initialize indexer
-      indexer = new AngularIndexer();
+      indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(context.workspaceState) });
 
       await generateInitialIndexForProject(projectRootPath, indexer, context);
 
@@ -558,7 +486,7 @@ async function handleConfigurationChange(newConfig: ExtensionConfig, context: vs
  *
  * @example
  * ```typescript
- * const indexer = new AngularIndexer();
+ * const indexer = new AngularIndexer({ cacheStore });
  * await generateInitialIndexForProject('/path/to/project', indexer, context);
  * ```
  */
@@ -571,14 +499,14 @@ async function generateInitialIndexForProject(
   indexer.setProjectRoot(projectRootPath);
 
   // Load from workspace cache first, if available and valid
-  const loadedFromCache = await indexer.loadFromWorkspace(context);
+  const loadedFromCache = await indexer.loadFromWorkspace();
 
   if (loadedFromCache) {
     logger.info(`Initial index loaded from cache for ${projectRootPath}.`);
     // The watcher will pick up any changes from here.
   } else {
     logger.info(`No cache found or cache invalid for ${projectRootPath}. Performing full initial index scan...`);
-    await indexer.generateFullIndex(context);
+    await indexer.generateFullIndex();
   }
 
   indexer.initializeWatcher(context);
@@ -619,7 +547,7 @@ async function generateIndexForProject(
 ): Promise<void> {
   logger.info(`GENERATE_INDEX: For project ${projectRootPath}`);
   indexer.ensureCacheKeys(projectRootPath);
-  await indexer.generateFullIndex(context);
+  await indexer.generateFullIndex();
 
   if (!indexer.fileWatcher) {
     logger.info(`Watcher for ${projectRootPath} was not active, initializing.`);
