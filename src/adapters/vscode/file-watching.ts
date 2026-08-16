@@ -10,8 +10,8 @@ import type { FileWatcherFactory, FileWatchQuery } from "../../core/file-watchin
  */
 export function createVsCodeFileWatcherFactory(): FileWatcherFactory {
   return {
-    watch({ root, include }: FileWatchQuery, onChange): Disposable {
-      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, include));
+    watch(query: FileWatchQuery, onChange): Disposable {
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(query.root, toGlob(query)));
       const subscriptions = [
         watcher,
         watcher.onDidCreate((uri) => onChange({ filePath: uri.fsPath, kind: "create" })),
@@ -28,4 +28,17 @@ export function createVsCodeFileWatcherFactory(): FileWatcherFactory {
       };
     },
   };
+}
+
+/**
+ * Turns a watch into a VS Code glob.
+ *
+ * Extensions and names are kept in one flat brace list: VS Code's glob parser does
+ * not reliably expand nested braces.
+ * @internal
+ */
+function toGlob(query: FileWatchQuery): string {
+  const names = [...(query.extensions ?? []).map((extension) => `*${extension}`), ...(query.fileNames ?? [])];
+  const pattern = names.length === 1 ? names[0] : `{${names.join(",")}}`;
+  return query.recursive ? `**/${pattern}` : pattern;
 }

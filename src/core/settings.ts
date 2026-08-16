@@ -12,7 +12,7 @@
 export interface ExtensionConfig {
   /** Path to a specific Angular project; `null` auto-detects projects in the workspace. */
   projectPath: string | null;
-  /** Seconds between automatic index refreshes; `0` disables it. */
+  /** Minutes between automatic index refreshes; `0` disables it. */
   indexRefreshInterval: number;
   completion: {
     pipes: boolean;

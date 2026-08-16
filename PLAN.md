@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 in progress — the server owns the handshake, lazy project discovery, one runtime per root, source indexing, and its own cache; watched-file handling, log forwarding, and cancellation remain, as do representative performance measurements
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 in progress — the server owns the handshake, lazy project discovery, one runtime per root, source indexing, watched files, and its own cache; log forwarding and cancellation remain, as do representative performance measurements
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -234,8 +234,12 @@ Exit criteria:
   - [x] Describe searches structurally instead of as glob strings (`core/file-system`), so the server can satisfy `FileSystem` with a plain directory walk (`adapters/node/file-system`) that never enters an excluded directory; the source-file rule itself now lives once in `core/source-files` and backs both the search and the watcher predicate.
   - [x] Give the shared analysis helpers an installable logger (`installSharedLogger`) instead of the editor-bound one, which was the indexer's last transitive `vscode` dependency; every port is now required rather than defaulted to a VS Code adapter.
   - [x] Instantiate the indexer from `ProjectRuntime`: it restores the index from the project's cache when that is still valid and falls back to a full scan, and it starts watching afterwards.
-  - [ ] Feed incremental updates from the client instead of the inert watcher factory the runtime currently uses (next item).
-- [ ] Implement source/dependency watched-file handling and periodic reindex.
+  - [x] Feed incremental updates from the client's watched-file notifications.
+- [x] Implement source/dependency watched-file handling and periodic reindex.
+  - [x] Describe a watch structurally (`core/file-watching`) so the server can both register it with the client and decide which subscription a reported path belongs to.
+  - [x] Register watches through `client/registerCapability` and route `didChangeWatchedFiles` back to the subscribing runtime (`lsp/watched-files`); a client that cannot register watchers still works, it just reports nothing.
+  - [x] Reindex on the `index.refreshInterval` timer in the server, as the Extension Host does, and stop it with the runtime.
+  - [x] Fix element removal, which never matched: elements are indexed with a project-relative path while deletions and renames removed them by absolute path, so a deleted file's selector and a renamed element's old selector stayed in the index until a full reindex. Affected the Extension Host too.
 - [x] Implement the versioned file cache under the provided storage directory.
   - [x] One JSON file per root under the client's storage directory (`lsp/file-cache-store`), loaded once at open because `CacheStore` reads synchronously, written through a temporary file so a crash cannot truncate it.
   - [x] Reuse a cached index only when the schema version, the root, and the project fingerprint all still match; anything else starts empty and lets the caller reindex.

@@ -1,6 +1,7 @@
 import {
   createConnection,
   DidChangeConfigurationNotification,
+  DidChangeWatchedFilesNotification,
   type InitializeParams,
   type InitializeResult,
   TextDocuments,
@@ -19,6 +20,7 @@ import {
   type ServerInitializationOptions,
 } from "./server-environment";
 import { ServerProjects } from "./server-projects";
+import { WatchedFiles } from "./watched-files";
 
 const SPIKE_MARKER = "angular-auto-import-lsp-spike";
 const SERVER_NAME = "Angular Auto Import LSP Spike";
@@ -30,6 +32,7 @@ let runtimeDependenciesLoaded = false;
 let environment: ServerEnvironment | undefined;
 let projects: ServerProjects | undefined;
 let runtimes: ProjectRuntimeHost | undefined;
+let watchedFiles: WatchedFiles | undefined;
 
 /** Routes core logs to the client's output channel until structured forwarding lands. */
 const serverLogger: InstrumentedLogger = withInstrumentation({
@@ -83,9 +86,17 @@ connection.onInitialized(async () => {
     });
   }
 
+  watchedFiles = new WatchedFiles({
+    logger: serverLogger,
+    register: environment.client.didChangeWatchedFiles
+      ? (watchers) => connection.client.register(DidChangeWatchedFilesNotification.type, { watchers })
+      : undefined,
+  });
   const runtimeHost = new ProjectRuntimeHost({
     logger: serverLogger,
     storagePath: environment.storagePath,
+    fileWatchers: watchedFiles,
+    reindexIntervalMinutes: environment.config.indexRefreshInterval,
   });
   runtimes = runtimeHost;
   projects = new ServerProjects({
@@ -98,11 +109,17 @@ connection.onInitialized(async () => {
   connection.console.info(`[server] discovered ${projects.knownRoots().length} Angular project root(s)`);
 });
 
+connection.onDidChangeWatchedFiles((params) => {
+  watchedFiles?.dispatch(params.changes);
+});
+
 connection.onShutdown(() => {
   projects?.dispose();
   projects = undefined;
   runtimes?.disposeAll();
   runtimes = undefined;
+  watchedFiles?.dispose();
+  watchedFiles = undefined;
 });
 
 connection.onDidChangeConfiguration(async (params) => {

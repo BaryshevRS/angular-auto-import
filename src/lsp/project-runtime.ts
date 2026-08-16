@@ -35,6 +35,8 @@ export interface ProjectRuntimeOptions {
   progressHost?: ProgressHost;
   /** Directory the client set aside for caches; without one the index lives for this session. */
   storagePath?: string;
+  /** Minutes between automatic reindexes; `0` disables them, matching the setting. */
+  reindexIntervalMinutes?: number;
 }
 
 /** Everything the server knows about one Angular project root. */
@@ -49,6 +51,8 @@ export class ProjectRuntime {
   private readonly fileSystem: FileSystem;
   private readonly cacheStore: CacheStore;
   private readonly persistentCache: FileCacheStore | undefined;
+  private readonly reindexIntervalMinutes: number;
+  private reindexTimer: NodeJS.Timeout | undefined;
   private processedTsConfig: ProcessedTsConfig | null = null;
   private loadedFromCache = false;
   private disposed = false;
@@ -58,6 +62,7 @@ export class ProjectRuntime {
     this.logger = options.logger ?? withInstrumentation(silentLogger);
     this.storagePath = options.storagePath;
     this.fileSystem = options.fileSystem ?? createNodeFileSystem();
+    this.reindexIntervalMinutes = options.reindexIntervalMinutes ?? 0;
     this.tsConfigResolver = new TsConfigResolver({ logger: this.logger });
     this.persistentCache = this.storagePath ? this.createPersistentCache() : undefined;
     this.cacheStore = this.persistentCache ?? createMemoryCacheStore();
@@ -117,6 +122,7 @@ export class ProjectRuntime {
     }
 
     this.indexer.initializeWatcher();
+    this.startPeriodicReindex();
     this.logger.info(
       `Project runtime ready for ${this.rootPath}: ${this.indexer.getAllSelectors().length} selectors ${
         this.loadedFromCache ? "restored from cache" : "indexed from source"
@@ -136,10 +142,36 @@ export class ProjectRuntime {
   /** Releases everything this root owns, leaving nothing behind for another root to read. */
   dispose(): void {
     this.disposed = true;
+    if (this.reindexTimer) {
+      clearInterval(this.reindexTimer);
+      this.reindexTimer = undefined;
+    }
     this.indexer.dispose();
     this.tsConfigResolver.clearCache();
     this.processedTsConfig = null;
     this.loadedFromCache = false;
+  }
+
+  /**
+   * Rebuilds the index on a timer, as the Extension Host does, so a change the client
+   * never reported still cannot leave the index stale forever.
+   * @internal
+   */
+  private startPeriodicReindex(): void {
+    if (this.reindexIntervalMinutes <= 0) {
+      return;
+    }
+
+    this.reindexTimer = setInterval(
+      () => {
+        void this.indexer.generateFullIndex().catch((error) => {
+          this.logger.error(`Periodic reindex failed for ${this.rootPath}`, error as Error);
+        });
+      },
+      this.reindexIntervalMinutes * 60 * 1000
+    );
+    // A pending reindex must never be the reason the server process stays alive.
+    this.reindexTimer.unref?.();
   }
 
   /**

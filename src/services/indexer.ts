@@ -42,10 +42,7 @@ import { findAngularDependencies, getLibraryEntryPoints } from "../utils/package
  * non-recursive so nested `node_modules/**\/package.json` files are ignored.
  * @internal
  */
-const DEPENDENCY_MANIFEST_GLOB = "{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock}";
-
-/** Glob (relative to the project root) matching the sources whose changes update the index. */
-const PROJECT_SOURCE_WATCH_GLOB = "**/*.ts";
+const DEPENDENCY_MANIFEST_NAMES = ["package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"] as const;
 
 /**
  * Debounce delay (ms) before reacting to a dependency manifest change. Installs
@@ -302,15 +299,13 @@ export class AngularIndexer {
     // The watch pattern cannot exclude anything, so an install or a build would
     // otherwise push every written .ts through a full parse and index save.
     this.fileWatcher = this.fileWatchers.watch(
-      { root: this.projectRootPath, include: PROJECT_SOURCE_WATCH_GLOB },
+      { root: this.projectRootPath, recursive: true, extensions: [".ts"] },
       (change) => {
         void this.handleSourceChange(change);
       }
     );
 
-    this.logger.info(
-      `AngularIndexer: File watcher initialized for ${this.projectRootPath} with pattern ${PROJECT_SOURCE_WATCH_GLOB}`
-    );
+    this.logger.info(`AngularIndexer: Source watcher initialized for ${this.projectRootPath}`);
 
     this.initializeDependencyWatcher();
   }
@@ -357,13 +352,11 @@ export class AngularIndexer {
     }, DEPENDENCY_REINDEX_DEBOUNCE_MS);
 
     this.dependencyWatcher = this.fileWatchers.watch(
-      { root: this.projectRootPath, include: DEPENDENCY_MANIFEST_GLOB },
+      { root: this.projectRootPath, recursive: false, fileNames: DEPENDENCY_MANIFEST_NAMES },
       handler
     );
 
-    this.logger.info(
-      `AngularIndexer: Dependency watcher initialized for ${this.projectRootPath} with pattern ${DEPENDENCY_MANIFEST_GLOB}`
-    );
+    this.logger.info(`AngularIndexer: Dependency watcher initialized for ${this.projectRootPath}`);
   }
 
   /**
@@ -810,6 +803,26 @@ export class AngularIndexer {
     }
   }
 
+  /**
+   * Drops one element of a selector, matching how that element's path was stored.
+   *
+   * Project elements are indexed with a project-relative path, so removing them by the
+   * absolute path a watcher reports would silently match nothing and leave the selector
+   * of a deleted or renamed element in the index. A cache written by an older version
+   * can still hold absolute paths, so both forms are attempted.
+   * @param selector The selector to remove the element from.
+   * @param filePath Absolute path of the file the element came from.
+   * @param elementName Class name of the element, when only that one must go.
+   * @internal
+   */
+  private removeIndexedElement(selector: string, filePath: string, elementName?: string): void {
+    this.index.selectors.remove(selector, filePath, elementName);
+    const indexedPath = this.projectRootPath ? path.relative(this.projectRootPath, filePath) : filePath;
+    if (indexedPath !== filePath) {
+      this.index.selectors.remove(selector, indexedPath, elementName);
+    }
+  }
+
   private async removeOldSelectorsFromIndex(cachedFile: FileElementsInfo | undefined): Promise<void> {
     if (!cachedFile) {
       return;
@@ -818,7 +831,7 @@ export class AngularIndexer {
     for (const oldElement of cachedFile.elements) {
       const individualSelectors = await parseAngularSelector(oldElement.selector);
       for (const selector of individualSelectors) {
-        this.index.selectors.remove(selector, cachedFile.filePath, oldElement.name);
+        this.removeIndexedElement(selector, cachedFile.filePath, oldElement.name);
       }
     }
   }
@@ -922,7 +935,7 @@ export class AngularIndexer {
       for (const element of fileInfo.elements) {
         const individualSelectors = await parseAngularSelector(element.selector);
         for (const selector of individualSelectors) {
-          this.index.selectors.remove(selector, filePath, element.name);
+          this.removeIndexedElement(selector, filePath, element.name);
           this.logger.info(`Removed from index for ${this.projectRootPath}: ${selector} from ${filePath}`);
         }
       }

@@ -2,8 +2,11 @@ import * as assert from "node:assert";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+import { FileChangeType } from "vscode-languageserver/node";
 import { ProjectRuntime } from "../../lsp/project-runtime";
 import { ProjectRuntimeHost } from "../../lsp/project-runtime-host";
+import { WatchedFiles } from "../../lsp/watched-files";
 
 async function writeProject(root: string, paths: Record<string, string[]> = {}): Promise<void> {
   await fs.mkdir(path.join(root, "src"), { recursive: true });
@@ -33,6 +36,17 @@ async function writeComponent(root: string, className: string, selector: string)
     ].join("\n"),
     "utf8"
   );
+}
+
+/** Waits for work the indexer started from a watched change to settle. */
+async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error("Timed out waiting for the index to catch up with a watched change");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 describe("LSP project runtime", function () {
@@ -187,6 +201,61 @@ describe("LSP project runtime", function () {
 
     assert.strictEqual(second.restoredFromCache, true);
     assert.deepStrictEqual(second.indexer.getAllSelectors(), ["shop-card"]);
+  });
+
+  it("follows watched source changes without rescanning the project", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const componentPath = path.join(root, "src", "shop-card.component.ts");
+    await writeProject(root);
+    const watched = new WatchedFiles();
+    const runtime = new ProjectRuntime(root, { fileWatchers: watched });
+    await runtime.load();
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), []);
+
+    await writeComponent(root, "ShopCardComponent", "shop-card");
+    watched.dispatch([{ uri: pathToFileURL(componentPath).toString(), type: FileChangeType.Created }]);
+    await waitFor(() => runtime.indexer.getAllSelectors().length === 1);
+
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), ["shop-card"]);
+
+    await fs.rm(componentPath);
+    watched.dispatch([{ uri: pathToFileURL(componentPath).toString(), type: FileChangeType.Deleted }]);
+    await waitFor(() => runtime.indexer.getAllSelectors().length === 0);
+
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), []);
+  });
+
+  it("drops a renamed selector instead of keeping both", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const componentPath = path.join(root, "src", "shop-card.component.ts");
+    await writeProject(root);
+    await writeComponent(root, "ShopCardComponent", "shop-card");
+    const watched = new WatchedFiles();
+    const runtime = new ProjectRuntime(root, { fileWatchers: watched });
+    await runtime.load();
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), ["shop-card"]);
+
+    const renamed = (await fs.readFile(componentPath, "utf8")).replace('"shop-card"', '"shop-basket"');
+    await fs.writeFile(componentPath, renamed, "utf8");
+    watched.dispatch([{ uri: pathToFileURL(componentPath).toString(), type: FileChangeType.Changed }]);
+    await waitFor(() => runtime.indexer.getAllSelectors().includes("shop-basket"));
+
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), ["shop-basket"]);
+  });
+
+  it("reindexes on a timer for changes no watcher reported", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    await writeProject(root);
+    // 120 ms, expressed in the minutes the setting uses.
+    const runtime = new ProjectRuntime(root, { reindexIntervalMinutes: 0.002 });
+    await runtime.load();
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), []);
+
+    await writeComponent(root, "ShopCardComponent", "shop-card");
+    await waitFor(() => runtime.indexer.getAllSelectors().length === 1);
+
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), ["shop-card"]);
+    runtime.dispose();
   });
 
   it("drops the index and the parsed configuration when disposed", async () => {

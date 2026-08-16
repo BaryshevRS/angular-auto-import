@@ -3,6 +3,7 @@
  * @module
  */
 
+import type { FileWatcherFactory } from "../core/file-watching";
 import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../core/logging";
 import { ProjectRuntime } from "./project-runtime";
 
@@ -10,6 +11,10 @@ export interface ProjectRuntimeHostOptions {
   logger?: InstrumentedLogger;
   /** Directory the client set aside for caches, passed on to every runtime. */
   storagePath?: string;
+  /** How every runtime learns that a watched file changed. */
+  fileWatchers?: FileWatcherFactory;
+  /** Minutes between automatic reindexes, passed on to every runtime. */
+  reindexIntervalMinutes?: number;
   /** Overrides how a runtime is built, for tests and for future runtime variants. */
   createRuntime?(rootPath: string, logger: InstrumentedLogger): ProjectRuntime;
 }
@@ -29,7 +34,13 @@ export class ProjectRuntimeHost {
     this.logger = options.logger ?? withInstrumentation(silentLogger);
     this.createRuntime =
       options.createRuntime ??
-      ((rootPath, logger) => new ProjectRuntime(rootPath, { logger, storagePath: options.storagePath }));
+      ((rootPath, logger) =>
+        new ProjectRuntime(rootPath, {
+          logger,
+          storagePath: options.storagePath,
+          fileWatchers: options.fileWatchers,
+          reindexIntervalMinutes: options.reindexIntervalMinutes,
+        }));
   }
 
   /**
