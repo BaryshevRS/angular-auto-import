@@ -1,52 +1,20 @@
 /**
+ * Applies an import plan to a component file.
  *
- * Angular Auto-Import Utility Functions
- *
- * This module handles the core import functionality for Angular elements.
- *
- * Key Bug Fixes:
- * 1. **Active Document Synchronization**: The importElementToFile function now properly
- *    synchronizes with active VSCode documents instead of only reading from disk. This
- *    fixes the issue where quick fix imports wouldn't work on first access to TypeScript
- *    components with inline templates.
- *
- * 2. **Diagnostic Updates**: After successful imports, the system now automatically
- *    updates diagnostics to remove red underlines from successfully imported elements.
- *    Uses multiple retry attempts with increasing delays (100ms, 300ms, 500ms) to ensure
- *    proper synchronization between VSCode document changes and ts-morph Project state.
- *
- * 3. **Timing and Synchronization**: Improved timing of diagnostic updates to account for
- *    VSCode's asynchronous document processing. The system now waits for document changes
- *    to be fully processed before checking import status.
- *
- * 4. **Active Document Priority**: All operations now prioritize active VSCode documents
- *    over disk content, ensuring that unsaved changes are properly handled.
- *
- * @module
+ * Planning lives in `core/import-planner`; this module only decides where the file's
+ * current text comes from and how the resulting edit reaches it — through the open
+ * editor when the file is open, so unsaved changes are preserved, or straight to disk.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-  type ArrayLiteralExpression,
-  type Decorator,
-  type Node,
-  type ObjectLiteralExpression,
-  type PropertyAssignment,
-  type SourceFile,
-  SyntaxKind,
-} from "ts-morph";
 import * as vscode from "vscode";
+import { toVsCodeRange } from "../adapters/vscode/language-types";
+import { type ImportPlan, planImports } from "../core/import-planner";
 import { logger } from "../logger";
 import * as TsConfigHelper from "../services/tsconfig";
 import type { AngularElementData, ProcessedTsConfig } from "../types";
 import { switchFileType } from "./path";
-
-/**
- * Global reference to diagnostic provider for updating diagnostics.
- * @internal
- */
-const globalDiagnosticProvider: import("../providers/diagnostics").DiagnosticProvider | null = null;
 
 /**
  * Gets the active VSCode document for a given file path.
@@ -59,149 +27,43 @@ function getActiveDocument(filePath: string): vscode.TextDocument | undefined {
 }
 
 /**
- * Prepares a source file for modification.
+ * Reads the file as the user currently sees it: the open editor's text when there is
+ * one, the file on disk otherwise.
+ * @internal
  */
-async function prepareSourceFile(
-  componentFilePathAbs: string,
-  indexerProject: import("ts-morph").Project
-): Promise<import("ts-morph").SourceFile | null> {
+function readCurrentContent(componentFilePathAbs: string): { text: string; version: number } {
   const activeDocument = getActiveDocument(componentFilePathAbs);
-  let currentContent: string;
-
   if (activeDocument) {
-    currentContent = activeDocument.getText();
-  } else {
-    currentContent = fs.readFileSync(componentFilePathAbs, "utf-8");
+    return { text: activeDocument.getText(), version: activeDocument.version };
   }
-
-  let sourceFile = indexerProject.getSourceFile(componentFilePathAbs);
-  if (sourceFile) {
-    if (sourceFile.getFullText() !== currentContent) {
-      sourceFile.replaceWithText(currentContent);
-    }
-  } else {
-    sourceFile = indexerProject.createSourceFile(componentFilePathAbs, currentContent, { overwrite: true });
-  }
-
-  return sourceFile;
+  return { text: fs.readFileSync(componentFilePathAbs, "utf-8"), version: 0 };
 }
 
 /**
- * Processes import statements for each element.
+ * Applies a planned edit through the open editor when there is one, or straight to disk.
+ * @internal
  */
-async function processElementImports(
-  elements: AngularElementData[],
-  sourceFile: import("ts-morph").SourceFile,
-  componentFilePathAbs: string,
-  projectRootPath: string
-): Promise<boolean> {
-  let modified = false;
-
-  for (const element of elements) {
-    const importPathString = await resolveImportPathForElement(element, componentFilePathAbs, projectRootPath);
-    logger.debug(`Final import path for ${element.type} '${element.name}': '${importPathString}'`);
-
-    if (addImportStatementForElement(sourceFile, element, importPathString)) {
-      modified = true;
-    }
-
-    if (addImportToAnnotationTsMorph(element.exportingModuleName || element.name, sourceFile)) {
-      modified = true;
-    }
-  }
-
-  // Format import statements after all elements are added
-  if (modified) {
-    formatImportStatements(sourceFile);
-  }
-
-  return modified;
-}
-
-/**
- * Adds import statement for a single element.
- */
-function addImportStatementForElement(
-  sourceFile: import("ts-morph").SourceFile,
-  element: AngularElementData,
-  importPathString: string
-): boolean {
-  const importDeclaration = sourceFile.getImportDeclaration(
-    (d) =>
-      d.getModuleSpecifierValue() === importPathString &&
-      d.getNamedImports().some((ni) => ni.getName() === element.name)
-  );
-
-  if (importDeclaration) {
-    return false; // Already imported
-  }
-
-  const existingImportFromSameModule = sourceFile.getImportDeclaration(
-    (d) => d.getModuleSpecifierValue() === importPathString
-  );
-
-  if (existingImportFromSameModule) {
-    const namedImports = existingImportFromSameModule.getNamedImports();
-    const alreadyImported = namedImports.some((ni) => ni.getName() === element.name);
-    if (!alreadyImported) {
-      existingImportFromSameModule.addNamedImport(element.name);
-      return true;
-    }
-    return false;
-  }
-
-  const existingImportWithName = sourceFile
-    .getImportDeclarations()
-    .find((d) => d.getNamedImports().some((ni) => ni.getName() === element.name));
-
-  if (!existingImportWithName) {
-    sourceFile.addImportDeclaration({
-      namedImports: [{ name: element.name }],
-      moduleSpecifier: importPathString,
-    });
+async function applyImportPlan(plan: ImportPlan): Promise<boolean> {
+  const [edit] = plan.edits;
+  if (!edit) {
     return true;
   }
 
-  return false;
-}
-
-/**
- * Saves the modified file to disk and updates diagnostics.
- */
-async function saveModifiedFile(
-  sourceFile: import("ts-morph").SourceFile,
-  componentFilePathAbs: string
-): Promise<boolean> {
-  const newContent = sourceFile.getFullText();
-  const activeDocument = getActiveDocument(componentFilePathAbs);
-
-  if (activeDocument) {
-    const edit = new vscode.WorkspaceEdit();
-    const fullRange = new vscode.Range(
-      activeDocument.positionAt(0),
-      activeDocument.positionAt(activeDocument.getText().length)
-    );
-    edit.replace(activeDocument.uri, fullRange, newContent);
-
-    const success = await vscode.workspace.applyEdit(edit);
-    if (success) {
-      await activeDocument.save();
-    } else {
-      logger.error(`Failed to apply WorkspaceEdit to ${path.basename(componentFilePathAbs)}`);
-      return false;
-    }
-  } else {
-    fs.writeFileSync(componentFilePathAbs, newContent);
+  const activeDocument = getActiveDocument(plan.filePath);
+  if (!activeDocument) {
+    fs.writeFileSync(plan.filePath, edit.newText);
+    return true;
   }
 
-  if (globalDiagnosticProvider) {
-    await globalDiagnosticProvider.forceUpdateDiagnosticsForFile(componentFilePathAbs);
-    const htmlFilePath = switchFileType(componentFilePathAbs, ".html");
-    if (fs.existsSync(htmlFilePath)) {
-      await globalDiagnosticProvider.forceUpdateDiagnosticsForFile(htmlFilePath);
-    }
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  workspaceEdit.replace(activeDocument.uri, toVsCodeRange(edit.range), edit.newText);
+
+  if (!(await vscode.workspace.applyEdit(workspaceEdit))) {
+    logger.error(`Failed to apply WorkspaceEdit to ${path.basename(plan.filePath)}`);
+    return false;
   }
 
+  await activeDocument.save();
   return true;
 }
 
@@ -229,18 +91,18 @@ export async function importElementsToFile(
       return false;
     }
 
-    const sourceFile = await prepareSourceFile(componentFilePathAbs, indexerProject);
-    if (!sourceFile) {
-      return false;
-    }
+    const { text, version } = readCurrentContent(componentFilePathAbs);
+    const plan = await planImports({
+      filePath: componentFilePathAbs,
+      text,
+      version,
+      elements,
+      project: indexerProject,
+      resolveImportPath: (element) => resolveImportPathForElement(element, componentFilePathAbs, projectRootPath),
+      logger,
+    });
 
-    const modified = await processElementImports(elements, sourceFile, componentFilePathAbs, projectRootPath);
-
-    if (modified) {
-      return await saveModifiedFile(sourceFile, componentFilePathAbs);
-    }
-
-    return true;
+    return await applyImportPlan(plan);
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
     logger.error("Error importing elements:", error);
@@ -270,108 +132,4 @@ async function resolveImportPathForElement(
   const absoluteTargetModulePathNoExt = switchFileType(absoluteTargetModulePath, "");
 
   return TsConfigHelper.resolveImportPath(absoluteTargetModulePathNoExt, componentFilePathAbs, projectRootPath);
-}
-
-/**
- * Adds an import to the `imports` array of a `@Component` decorator.
- *
- * @param importName The name of the module or component to add.
- * @param sourceFile The ts-morph `SourceFile` to modify.
- * @returns `true` if the file was modified, `false` otherwise.
- * @internal
- */
-function addImportToAnnotationTsMorph(importName: string, sourceFile: SourceFile): boolean {
-  for (const classDeclaration of sourceFile.getClasses()) {
-    const componentDecorator = classDeclaration.getDecorator("Component");
-    if (componentDecorator) {
-      return addImportToComponentDecorator(componentDecorator, importName, sourceFile);
-    }
-  }
-  return false;
-}
-
-/**
- * Adds import to Component decorator's imports array.
- */
-function addImportToComponentDecorator(
-  componentDecorator: Decorator,
-  importName: string,
-  sourceFile: SourceFile
-): boolean {
-  const decoratorArgs = componentDecorator.getArguments();
-  if (decoratorArgs.length === 0 || !decoratorArgs[0].isKind(SyntaxKind.ObjectLiteralExpression)) {
-    return false;
-  }
-
-  const objectLiteral = decoratorArgs[0] as ObjectLiteralExpression;
-  const importsProperty = objectLiteral.getProperty("imports") as PropertyAssignment | undefined;
-
-  if (importsProperty) {
-    return addToExistingImportsArray(importsProperty, importName, sourceFile);
-  }
-
-  return addNewImportsProperty(objectLiteral, importName);
-}
-
-/**
- * Adds import to existing imports array.
- */
-function addToExistingImportsArray(
-  importsProperty: PropertyAssignment,
-  importName: string,
-  sourceFile: SourceFile
-): boolean {
-  const initializer = importsProperty.getInitializer();
-  if (!initializer?.isKind(SyntaxKind.ArrayLiteralExpression)) {
-    logger.warn(
-      `@Component 'imports' property in ${sourceFile.getBaseName()} is not an array. Manual update needed for ${importName}.`
-    );
-    return false;
-  }
-
-  const importsArray = initializer as ArrayLiteralExpression;
-  const existingImportNames = importsArray.getElements().map((el: Node) => el.getText().trim());
-
-  if (existingImportNames.includes(importName)) {
-    return false; // Already in imports array
-  }
-
-  importsArray.addElement(importName);
-  return true;
-}
-
-/**
- * Adds new imports property to Component decorator.
- */
-function addNewImportsProperty(objectLiteral: ObjectLiteralExpression, importName: string): boolean {
-  const newPropertyAssignment = {
-    name: "imports",
-    initializer: `[${importName}]`,
-  };
-
-  objectLiteral.addPropertyAssignment(newPropertyAssignment);
-  return true;
-}
-
-/**
- * Formats all import statements in the source file.
- * Applies multi-line formatting if import statement exceeds 120 characters.
- */
-function formatImportStatements(sourceFile: SourceFile): void {
-  for (const importDeclaration of sourceFile.getImportDeclarations()) {
-    const importText = importDeclaration.getText();
-
-    if (importText.length > 120) {
-      const namedImports = importDeclaration.getNamedImports();
-
-      if (namedImports.length > 0) {
-        const moduleSpecifier = importDeclaration.getModuleSpecifierValue();
-        const importNames = namedImports.map((ni) => ni.getName());
-        const formattedImports = importNames.join(",\n  ");
-        const newImportText = `import {\n  ${formattedImports}\n} from "${moduleSpecifier}";`;
-
-        importDeclaration.replaceWithText(newImportText);
-      }
-    }
-  }
 }
