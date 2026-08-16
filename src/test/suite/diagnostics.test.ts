@@ -2,6 +2,7 @@ import * as assert from "node:assert";
 import * as path from "node:path";
 import { Project } from "ts-morph";
 import * as vscode from "vscode";
+import type { ComponentImports } from "../../core/component-imports";
 import type { CoreRange } from "../../core/language-types";
 import {
   findMissingImports,
@@ -148,6 +149,21 @@ describe("DiagnosticProvider", function () {
     return findMissingImports([element], "warning", context);
   }
 
+  /** The resolver the provider wired up, answering from the real ts-morph AST. */
+  function realComponentImports(): ComponentImports {
+    return (provider as any).componentImports as ComponentImports;
+  }
+
+  /** Answers "already imported" from `importedNames` instead of reading the AST. */
+  function stubImportedNames(): void {
+    (provider as any).componentImports.isImported = (
+      _sourceFile: import("ts-morph").SourceFile,
+      element: AngularElementData
+    ) =>
+      importedNames.has(element.name) ||
+      Boolean(element.exportingModuleName && importedNames.has(element.exportingModuleName));
+  }
+
   beforeEach(() => {
     importedNames = new Set<string>();
 
@@ -184,10 +200,6 @@ describe("DiagnosticProvider", function () {
       "export class PlaygroundComponent {}",
       { overwrite: true }
     );
-
-    (provider as any).isElementImported = (_sourceFile: import("ts-morph").SourceFile, element: AngularElementData) =>
-      importedNames.has(element.name) ||
-      Boolean(element.exportingModuleName && importedNames.has(element.exportingModuleName));
   });
 
   afterEach(() => {
@@ -196,6 +208,7 @@ describe("DiagnosticProvider", function () {
 
   it("should suppress auxiliary diagnostics for nz-button when NzButtonComponent is already imported", async () => {
     importedNames = new Set(["NzButtonComponent"]);
+    stubImportedNames();
 
     const element = createElement("nz-button", "button", [
       { name: "nz-button", value: "" },
@@ -209,6 +222,7 @@ describe("DiagnosticProvider", function () {
 
   it("should keep diagnostics for compound selectors like NzDropdownButtonDirective", async () => {
     importedNames = new Set(["NzButtonComponent", "NzDropDownDirective"]);
+    stubImportedNames();
 
     const element = createElement("nz-dropdown", "button", [
       { name: "nz-button", value: "" },
@@ -227,6 +241,7 @@ describe("DiagnosticProvider", function () {
 
   it("suppresses pipe diagnostics when another pipe candidate for the same selector is imported", async () => {
     importedNames = new Set(["TranslateModule"]);
+    stubImportedNames();
 
     const element = createPipeElement("translate");
 
@@ -268,18 +283,12 @@ export class TranslatePlaygroundComponent {}
       exportingModuleName: "TranslateModule",
     });
 
-    const isImported = (DiagnosticProvider.prototype as any).isElementImported.call(
-      provider,
-      moduleSourceFile,
-      translatePipe
-    );
+    const isImported = realComponentImports().isImported(moduleSourceFile, translatePipe);
 
     assert.strictEqual(isImported, true, "TranslateModule should make TranslatePipe available");
   });
 
   it("suppresses pipe diagnostics when a matching module is imported from the pipe package", async () => {
-    (provider as any).isElementImported = (DiagnosticProvider.prototype as any).isElementImported.bind(provider);
-
     const project = new Project({ useInMemoryFileSystem: true });
     const moduleSourceFile = project.createSourceFile(
       path.join(testProjectPath, "src/app/standalone-translate-playground.component.ts"),
@@ -334,8 +343,6 @@ export class StandaloneTranslatePlaygroundComponent {}
   });
 
   it("keeps pipe diagnostics when a matching module import is from a different package", async () => {
-    (provider as any).isElementImported = (DiagnosticProvider.prototype as any).isElementImported.bind(provider);
-
     const project = new Project({ useInMemoryFileSystem: true });
     const moduleSourceFile = project.createSourceFile(
       path.join(testProjectPath, "src/app/module-name-translate-playground.component.ts"),
@@ -386,8 +393,6 @@ export class ModuleNameTranslatePlaygroundComponent {}
   });
 
   it("keeps pipe diagnostics when a matching module has explicit exports without the pipe", async () => {
-    (provider as any).isElementImported = (DiagnosticProvider.prototype as any).isElementImported.bind(provider);
-
     const project = new Project({ useInMemoryFileSystem: true });
     const moduleSourceFile = project.createSourceFile(
       path.join(testProjectPath, "src/app/date-playground.component.ts"),
@@ -439,16 +444,41 @@ export class DatePlaygroundComponent {}
   });
 
   it("refreshOpenDocuments clears the import resolution cache", async () => {
-    // Simulate a previously cached (stale) "not imported" result, e.g. captured
-    // before a library was indexed. After the external index is rebuilt this
-    // must be dropped so the refreshed resolution is used.
-    const cache = (provider as any).importedElementsCache as Map<string, Map<string, boolean>>;
-    cache.set(path.join(testProjectPath, "src/app/foo.component.ts"), new Map([["TranslatePipe", false]]));
-    assert.ok(cache.size > 0, "precondition: import cache populated");
+    // A "not imported" answer captured before a library was indexed must not survive
+    // an index rebuild, or the refreshed resolution is never seen.
+    const componentImports = realComponentImports();
+    const project = new Project({ useInMemoryFileSystem: true });
+    const componentFile = project.createSourceFile(
+      path.join(testProjectPath, "src/app/cached.component.ts"),
+      `
+@Component({ selector: "app-cached", standalone: true, template: "", imports: [] })
+export class CachedComponent {}
+`,
+      { overwrite: true }
+    );
+    const card = new AngularElementData({
+      path: "./src/app/card",
+      name: "CardComponent",
+      type: "component",
+      originalSelector: "app-card",
+      selectors: ["app-card"],
+      isStandalone: true,
+      isExternal: false,
+    });
+
+    assert.strictEqual(componentImports.isImported(componentFile, card), false, "precondition: not imported yet");
+
+    componentFile.replaceWithText(`
+import { CardComponent } from "./card";
+
+@Component({ selector: "app-cached", standalone: true, template: "", imports: [CardComponent] })
+export class CachedComponent {}
+`);
+    assert.strictEqual(componentImports.isImported(componentFile, card), false, "the stale answer is cached");
 
     await provider.refreshOpenDocuments();
 
-    assert.strictEqual(cache.size, 0, "import cache should be cleared after refreshOpenDocuments");
+    assert.strictEqual(componentImports.isImported(componentFile, card), true, "the refreshed answer is used");
   });
 
   it("clears diagnostics for Source Control virtual documents", async () => {

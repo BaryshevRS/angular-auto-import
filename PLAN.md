@@ -201,7 +201,7 @@ Exit criteria:
 - [x] Extract diagnostics so parsing and missing-import checks return plain diagnostic DTOs with offsets/ranges.
   - [x] Move the template AST walk into core (`core/template-scan`), returning import candidates with plain ranges; parsing, caching, and logging stay in the provider.
   - [x] Move the missing-import checks behind plain diagnostic DTOs (`core/missing-imports`), reading the component file through an injected context; the provider maps DTOs onto `vscode.Diagnostic`.
-  - [ ] Move the ts-morph import interrogation (`isElementImported` and its cache) behind that context into core; it needs a logging port first.
+  - [x] Move the ts-morph import interrogation and its cache into core (`core/component-imports`), behind a `CoreLogger` port (`core/logging`) that the Extension Host satisfies with its existing logger.
 - [ ] Extract an `ImportPlanner` that accepts document text and requested elements and returns a versioned edit plan.
 - [ ] Keep the current VS Code providers working through adapters.
 - [ ] Convert suitable tests to plain Node tests; retain Electron tests only where the VS Code host is relevant.

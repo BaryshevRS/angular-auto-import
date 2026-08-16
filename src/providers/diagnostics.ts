@@ -6,10 +6,8 @@
  */
 
 import {
-  type ArrayLiteralExpression,
   type ClassDeclaration,
   type Decorator,
-  type Expression,
   type Node,
   type NoSubstitutionTemplateLiteral,
   type ObjectLiteralExpression,
@@ -20,13 +18,13 @@ import {
 import * as vscode from "vscode";
 import { toDocumentView } from "../adapters/vscode/document";
 import { toVsCodeDiagnosticSeverity, toVsCodeRange } from "../adapters/vscode/language-types";
-import { getStandardModuleExports } from "../config/standard-modules";
+import { ComponentImports } from "../core/component-imports";
 import type { CoreDiagnosticSeverity } from "../core/language-types";
 import { findMissingImports, type MissingImportContext, type MissingImportDiagnostic } from "../core/missing-imports";
 import { type ScannedTemplateElement, scanTemplate } from "../core/template-scan";
 import { logger } from "../logger";
 import type { AngularIndexer } from "../services";
-import type { AngularElementData, TemplateAstNode } from "../types";
+import type { TemplateAstNode } from "../types";
 import { getAngularElements, getTsDocument, isStandalone, switchFileType } from "../utils";
 import { debounce } from "../utils/debounce";
 import { findDeepestContainingProjectContext, getProjectContextForDocument } from "../utils/project-context";
@@ -47,7 +45,10 @@ export class DiagnosticProvider {
    * Key: path to the TypeScript component file.
    * Value: Map where key is the Angular element name (e.g., 'MyComponent') and value is a boolean indicating if it's imported.
    */
-  private readonly importedElementsCache = new Map<string, Map<string, boolean>>();
+  private readonly componentImports = new ComponentImports({
+    resolveIndex: (filePath) => findDeepestContainingProjectContext(filePath, this.context.projectIndexers),
+    logger,
+  });
   private isPublishing = false;
 
   constructor(private readonly context: ProviderContext) {
@@ -165,7 +166,7 @@ export class DiagnosticProvider {
       }
 
       // Clear cache for the related TS file as its changes might affect diagnostics
-      this.importedElementsCache.delete(tsDocument.fileName);
+      this.componentImports.invalidate(tsDocument.fileName);
 
       // Open the HTML document and update diagnostics
       const htmlUri = vscode.Uri.file(htmlFilePath);
@@ -200,7 +201,7 @@ export class DiagnosticProvider {
    * stale "missing import" diagnostics without requiring the user to edit files.
    */
   public async refreshOpenDocuments(): Promise<void> {
-    this.importedElementsCache.clear();
+    this.componentImports.clear();
     for (const document of vscode.workspace.textDocuments) {
       if (document.languageId === "html" || document.languageId === "typescript") {
         await this.updateDiagnostics(document);
@@ -347,7 +348,7 @@ export class DiagnosticProvider {
 
     const componentInfo = this.extractInlineTemplate(document, sourceFile);
     if (componentInfo) {
-      this.importedElementsCache.delete(document.fileName);
+      this.componentImports.invalidate(document.fileName);
       await this.runDiagnostics(componentInfo.template, document, componentInfo.templateOffset, sourceFile);
     } else {
       this.clearDiagnosticsForNoTemplate(document);
@@ -373,7 +374,7 @@ export class DiagnosticProvider {
   private clearDiagnosticsForNoTemplate(document: vscode.TextDocument): void {
     this.candidateDiagnostics.delete(document.uri.toString());
     this.diagnosticCollection.delete(document.uri);
-    this.importedElementsCache.delete(document.fileName);
+    this.componentImports.invalidate(document.fileName);
     logger.debug(
       `[DiagnosticProvider] No inline template found for TS file, clearing diagnostics: ${document.fileName}`
     );
@@ -428,9 +429,9 @@ export class DiagnosticProvider {
 
     return {
       findCandidates: (name) => getAngularElements(name, indexer),
-      isImported: (candidate) => this.isElementImported(sourceFile, candidate),
-      getComponentImportNames: () => this.getComponentImportNames(sourceFile),
-      getNamedImportSpecifiers: (importName) => this.getNamedImportModuleSpecifiers(sourceFile, importName),
+      isImported: (candidate) => this.componentImports.isImported(sourceFile, candidate),
+      getComponentImportNames: () => this.componentImports.getImportNames(sourceFile),
+      getNamedImportSpecifiers: (importName) => this.componentImports.getNamedImportSpecifiers(sourceFile, importName),
       getExternalModuleExports: (moduleName) => indexer.getExternalModuleExports(moduleName),
       selectors: { cssSelector: CssSelector, selectorMatcher: SelectorMatcher },
     };
@@ -637,235 +638,6 @@ export class DiagnosticProvider {
 
   private getProjectContextForDocument(document: vscode.TextDocument) {
     return getProjectContextForDocument(document, this.context.projectIndexers, this.context.projectTsConfigs);
-  }
-
-  /**
-   * Returns the module specifiers of every top-level named import of `importName`.
-   */
-  private getNamedImportModuleSpecifiers(sourceFile: SourceFile, importName: string): string[] {
-    const moduleSpecifiers: string[] = [];
-
-    for (const declaration of sourceFile.getImportDeclarations()) {
-      if (!declaration.getNamedImports().some((namedImport) => namedImport.getName() === importName)) {
-        continue;
-      }
-
-      moduleSpecifiers.push(declaration.getModuleSpecifierValue());
-    }
-
-    return moduleSpecifiers;
-  }
-
-  /**
-   * Returns every identifier listed in a `@Component({ imports: [...] })` in this file.
-   */
-  private getComponentImportNames(sourceFile: SourceFile): string[] {
-    const importNames = new Set<string>();
-
-    for (const classDeclaration of sourceFile.getClasses()) {
-      const importsArray = this.getComponentImportsArray(classDeclaration);
-      if (!importsArray) {
-        continue;
-      }
-
-      for (const element of importsArray.getElements()) {
-        if (element.isKind(SyntaxKind.Identifier)) {
-          importNames.add(element.getText().trim());
-        }
-      }
-    }
-
-    return [...importNames];
-  }
-
-  private isElementImported(sourceFile: SourceFile, element: AngularElementData): boolean {
-    try {
-      if (!sourceFile) {
-        return false;
-      }
-
-      const cacheKey = sourceFile.getFilePath();
-      const cached = this.getImportFromCache(cacheKey, element.name);
-      if (cached !== undefined) {
-        return cached;
-      }
-
-      let isImported = this.checkDirectElementImport(sourceFile, element);
-      if (!isImported) {
-        isImported = this.checkExternalModuleImports(sourceFile, element);
-      }
-
-      this.updateImportCache(cacheKey, element.name, isImported);
-      return isImported;
-    } catch (error) {
-      logger.error("[DiagnosticProvider] Error checking element import with ts-morph:", error as Error);
-      return false;
-    }
-  }
-
-  /**
-   * Gets import status from cache.
-   */
-  private getImportFromCache(cacheKey: string, elementName: string): boolean | undefined {
-    const fileCache = this.importedElementsCache.get(cacheKey);
-    return fileCache?.get(elementName);
-  }
-
-  /**
-   * Updates import cache with result.
-   */
-  private updateImportCache(cacheKey: string, elementName: string, isImported: boolean): void {
-    let fileCache = this.importedElementsCache.get(cacheKey);
-    if (!fileCache) {
-      fileCache = new Map();
-      this.importedElementsCache.set(cacheKey, fileCache);
-    }
-    fileCache.set(elementName, isImported);
-  }
-
-  /**
-   * Gets the imports array from a Component decorator.
-   */
-  private getComponentImportsArray(classDeclaration: ClassDeclaration): ArrayLiteralExpression | undefined {
-    const componentDecorator = classDeclaration.getDecorator("Component");
-    if (!componentDecorator) {
-      return undefined;
-    }
-
-    const decoratorArgs = componentDecorator.getArguments();
-    if (decoratorArgs.length === 0 || !decoratorArgs[0].isKind(SyntaxKind.ObjectLiteralExpression)) {
-      return undefined;
-    }
-
-    const objectLiteral = decoratorArgs[0] as ObjectLiteralExpression;
-    const importsProperty = objectLiteral.getProperty("imports");
-
-    if (!importsProperty?.isKind(SyntaxKind.PropertyAssignment)) {
-      return undefined;
-    }
-
-    const initializer = importsProperty.getInitializer();
-    return initializer?.isKind(SyntaxKind.ArrayLiteralExpression) ? (initializer as ArrayLiteralExpression) : undefined;
-  }
-
-  /**
-   * Checks if element is directly imported in the Component imports array.
-   */
-  private checkDirectElementImport(sourceFile: SourceFile, element: AngularElementData): boolean {
-    for (const classDeclaration of sourceFile.getClasses()) {
-      const importsArray = this.getComponentImportsArray(classDeclaration);
-      if (!importsArray) {
-        continue;
-      }
-
-      for (const importName of this.getImportNamesForElement(element)) {
-        const isInImportsArray = importsArray
-          .getElements()
-          .some((el: Expression) => el.getText().trim() === importName);
-
-        if (isInImportsArray) {
-          const hasTopLevelImport = sourceFile.getImportDeclarations().some((imp) => {
-            return imp.getNamedImports().some((named) => named.getName() === importName);
-          });
-          if (hasTopLevelImport) {
-            return true;
-          }
-        }
-      }
-    }
-    return false;
-  }
-
-  private getImportNamesForElement(element: AngularElementData): string[] {
-    const names = [element.name];
-    if (element.exportingModuleName && element.exportingModuleName !== element.name) {
-      names.push(element.exportingModuleName);
-    }
-    return names;
-  }
-
-  /**
-   * Checks if element is imported via external modules.
-   */
-  private checkExternalModuleImports(sourceFile: SourceFile, element: AngularElementData): boolean {
-    const indexer = this.getIndexerForSourceFile(sourceFile);
-    if (!indexer) {
-      return false;
-    }
-
-    for (const classDeclaration of sourceFile.getClasses()) {
-      if (this.checkClassImportsForElement(classDeclaration, element, indexer)) {
-        return true;
-      }
-    }
-    logger.debug(`[DiagnosticProvider] Element '${element.name}' not found in any imported modules`);
-    return false;
-  }
-
-  /**
-   * Gets the indexer for a source file's workspace.
-   */
-  private getIndexerForSourceFile(sourceFile: SourceFile) {
-    return findDeepestContainingProjectContext(sourceFile.getFilePath(), this.context.projectIndexers);
-  }
-
-  /**
-   * Checks if a class declaration imports an element via its module imports.
-   */
-  private checkClassImportsForElement(
-    classDeclaration: ClassDeclaration,
-    element: AngularElementData,
-    indexer: AngularIndexer
-  ): boolean {
-    const importsArray = this.getComponentImportsArray(classDeclaration);
-    if (!importsArray) {
-      return false;
-    }
-
-    const importedModules = importsArray.getElements().map((el: Expression) => el.getText().trim());
-    logger.debug(
-      `[DiagnosticProvider] Checking element '${element.name}' against ${importedModules.length} imported modules: [${importedModules.join(", ")}]`
-    );
-
-    for (const moduleName of importedModules) {
-      if (this.checkModuleExportsForElement(moduleName, element, indexer)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Checks if a module exports a specific element.
-   */
-  private checkModuleExportsForElement(
-    moduleName: string,
-    element: AngularElementData,
-    indexer: AngularIndexer
-  ): boolean {
-    // First check if it's a standard Angular module (CommonModule, FormsModule, etc.)
-    const standardModuleExports = getStandardModuleExports(moduleName);
-    if (standardModuleExports?.has(element.name)) {
-      logger.debug(`[DiagnosticProvider] Element '${element.name}' found in standard Angular module '${moduleName}'`);
-      return true;
-    }
-
-    // Then check indexer for custom modules
-    const moduleExports = indexer.getExternalModuleExports(moduleName);
-    if (moduleExports) {
-      logger.debug(
-        `[DiagnosticProvider] Module '${moduleName}' exports ${moduleExports.size} items: [${Array.from(moduleExports).slice(0, 10).join(", ")}${moduleExports.size > 10 ? ", ..." : ""}]`
-      );
-      if (moduleExports.has(element.name)) {
-        logger.debug(`[DiagnosticProvider] Element '${element.name}' found in external module '${moduleName}' exports`);
-        return true;
-      }
-    } else {
-      logger.debug(
-        `[DiagnosticProvider] Module '${moduleName}' not found in indexer. This module may not be indexed yet.`
-      );
-    }
-    return false;
   }
 
   private getSeverityFromConfig(severityLevel: string): CoreDiagnosticSeverity {
