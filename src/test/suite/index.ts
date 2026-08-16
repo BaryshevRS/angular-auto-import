@@ -21,7 +21,8 @@ export function run(): Promise<void> {
   const testsRoot = path.resolve(__dirname, "..");
 
   return new Promise((c, e) => {
-    glob("**/**.test.js", { cwd: testsRoot }, (err: any, files: string[]) => {
+    // Only the suites that need the VS Code host; `test/node` runs under plain Mocha.
+    glob("suite/**/*.test.js", { cwd: testsRoot }, (err: any, files: string[]) => {
       if (err) {
         return e(err);
       }

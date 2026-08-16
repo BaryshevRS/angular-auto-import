@@ -204,8 +204,10 @@ Exit criteria:
   - [x] Move the ts-morph import interrogation and its cache into core (`core/component-imports`), behind a `CoreLogger` port (`core/logging`) that the Extension Host satisfies with its existing logger.
 - [x] Extract an `ImportPlanner` that accepts document text and requested elements and returns a versioned edit plan (`core/import-planner`); `utils/import` only chooses the text source and applies the edit.
   - [ ] Reject a plan whose version no longer matches the document before applying it (Phase 2 staleness work).
-- [ ] Keep the current VS Code providers working through adapters.
-- [ ] Convert suitable tests to plain Node tests; retain Electron tests only where the VS Code host is relevant.
+- [x] Keep the current VS Code providers working through adapters — every extraction above kept completion, diagnostics, quick fixes, and imports behaviour-identical, verified by the unit suites and the v22 e2e matrix at each step.
+- [x] Convert suitable tests to plain Node tests; retain Electron tests only where the VS Code host is relevant.
+  - [x] Split the unit suites into `src/test/node` (plain Mocha, 107 tests) and `src/test/suite` (VS Code host, 177 tests); `pnpm run test:unit` runs both, `pnpm run test:node` only the fast ones.
+  - [x] Enforce the boundary with a lint rule: `src/core` and `src/test/node` may not import `vscode`.
 
 Exit criteria:
 

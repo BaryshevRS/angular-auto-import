@@ -9,6 +9,7 @@
 
 - Uses VS Code Extension Test Runner (`@vscode/test-cli`)
 - Test fixtures in `src/test/fixtures/` for different project scenarios
-- Mocha-based test suites in `src/test/suite/`
+- Mocha-based test suites in `src/test/suite/` need the VS Code host; suites in `src/test/node/` must not import `vscode` and run under plain Mocha
+- `pnpm run test:unit` runs both; `pnpm run test:node` runs only the fast Node ones
 - E2E projects live in `src/e2e/projects/` (`v19`, `v21`, `v22` — one per supported Angular version)
 - The final e2e run before shipping is the v22 project in parallel mode: `pnpm run test:e2e:v22:parallel`
