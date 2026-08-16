@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 document boundary started; remote-host validation and representative performance measurements remain
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 started with the `initialize` handshake; representative performance measurements remain
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -122,7 +122,7 @@ Push diagnostics remain an implementation fallback if pull diagnostics expose a 
 
 - Return `LocationLink[]` for all matching indexed elements.
 - Preserve the current rule that this extension resolves only elements considered missing/unimported, leaving already-imported elements to Angular Language Service.
-- Convert file paths with URI-aware utilities and cover Windows drive letters and remote extension-host paths in tests.
+- Convert file paths with URI-aware utilities and cover Windows drive letters in tests.
 
 ### Project lifecycle and file watching
 
@@ -172,7 +172,6 @@ Define them with current `RequestType` constructors in a dependency-light shared
 - [x] Synchronize one HTML and one TypeScript document through `TextDocuments<TextDocument>`.
 - [x] Implement one fixture-backed completion response as an end-to-end vertical slice.
 - [x] Verify server crash reporting and automatic restart behavior.
-- [ ] Verify that the server starts on the remote side in an SSH/WSL-style extension-host setup.
 
 Exit criteria:
 
@@ -217,7 +216,10 @@ Exit criteria:
 
 ### Phase 2 — Server project runtime (3–5 days)
 
-- [ ] Implement `initialize` capabilities, workspace folders, initialization options, and configuration sync.
+- [x] Implement `initialize` capabilities, workspace folders, initialization options, and configuration sync.
+  - [x] Move the settings shape, defaults, and coercion into core (`core/settings`); the VS Code reader and the server share one schema.
+  - [x] Resolve the handshake into a `ServerEnvironment` (`lsp/server-environment`): workspace roots as paths, storage directory, settings, and the client capabilities the server acts on.
+  - [x] Register `didChangeConfiguration`, pull `workspace/configuration`, and track workspace-folder changes; the client sends settings and its storage path at `initialize`.
 - [ ] Move lazy project discovery and deepest-root context selection into the server.
 - [ ] Create and dispose one project runtime per discovered Angular root.
 - [ ] Implement full and incremental source indexing in the server.
@@ -356,7 +358,7 @@ Capture exact thresholds from the Phase 0 baseline, then require:
 | LSP process increases total memory | Keep one server per window, avoid duplicate direct/LSP indexes, and enforce RSS/reindex benchmarks. |
 | Old cache is incompatible | Introduce a schema-versioned server cache and tolerate one cold rebuild; retain old cache during fallback period. |
 | Dynamic Angular compiler import or bundling fails | Prove it in Phase 0 and inspect the packaged VSIX before core migration proceeds. |
-| Windows/remote URI handling breaks path containment | Centralize URI conversion and add Windows, SSH/WSL, nested-root, and sibling-prefix tests. |
+| Windows URI handling breaks path containment | Centralize URI conversion and add Windows, nested-root, and sibling-prefix tests. |
 | Direct and LSP providers return duplicate results during rollout | Make modes mutually exclusive and test both paths in CI rather than activating both in one window. |
 | Server requests monopolize its event loop | Honor cancellation, debounce document diagnostics, coalesce file events, and retain bounded file-read concurrency. |
 | Custom protocol grows into a second ad hoc API | Use standard LSP features for language operations and reserve typed custom requests for UI/reporting operations only. |

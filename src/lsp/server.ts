@@ -1,23 +1,30 @@
 import {
   createConnection,
+  DidChangeConfigurationNotification,
   type InitializeParams,
   type InitializeResult,
-  TextDocumentSyncKind,
   TextDocuments,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { toLspCompletionKind } from "../adapters/lsp/language-types";
+import { resolveExtensionConfig } from "../core/settings";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
-
-type SpikeInitializationOptions = {
-  verifyRuntimeDependencies?: boolean;
-};
+import {
+  applyWorkspaceFolderChange,
+  buildInitializeResult,
+  resolveServerEnvironment,
+  type ServerEnvironment,
+  type ServerInitializationOptions,
+} from "./server-environment";
 
 const SPIKE_MARKER = "angular-auto-import-lsp-spike";
+const SERVER_NAME = "Angular Auto Import LSP Spike";
+const CONFIGURATION_SECTION = "angular-auto-import";
 
 const connection = createConnection();
 const documents = new TextDocuments(TextDocument);
 let runtimeDependenciesLoaded = false;
+let environment: ServerEnvironment | undefined;
 
 async function loadRuntimeDependencies(): Promise<void> {
   const [compiler, tsMorph] = await Promise.all([import("@angular/compiler"), import("ts-morph")]);
@@ -28,23 +35,58 @@ async function loadRuntimeDependencies(): Promise<void> {
 }
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
-  const initializationOptions = (params.initializationOptions ?? {}) as SpikeInitializationOptions;
-  if (initializationOptions.verifyRuntimeDependencies) {
+  environment = resolveServerEnvironment(params);
+  const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
+  if (options.verifyRuntimeDependencies) {
     await loadRuntimeDependencies();
   }
 
-  return {
-    capabilities: {
-      textDocumentSync: TextDocumentSyncKind.Incremental,
-      completionProvider: {
-        triggerCharacters: ["<", "|", " ", "[", "*"],
-      },
-    },
-    serverInfo: {
-      name: "Angular Auto Import LSP Spike",
-    },
-  };
+  connection.console.info(
+    `[server] initialized for ${environment.workspaceRoots.length} workspace root(s); storage: ${environment.storagePath ?? "none"}`
+  );
+
+  return buildInitializeResult(environment, SERVER_NAME);
 });
+
+connection.onInitialized(async () => {
+  if (environment?.client.configuration) {
+    await connection.client.register(DidChangeConfigurationNotification.type, { section: CONFIGURATION_SECTION });
+    await pullConfiguration();
+  }
+
+  if (environment?.client.workspaceFolders) {
+    connection.workspace.onDidChangeWorkspaceFolders((event) => {
+      if (!environment) {
+        return;
+      }
+      environment.workspaceRoots = applyWorkspaceFolderChange(environment.workspaceRoots, event);
+      connection.console.info(`[server] workspace roots now: ${environment.workspaceRoots.length}`);
+    });
+  }
+});
+
+connection.onDidChangeConfiguration(async (params) => {
+  if (!environment) {
+    return;
+  }
+
+  if (environment.client.configuration) {
+    await pullConfiguration();
+    return;
+  }
+
+  const pushed = (params.settings as Record<string, unknown> | null)?.[CONFIGURATION_SECTION];
+  environment.config = resolveExtensionConfig(pushed);
+});
+
+/** Reads the authoritative settings from a client that answers configuration requests. */
+async function pullConfiguration(): Promise<void> {
+  if (!environment) {
+    return;
+  }
+  const [settings] = await connection.workspace.getConfiguration([{ section: CONFIGURATION_SECTION }]);
+  environment.config = resolveExtensionConfig(settings);
+}
 
 connection.onCompletion((params) => {
   const document = documents.get(params.textDocument.uri);

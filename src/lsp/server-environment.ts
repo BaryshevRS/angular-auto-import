@@ -1,0 +1,154 @@
+/**
+ * Resolves what the server learned from `initialize`.
+ *
+ * The handshake is the only place the server hears about workspace roots, storage,
+ * settings, and what the client can do. Parsing it is kept pure so the answers can be
+ * asserted without a live JSON-RPC connection.
+ * @module
+ */
+
+import type { InitializeParams, InitializeResult, ServerCapabilities } from "vscode-languageserver/node";
+import { TextDocumentSyncKind } from "vscode-languageserver/node";
+import { fileUriToPath } from "../core/document";
+import { type ExtensionConfig, resolveExtensionConfig } from "../core/settings";
+
+/** Completion trigger characters, kept identical to the direct provider's. */
+export const COMPLETION_TRIGGER_CHARACTERS = ["<", "|", " ", "[", "*"];
+
+/** What the client told us it supports, limited to the parts the server acts on. */
+export interface ClientSupport {
+  /** The client answers `workspace/configuration` pull requests. */
+  configuration: boolean;
+  /** The client reports workspace folders and their changes. */
+  workspaceFolders: boolean;
+  /** The client can register file watchers on the server's behalf. */
+  didChangeWatchedFiles: boolean;
+}
+
+/** Everything one server instance needs from the handshake. */
+export interface ServerEnvironment {
+  /** Absolute filesystem paths of the workspace roots, in the order the client sent them. */
+  workspaceRoots: string[];
+  /** Directory the client set aside for this workspace's caches, when it provided one. */
+  storagePath: string | undefined;
+  config: ExtensionConfig;
+  client: ClientSupport;
+}
+
+/** Options the client passes at `initialize`. */
+export interface ServerInitializationOptions {
+  settings?: unknown;
+  storagePath?: string;
+  /** Development-only: verify that the heavy runtime dependencies load in this process. */
+  verifyRuntimeDependencies?: boolean;
+}
+
+/**
+ * Reads the handshake into the server's own view of the world.
+ * @param params The `initialize` request parameters.
+ */
+export function resolveServerEnvironment(params: InitializeParams): ServerEnvironment {
+  const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
+  const workspace = params.capabilities.workspace;
+
+  return {
+    workspaceRoots: resolveWorkspaceRoots(params),
+    storagePath: typeof options.storagePath === "string" ? options.storagePath : undefined,
+    config: resolveExtensionConfig(options.settings),
+    client: {
+      configuration: workspace?.configuration === true,
+      workspaceFolders: workspace?.workspaceFolders === true,
+      didChangeWatchedFiles: workspace?.didChangeWatchedFiles?.dynamicRegistration === true,
+    },
+  };
+}
+
+/**
+ * Prefers the workspace folders the client advertised, falling back to the deprecated
+ * single-root fields older clients still send.
+ * @internal
+ */
+function resolveWorkspaceRoots(params: InitializeParams): string[] {
+  const folders = params.workspaceFolders;
+  if (folders && folders.length > 0) {
+    return folders.map((folder) => toPath(folder.uri)).filter((path): path is string => path !== undefined);
+  }
+
+  const rootFromUri = params.rootUri ? toPath(params.rootUri) : undefined;
+  if (rootFromUri) {
+    return [rootFromUri];
+  }
+
+  return params.rootPath ? [params.rootPath] : [];
+}
+
+/**
+ * Converts a workspace URI to a filesystem path, skipping anything not on disk.
+ * @internal
+ */
+function toPath(uri: string): string | undefined {
+  try {
+    return fileUriToPath(uri);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Builds the capabilities the server answers `initialize` with.
+ * @param environment The resolved handshake, which decides the workspace-folder support.
+ */
+export function buildServerCapabilities(environment: ServerEnvironment): ServerCapabilities {
+  const capabilities: ServerCapabilities = {
+    textDocumentSync: TextDocumentSyncKind.Incremental,
+    completionProvider: {
+      triggerCharacters: COMPLETION_TRIGGER_CHARACTERS,
+    },
+  };
+
+  if (environment.client.workspaceFolders) {
+    capabilities.workspace = {
+      workspaceFolders: {
+        supported: true,
+        changeNotifications: true,
+      },
+    };
+  }
+
+  return capabilities;
+}
+
+/**
+ * Applies a workspace-folder change to the roots the server tracks, keeping the order
+ * stable and ignoring folders that are not on disk.
+ * @param roots The roots known so far.
+ * @param change The added and removed folder URIs.
+ */
+export function applyWorkspaceFolderChange(
+  roots: string[],
+  change: { added: readonly { uri: string }[]; removed: readonly { uri: string }[] }
+): string[] {
+  const removed = new Set(change.removed.map((folder) => toPath(folder.uri)));
+  const kept = roots.filter((root) => !removed.has(root));
+
+  for (const folder of change.added) {
+    const path = toPath(folder.uri);
+    if (path && !kept.includes(path)) {
+      kept.push(path);
+    }
+  }
+
+  return kept;
+}
+
+/**
+ * Builds the `initialize` response.
+ * @param environment The resolved handshake.
+ * @param name The server name reported to the client.
+ */
+export function buildInitializeResult(environment: ServerEnvironment, name: string): InitializeResult {
+  return {
+    capabilities: buildServerCapabilities(environment),
+    serverInfo: { name },
+  };
+}

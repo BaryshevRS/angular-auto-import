@@ -7,7 +7,9 @@ import {
   State,
   TransportKind,
 } from "vscode-languageclient/node";
+import { getConfiguration } from "../config/settings";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
+import type { ServerInitializationOptions } from "./server-environment";
 
 const LSP_SPIKE_ENV = "AAI_LSP_SPIKE";
 
@@ -44,7 +46,12 @@ export async function startLspSpike(context: vscode.ExtensionContext): Promise<v
       { scheme: "file", language: "typescript" },
     ],
     initializationOptions: {
+      settings: getConfiguration(),
+      storagePath: context.storageUri?.fsPath ?? context.globalStorageUri.fsPath,
       verifyRuntimeDependencies: true,
+    } satisfies ServerInitializationOptions,
+    synchronize: {
+      configurationSection: "angular-auto-import",
     },
     connectionOptions: {
       maxRestartCount: 2,

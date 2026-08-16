@@ -7,112 +7,9 @@
  * @module
  */
 import * as vscode from "vscode";
+import { DEFAULT_EXTENSION_CONFIG, type ExtensionConfig } from "../core/settings";
 
-/**
- * Configuration interface for the Angular Auto-Import extension.
- *
- * Contains all user-configurable settings that control the behavior
- * of the Angular Auto-Import extension.
- *
- * @interface ExtensionConfig
- *
- * @example
- * ```typescript
- * const config: ExtensionConfig = {
- *   projectPath: '/path/to/project',
- *   indexRefreshInterval: 60,
- *   diagnosticsEnabled: true,
- *   diagnosticsSeverity: 'warning'
- * };
- * ```
- */
-export interface ExtensionConfig {
-  /**
-   * Optional path to a specific Angular project.
-   * When null, the extension will auto-detect projects in the workspace.
-   */
-  projectPath: string | null;
-  /**
-   * Interval in seconds for automatic index refresh.
-   * Set to 0 to disable automatic refresh.
-   * @default 60
-   */
-  indexRefreshInterval: number;
-  /**
-   * Auto-completion configuration for Angular elements.
-   */
-  completion: {
-    /**
-     * Whether to enable auto-completion suggestions for Angular pipes.
-     * @default true
-     */
-    pipes: boolean;
-    /**
-     * Whether to enable auto-completion suggestions for Angular components.
-     * @default true
-     */
-    components: boolean;
-    /**
-     * Whether to enable auto-completion suggestions for Angular directives.
-     * @default true
-     */
-    directives: boolean;
-  };
-  /**
-   * Diagnostic mode for missing imports.
-   * - 'full': Show diagnostic underlines and provide quick fixes
-   * - 'quickfix-only': Provide quick fixes without showing diagnostic underlines
-   * - 'disabled': Turn off all diagnostics
-   * @default 'full'
-   */
-  diagnosticsMode: string;
-  /**
-   * Severity level for diagnostic messages.
-   * Valid values: 'error', 'warning', 'information', 'hint'
-   * @default 'warning'
-   */
-  diagnosticsSeverity: string;
-  /**
-   * Logging configuration settings.
-   */
-  logging: {
-    /**
-     * Whether logging is enabled.
-     * @default true
-     */
-    enabled: boolean;
-    /**
-     * Logging level threshold.
-     * @default 'INFO'
-     */
-    level: string;
-    /**
-     * Whether file logging is enabled.
-     * @default false
-     */
-    fileLoggingEnabled: boolean;
-    /**
-     * Directory for log files.
-     * @default null
-     */
-    logDirectory: string | null;
-    /**
-     * Maximum log file size in MB before rotation.
-     * @default 5
-     */
-    rotationMaxSize: number;
-    /**
-     * Maximum number of log files to keep.
-     * @default 5
-     */
-    rotationMaxFiles: number;
-    /**
-     * Log output format.
-     * @default 'plain'
-     */
-    outputFormat: string;
-  };
-}
+export type { ExtensionConfig } from "../core/settings";
 
 /**
  * Retrieves the current extension configuration from VS Code settings.
@@ -132,25 +29,26 @@ export interface ExtensionConfig {
  */
 export function getConfiguration(): ExtensionConfig {
   const config = vscode.workspace.getConfiguration("angular-auto-import");
+  const defaults = DEFAULT_EXTENSION_CONFIG;
 
   return {
-    projectPath: config.get<string | null>("projectPath", null),
-    indexRefreshInterval: config.get<number>("index.refreshInterval", 60),
+    projectPath: config.get<string | null>("projectPath", defaults.projectPath),
+    indexRefreshInterval: config.get<number>("index.refreshInterval", defaults.indexRefreshInterval),
     completion: {
-      pipes: config.get<boolean>("completion.pipes.enabled", true),
-      components: config.get<boolean>("completion.components.enabled", true),
-      directives: config.get<boolean>("completion.directives.enabled", true),
+      pipes: config.get<boolean>("completion.pipes.enabled", defaults.completion.pipes),
+      components: config.get<boolean>("completion.components.enabled", defaults.completion.components),
+      directives: config.get<boolean>("completion.directives.enabled", defaults.completion.directives),
     },
-    diagnosticsMode: config.get<string>("diagnostics.mode", "full"),
-    diagnosticsSeverity: config.get<string>("diagnostics.severity", "warning"),
+    diagnosticsMode: config.get<string>("diagnostics.mode", defaults.diagnosticsMode),
+    diagnosticsSeverity: config.get<string>("diagnostics.severity", defaults.diagnosticsSeverity),
     logging: {
-      enabled: config.get<boolean>("logging.enabled", true),
-      level: config.get<string>("logging.level", "INFO"),
-      fileLoggingEnabled: config.get<boolean>("logging.fileLoggingEnabled", false),
-      logDirectory: config.get<string | null>("logging.logDirectory", null),
-      rotationMaxSize: config.get<number>("logging.rotationMaxSize", 5),
-      rotationMaxFiles: config.get<number>("logging.rotationMaxFiles", 5),
-      outputFormat: config.get<string>("logging.outputFormat", "plain"),
+      enabled: config.get<boolean>("logging.enabled", defaults.logging.enabled),
+      level: config.get<string>("logging.level", defaults.logging.level),
+      fileLoggingEnabled: config.get<boolean>("logging.fileLoggingEnabled", defaults.logging.fileLoggingEnabled),
+      logDirectory: config.get<string | null>("logging.logDirectory", defaults.logging.logDirectory),
+      rotationMaxSize: config.get<number>("logging.rotationMaxSize", defaults.logging.rotationMaxSize),
+      rotationMaxFiles: config.get<number>("logging.rotationMaxFiles", defaults.logging.rotationMaxFiles),
+      outputFormat: config.get<string>("logging.outputFormat", defaults.logging.outputFormat),
     },
   };
 }
