@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 in progress — the server owns the handshake, lazy project discovery, one runtime per root, source indexing, watched files, and its own cache; log forwarding and cancellation remain, as do representative performance measurements
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 (LSP language features) is next
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -244,14 +244,20 @@ Exit criteria:
   - [x] One JSON file per root under the client's storage directory (`lsp/file-cache-store`), loaded once at open because `CacheStore` reads synchronously, written through a temporary file so a crash cannot truncate it.
   - [x] Reuse a cached index only when the schema version, the root, and the project fingerprint all still match; anything else starts empty and lets the caller reindex.
   - [x] Open one cache per `ProjectRuntime`, so two roots never read each other's index.
-- [ ] Forward structured server logs to the LanguageClient output channel.
-- [ ] Add cancellation and index-generation guards around long-running indexing.
+- [x] Forward structured server logs to the LanguageClient output channel.
+  - [x] Filter and format server logs by the user's existing `logging` settings (`lsp/server-logging`), in the same `[timestamp][LEVEL]` shape the host's output channel uses, or as one JSON object per entry when `outputFormat` is `json`.
+  - [x] Reapply the settings on every configuration change, pulled or pushed.
+- [x] Add cancellation and index-generation guards around long-running indexing.
+  - [x] Add a cooperative `CancellationSignal` (`core/cancellation`); a full index checks it between batches, before dependency indexing, and per dependency, and a cancelled scan clears what it built instead of serving or persisting half an index.
+  - [x] Cancel a project's indexing when its runtime is disposed, so a root that left the workspace stops working immediately.
+  - [x] Track an index generation per runtime, so Phase 3 can discard results computed against an index that no longer exists.
+  - [x] Share one in-flight creation per root in `ProjectRuntimeHost`, so concurrent document opens cannot build two indexes for one project.
 
 Exit criteria:
 
-- Cold/warm starts produce the same selector/module indexes as the direct implementation.
-- Nested and sibling projects remain isolated.
-- Source and dependency changes update the appropriate index without reloading VS Code.
+- Cold/warm starts produce the same selector/module indexes as the direct implementation. Both runtimes now drive the same `AngularIndexer` through the same ports, but the index snapshots have not been compared side by side yet; that comparison belongs with the Phase 5 snapshot work.
+- Nested and sibling projects remain isolated. Covered by the runtime tests: separate indexes, separate alias resolution, separate caches.
+- Source and dependency changes update the appropriate index without reloading VS Code. Covered by the watched-file routing tests and a runtime test that adds, renames, and deletes a component.
 
 ### Phase 3 — LSP language features (4–6 days)
 

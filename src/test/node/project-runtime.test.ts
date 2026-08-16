@@ -258,6 +258,28 @@ describe("LSP project runtime", function () {
     runtime.dispose();
   });
 
+  it("advances its index generation only when the index changes", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const componentPath = path.join(root, "src", "shop-card.component.ts");
+    await writeProject(root);
+    const watched = new WatchedFiles();
+    const runtime = new ProjectRuntime(root, { fileWatchers: watched });
+    await runtime.load();
+    const afterLoad = runtime.indexGeneration;
+
+    watched.dispatch([
+      { uri: pathToFileURL(path.join(root, "src", "styles.css")).toString(), type: FileChangeType.Changed },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(runtime.indexGeneration, afterLoad, "An unwatched file must not invalidate anything");
+
+    await writeComponent(root, "ShopCardComponent", "shop-card");
+    watched.dispatch([{ uri: pathToFileURL(componentPath).toString(), type: FileChangeType.Created }]);
+    await waitFor(() => runtime.indexGeneration > afterLoad);
+
+    assert.ok(runtime.indexGeneration > afterLoad);
+  });
+
   it("drops the index and the parsed configuration when disposed", async () => {
     const root = path.join(sandbox, "apps", "shop");
     await writeProject(root, { "@shop/*": ["src/*"] });
@@ -284,6 +306,23 @@ describe("LSP project runtime host", function () {
 
   afterEach(async () => {
     await fs.rm(sandbox, { recursive: true, force: true });
+  });
+
+  it("creates one runtime when two documents of the same root arrive at once", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    await writeProject(root);
+    let creations = 0;
+    const host = new ProjectRuntimeHost({
+      createRuntime: (rootPath: string) => {
+        creations += 1;
+        return new ProjectRuntime(rootPath);
+      },
+    });
+
+    await Promise.all([host.create(root), host.create(root), host.create(root)]);
+
+    assert.strictEqual(creations, 1, "Concurrent opens must not build a second index for one root");
+    assert.deepStrictEqual(host.roots(), [root]);
   });
 
   it("creates one runtime per root and keeps it across repeated requests", async () => {

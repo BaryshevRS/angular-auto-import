@@ -10,6 +10,7 @@
 
 import { createNodeFileSystem } from "../adapters/node/file-system";
 import { type CacheStore, createMemoryCacheStore } from "../core/cache";
+import { type CancellationSource, createCancellationSource } from "../core/cancellation";
 import type { FileSystem } from "../core/file-system";
 import type { FileWatcherFactory } from "../core/file-watching";
 import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../core/logging";
@@ -52,6 +53,9 @@ export class ProjectRuntime {
   private readonly cacheStore: CacheStore;
   private readonly persistentCache: FileCacheStore | undefined;
   private readonly reindexIntervalMinutes: number;
+  private readonly cancellation: CancellationSource = createCancellationSource();
+  private readonly indexSubscription: { dispose(): void };
+  private generation = 0;
   private reindexTimer: NodeJS.Timeout | undefined;
   private processedTsConfig: ProcessedTsConfig | null = null;
   private loadedFromCache = false;
@@ -73,6 +77,19 @@ export class ProjectRuntime {
       progressHost: options.progressHost ?? silentProgressHost,
       fileWatchers: options.fileWatchers ?? inertFileWatchers,
     });
+    this.indexSubscription = this.indexer.onDidChangeIndex(() => {
+      this.generation += 1;
+    });
+  }
+
+  /**
+   * Advances whenever this project's index changes.
+   *
+   * A result computed against an older generation was computed against an index that
+   * no longer exists, and must be discarded rather than returned.
+   */
+  get indexGeneration(): number {
+    return this.generation;
   }
 
   /** The project's parsed TypeScript configuration, or `null` when it has none. */
@@ -115,7 +132,7 @@ export class ProjectRuntime {
     this.indexer.setProjectRoot(this.rootPath);
     this.loadedFromCache = reusedCache && (await this.indexer.loadFromWorkspace());
     if (!this.loadedFromCache) {
-      await this.indexer.generateFullIndex();
+      await this.indexer.generateFullIndex(undefined, this.cancellation.signal);
     }
     if (this.disposed) {
       return;
@@ -142,6 +159,8 @@ export class ProjectRuntime {
   /** Releases everything this root owns, leaving nothing behind for another root to read. */
   dispose(): void {
     this.disposed = true;
+    this.cancellation.cancel();
+    this.indexSubscription.dispose();
     if (this.reindexTimer) {
       clearInterval(this.reindexTimer);
       this.reindexTimer = undefined;
@@ -164,7 +183,7 @@ export class ProjectRuntime {
 
     this.reindexTimer = setInterval(
       () => {
-        void this.indexer.generateFullIndex().catch((error) => {
+        void this.indexer.generateFullIndex(undefined, this.cancellation.signal).catch((error) => {
           this.logger.error(`Periodic reindex failed for ${this.rootPath}`, error as Error);
         });
       },

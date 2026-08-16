@@ -8,7 +8,7 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { toLspCompletionKind } from "../adapters/lsp/language-types";
-import { type InstrumentedLogger, installSharedLogger, withInstrumentation } from "../core/logging";
+import { installSharedLogger } from "../core/logging";
 import { resolveExtensionConfig } from "../core/settings";
 import { ProjectRuntimeHost } from "./project-runtime-host";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
@@ -19,6 +19,7 @@ import {
   type ServerEnvironment,
   type ServerInitializationOptions,
 } from "./server-environment";
+import { ServerLogging } from "./server-logging";
 import { ServerProjects } from "./server-projects";
 import { WatchedFiles } from "./watched-files";
 
@@ -34,13 +35,9 @@ let projects: ServerProjects | undefined;
 let runtimes: ProjectRuntimeHost | undefined;
 let watchedFiles: WatchedFiles | undefined;
 
-/** Routes core logs to the client's output channel until structured forwarding lands. */
-const serverLogger: InstrumentedLogger = withInstrumentation({
-  debug: (message) => connection.console.log(message),
-  info: (message) => connection.console.info(message),
-  warn: (message) => connection.console.warn(message),
-  error: (message, error) => connection.console.error(error ? `${message}: ${error.message}` : message),
-});
+/** Routes the server's logs to the client's output channel, filtered by the user's settings. */
+const logging = new ServerLogging(connection.console);
+const serverLogger = logging.logger;
 
 async function loadRuntimeDependencies(): Promise<void> {
   const [compiler, tsMorph] = await Promise.all([import("@angular/compiler"), import("ts-morph")]);
@@ -53,13 +50,14 @@ async function loadRuntimeDependencies(): Promise<void> {
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
   installSharedLogger(serverLogger);
   environment = resolveServerEnvironment(params);
+  logging.configure(environment.config.logging);
   const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
   if (options.verifyRuntimeDependencies) {
     await loadRuntimeDependencies();
   }
 
-  connection.console.info(
-    `[server] initialized for ${environment.workspaceRoots.length} workspace root(s); storage: ${environment.storagePath ?? "none"}`
+  serverLogger.info(
+    `Initialized for ${environment.workspaceRoots.length} workspace root(s); storage: ${environment.storagePath ?? "none"}`
   );
 
   return buildInitializeResult(environment, SERVER_NAME);
@@ -81,7 +79,7 @@ connection.onInitialized(async () => {
         return;
       }
       environment.workspaceRoots = applyWorkspaceFolderChange(environment.workspaceRoots, event);
-      connection.console.info(`[server] workspace roots now: ${environment.workspaceRoots.length}`);
+      serverLogger.info(`Workspace roots now: ${environment.workspaceRoots.length}`);
       void projects?.setWorkspaceRoots(environment.workspaceRoots);
     });
   }
@@ -106,7 +104,7 @@ connection.onInitialized(async () => {
     disposeRoot: (rootPath) => runtimeHost.dispose(rootPath),
   });
   await projects.start(documents);
-  connection.console.info(`[server] discovered ${projects.knownRoots().length} Angular project root(s)`);
+  serverLogger.info(`Discovered ${projects.knownRoots().length} Angular project root(s)`);
 });
 
 connection.onDidChangeWatchedFiles((params) => {
@@ -134,6 +132,7 @@ connection.onDidChangeConfiguration(async (params) => {
 
   const pushed = (params.settings as Record<string, unknown> | null)?.[CONFIGURATION_SECTION];
   environment.config = resolveExtensionConfig(pushed);
+  logging.configure(environment.config.logging);
 });
 
 /** Reads the authoritative settings from a client that answers configuration requests. */
@@ -143,6 +142,7 @@ async function pullConfiguration(): Promise<void> {
   }
   const [settings] = await connection.workspace.getConfiguration([{ section: CONFIGURATION_SECTION }]);
   environment.config = resolveExtensionConfig(settings);
+  logging.configure(environment.config.logging);
 }
 
 connection.onCompletion((params) => {

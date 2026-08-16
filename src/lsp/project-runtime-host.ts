@@ -27,6 +27,8 @@ export interface ProjectRuntimeHostOptions {
  */
 export class ProjectRuntimeHost {
   private readonly runtimes = new Map<string, ProjectRuntime>();
+  /** Creations still in flight, so two documents opening at once share one runtime. */
+  private readonly creating = new Map<string, Promise<void>>();
   private readonly logger: InstrumentedLogger;
   private readonly createRuntime: (rootPath: string, logger: InstrumentedLogger) => ProjectRuntime;
 
@@ -52,6 +54,27 @@ export class ProjectRuntimeHost {
       return;
     }
 
+    const pending = this.creating.get(rootPath);
+    if (pending) {
+      await pending;
+      return;
+    }
+
+    const creation = this.load(rootPath);
+    this.creating.set(rootPath, creation);
+    try {
+      await creation;
+    } finally {
+      this.creating.delete(rootPath);
+    }
+  }
+
+  /**
+   * Builds and loads one runtime, leaving nothing behind if either step fails or if the
+   * root was released while it was loading.
+   * @internal
+   */
+  private async load(rootPath: string): Promise<void> {
     const runtime = this.createRuntime(rootPath, this.logger);
     try {
       await runtime.load();

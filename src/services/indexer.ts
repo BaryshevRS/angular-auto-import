@@ -22,6 +22,7 @@ import {
 
 import { isLibraryExcluded } from "../config/excluded-libraries";
 import type { CacheStore } from "../core/cache";
+import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import { AngularElementIndex, type ComponentToModuleMap } from "../core/element-index";
 import type { Disposable } from "../core/events";
 import { Emitter, type EventSource } from "../core/events";
@@ -953,9 +954,13 @@ export class AngularIndexer {
   /**
    * Generates a full index of the project.
    * @param progress Optional progress reporter for the caller's UI.
+   * @param cancellation Checked between batches; a cancelled scan stops without saving.
    * @returns A map of selectors to `AngularElementData` objects.
    */
-  async generateFullIndex(progress?: ProgressReporter): Promise<Map<string, AngularElementData>> {
+  async generateFullIndex(
+    progress?: ProgressReporter,
+    cancellation: CancellationSignal = neverCancelled
+  ): Promise<Map<string, AngularElementData>> {
     if (this.isIndexing) {
       this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Already indexing, skipping...`);
       return new Map(this.index.selectors.getAllElements().map((e) => [e.originalSelector, e]));
@@ -1004,6 +1009,9 @@ export class AngularIndexer {
       progress?.report({ message: "Indexing project components..." });
       const batchSize = 20; // Process in batches
       for (let i = 0; i < componentFiles.length; i += batchSize) {
+        if (cancellation.isCancelled) {
+          return this.abandonIndexing();
+        }
         const batch = componentFiles.slice(i, i + batchSize);
         // Sequentially process files in a batch to avoid overwhelming ts-morph or fs
         for (const filePath of batch) {
@@ -1019,7 +1027,15 @@ export class AngularIndexer {
       const totalElements = this.index.selectors.getAllElements().length;
       this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Indexed ${totalElements} elements.`);
 
-      await this.indexNodeModules(progress);
+      if (cancellation.isCancelled) {
+        return this.abandonIndexing();
+      }
+
+      await this.indexNodeModules(progress, cancellation);
+
+      if (cancellation.isCancelled) {
+        return this.abandonIndexing();
+      }
 
       // Expand module exports to include transitive dependencies
       // This must happen after all modules are indexed (both project and node_modules)
@@ -1038,6 +1054,18 @@ export class AngularIndexer {
       this.isIndexing = false;
       this.logger.stopTimer(timerName);
     }
+  }
+
+  /**
+   * Drops the half-built index of a cancelled scan, so nothing partial is served or
+   * persisted and the next scan starts from a clean state.
+   * @internal
+   */
+  private abandonIndexing(): Map<string, AngularElementData> {
+    this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Full index cancelled.`);
+    this.index.clear();
+    removeAllSourceFiles(this.project, "cancelled index", this.logger);
+    return new Map();
   }
 
   /**
@@ -1393,7 +1421,10 @@ export class AngularIndexer {
    * Indexes all Angular libraries in `node_modules`.
    * @param progress Optional progress reporter to use instead of creating a new one.
    */
-  public async indexNodeModules(progress?: ProgressReporter): Promise<void> {
+  public async indexNodeModules(
+    progress?: ProgressReporter,
+    cancellation: CancellationSignal = neverCancelled
+  ): Promise<void> {
     const timerName = `indexNodeModules:${path.basename(this.projectRootPath)}`;
     this.logger.startTimer(timerName);
 
@@ -1417,6 +1448,10 @@ export class AngularIndexer {
         let processedCount = 0;
 
         for (const dep of angularDeps) {
+          if (cancellation.isCancelled) {
+            this.logger.info(`[indexNodeModules] Cancelled after ${processedCount}/${totalDeps} libraries.`);
+            return;
+          }
           processedCount++;
           progressReporter.report({
             message: `Processing ${dep.name}... (${processedCount}/${totalDeps})`,
