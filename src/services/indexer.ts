@@ -20,9 +20,6 @@ import {
   type TypeReferenceNode,
 } from "ts-morph";
 
-import { createVsCodeFileSystem } from "../adapters/vscode/file-system";
-import { createVsCodeFileWatcherFactory } from "../adapters/vscode/file-watching";
-import { createVsCodeProgressHost } from "../adapters/vscode/progress";
 import { isLibraryExcluded } from "../config/excluded-libraries";
 import type { CacheStore } from "../core/cache";
 import { AngularElementIndex, type ComponentToModuleMap } from "../core/element-index";
@@ -34,7 +31,9 @@ import type { CoreLogger, InstrumentedLogger, PerformanceMetrics } from "../core
 import type { ProgressHost, ProgressReporter } from "../core/progress";
 import { isProjectSourceFile, projectSourceQuery } from "../core/source-files";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
-import { debounce, findAngularDependencies, getLibraryEntryPoints, isStandalone, parseAngularSelector } from "../utils";
+import { isStandalone, parseAngularSelector } from "../utils/angular";
+import { debounce } from "../utils/debounce";
+import { findAngularDependencies, getLibraryEntryPoints } from "../utils/package-json";
 
 /**
  * Glob (relative to the project root) matching dependency manifests and lock files.
@@ -159,9 +158,12 @@ export interface AngularIndexerOptions {
   cacheStore: CacheStore;
   /** Where this indexer reports progress, timings, and failures. */
   logger: InstrumentedLogger;
-  fileSystem?: FileSystem;
-  progressHost?: ProgressHost;
-  fileWatchers?: FileWatcherFactory;
+  /** How this indexer reaches the disk. */
+  fileSystem: FileSystem;
+  /** Where long operations report their progress. */
+  progressHost: ProgressHost;
+  /** How this indexer learns that a watched file changed. */
+  fileWatchers: FileWatcherFactory;
 }
 
 /**
@@ -227,18 +229,17 @@ export class AngularIndexer {
   private readonly fileWatchers: FileWatcherFactory;
 
   /**
-   * File access, progress presentation, and persistence are injected so the indexer
-   * can run under the language server, which has neither `workspace.findFiles` nor
-   * notification progress nor a workspace memento. The Extension Host adapters stay
-   * the default while both runtimes exist.
+   * Every port is injected: the indexer runs under the Extension Host and under the
+   * language server, which has neither `workspace.findFiles` nor notification progress
+   * nor a workspace memento, and it must not reach for `vscode` on its own.
    * @param options Ports this indexer reads and writes through.
    */
   constructor(options: AngularIndexerOptions) {
-    this.fileSystem = options.fileSystem ?? createVsCodeFileSystem();
-    this.progressHost = options.progressHost ?? createVsCodeProgressHost();
+    this.fileSystem = options.fileSystem;
+    this.progressHost = options.progressHost;
     this.cacheStore = options.cacheStore;
     this.logger = options.logger;
-    this.fileWatchers = options.fileWatchers ?? createVsCodeFileWatcherFactory();
+    this.fileWatchers = options.fileWatchers;
     this.project = new Project({
       useInMemoryFileSystem: false, // Keep this as false for real file system interaction
       skipAddingFilesFromTsConfig: true,

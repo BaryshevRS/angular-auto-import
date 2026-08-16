@@ -7,7 +7,7 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { toLspCompletionKind } from "../adapters/lsp/language-types";
-import { type InstrumentedLogger, withInstrumentation } from "../core/logging";
+import { type InstrumentedLogger, installSharedLogger, withInstrumentation } from "../core/logging";
 import { resolveExtensionConfig } from "../core/settings";
 import { ProjectRuntimeHost } from "./project-runtime-host";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
@@ -48,6 +48,7 @@ async function loadRuntimeDependencies(): Promise<void> {
 }
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
+  installSharedLogger(serverLogger);
   environment = resolveServerEnvironment(params);
   const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
   if (options.verifyRuntimeDependencies) {

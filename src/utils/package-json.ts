@@ -5,7 +5,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "../logger";
+import { sharedLogger } from "../core/logging";
 
 /**
  * Information about an Angular dependency found in `node_modules`.
@@ -50,7 +50,10 @@ async function getRootPackageJson(projectRootPath: string): Promise<PackageJson 
     const content = await fs.readFile(packageJsonPath, "utf-8");
     return JSON.parse(content) as PackageJson;
   } catch (error) {
-    logger.error(`[PackageJson] Error reading or parsing root package.json at ${packageJsonPath}`, error as Error);
+    sharedLogger().error(
+      `[PackageJson] Error reading or parsing root package.json at ${packageJsonPath}`,
+      error as Error
+    );
     return null;
   }
 }
@@ -117,7 +120,7 @@ export async function getLibraryEntryPoints(library: AngularDependency): Promise
     const packageJson = await loadPackageJson(library.path);
     processPackageJsonEntryPoints(packageJson, library, entryPoints);
   } catch (error) {
-    logger.error(`[PackageJson] Error getting entry points for ${library.name}`, error as Error);
+    sharedLogger().error(`[PackageJson] Error getting entry points for ${library.name}`, error as Error);
   }
 
   return entryPoints;

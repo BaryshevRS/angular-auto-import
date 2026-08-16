@@ -20,8 +20,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { createVsCodeCacheStore } from "./adapters/vscode/cache-store";
+import { createVsCodeFileSystem } from "./adapters/vscode/file-system";
+import { createVsCodeFileWatcherFactory } from "./adapters/vscode/file-watching";
+import { createVsCodeProgressHost } from "./adapters/vscode/progress";
 import { type CommandContext, registerCommands } from "./commands";
 import { type ExtensionConfig, getConfiguration, onConfigurationChanged } from "./config";
+import { installSharedLogger } from "./core/logging";
 import { AngularProjectDiscovery } from "./core/project-discovery";
 import { ProjectRegistry, type ProjectRegistryOptions } from "./core/project-registry";
 import { logger } from "./logger";
@@ -127,6 +131,7 @@ export async function activate(
 ): Promise<void> {
   const currentActivationGeneration = ++activationGeneration;
   logger.initialize(context);
+  installSharedLogger(logger);
   try {
     logger.info("🚀 Angular Auto-Import: Starting activation...");
 
@@ -394,7 +399,13 @@ async function initializeProjects(
       }
 
       // Initialize indexer
-      indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(context.workspaceState), logger });
+      indexer = new AngularIndexer({
+        cacheStore: createVsCodeCacheStore(context.workspaceState),
+        logger,
+        fileSystem: createVsCodeFileSystem(),
+        progressHost: createVsCodeProgressHost(),
+        fileWatchers: createVsCodeFileWatcherFactory(),
+      });
 
       await generateInitialIndexForProject(projectRootPath, indexer);
 

@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ProjectRuntime } from "../../lsp/project-runtime";
 import { ProjectRuntimeHost } from "../../lsp/project-runtime-host";
-import { AngularElementData } from "../../types/angular";
 
 async function writeProject(root: string, paths: Record<string, string[]> = {}): Promise<void> {
   await fs.mkdir(path.join(root, "src"), { recursive: true });
@@ -15,16 +14,25 @@ async function writeProject(root: string, paths: Record<string, string[]> = {}):
   );
 }
 
-function element(name: string, root: string): AngularElementData {
-  return new AngularElementData({
-    path: path.join(root, "src", "shared", `${name}.ts`),
-    name,
-    type: "component",
-    originalSelector: name,
-    selectors: [name],
-    isStandalone: true,
-    isExternal: false,
-  });
+/** Writes a standalone component the indexer can actually pick up. */
+async function writeComponent(root: string, className: string, selector: string): Promise<void> {
+  const filePath = path.join(root, "src", `${selector}.component.ts`);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(
+    filePath,
+    [
+      'import { Component } from "@angular/core";',
+      "",
+      "@Component({",
+      `  selector: "${selector}",`,
+      "  standalone: true,",
+      '  template: "",',
+      "})",
+      `export class ${className} {}`,
+      "",
+    ].join("\n"),
+    "utf8"
+  );
 }
 
 describe("LSP project runtime", function () {
@@ -81,11 +89,10 @@ describe("LSP project runtime", function () {
     const modernRoot = path.join(sandbox, "apps", "modern");
     await writeProject(legacyRoot, { "@legacy/*": ["src/*"] });
     await writeProject(modernRoot, { "@modern/*": ["src/*"] });
+    await writeComponent(legacyRoot, "LegacyCardComponent", "legacy-card");
     const legacy = new ProjectRuntime(legacyRoot);
     const modern = new ProjectRuntime(modernRoot);
     await Promise.all([legacy.load(), modern.load()]);
-
-    legacy.index.selectors.insert("legacy-card", element("LegacyCard", legacyRoot));
 
     assert.strictEqual(
       await legacy.resolveImportPath(path.join(legacyRoot, "src", "card"), path.join(legacyRoot, "src", "app.ts")),
@@ -95,8 +102,8 @@ describe("LSP project runtime", function () {
       await modern.resolveImportPath(path.join(modernRoot, "src", "card"), path.join(modernRoot, "src", "app.ts")),
       "@modern/card"
     );
-    assert.deepStrictEqual(legacy.index.getAllSelectors(), ["legacy-card"]);
-    assert.deepStrictEqual(modern.index.getAllSelectors(), []);
+    assert.deepStrictEqual(legacy.indexer.getAllSelectors(), ["legacy-card"]);
+    assert.deepStrictEqual(modern.indexer.getAllSelectors(), []);
   });
 
   it("lists the project's indexable sources and nothing else", async () => {
@@ -154,17 +161,46 @@ describe("LSP project runtime", function () {
     assert.strictEqual(admin.cache?.get("selectors"), undefined);
   });
 
+  it("indexes the project's own components at load", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    await writeProject(root);
+    await writeComponent(root, "ShopCardComponent", "shop-card");
+    const runtime = new ProjectRuntime(root);
+
+    await runtime.load();
+
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), ["shop-card"]);
+    assert.strictEqual(runtime.restoredFromCache, false);
+  });
+
+  it("restores the index from the cache instead of rescanning", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const storagePath = path.join(sandbox, "storage");
+    await writeProject(root);
+    await writeComponent(root, "ShopCardComponent", "shop-card");
+    const first = new ProjectRuntime(root, { storagePath });
+    await first.load();
+    first.dispose();
+
+    const second = new ProjectRuntime(root, { storagePath });
+    await second.load();
+
+    assert.strictEqual(second.restoredFromCache, true);
+    assert.deepStrictEqual(second.indexer.getAllSelectors(), ["shop-card"]);
+  });
+
   it("drops the index and the parsed configuration when disposed", async () => {
     const root = path.join(sandbox, "apps", "shop");
     await writeProject(root, { "@shop/*": ["src/*"] });
+    await writeComponent(root, "ShopCardComponent", "shop-card");
     const runtime = new ProjectRuntime(root);
     await runtime.load();
-    runtime.index.selectors.insert("shop-card", element("ShopCard", root));
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), ["shop-card"]);
 
     runtime.dispose();
 
     assert.strictEqual(runtime.tsConfig, null);
-    assert.deepStrictEqual(runtime.index.getAllSelectors(), []);
+    assert.deepStrictEqual(runtime.indexer.getAllSelectors(), []);
   });
 });
 

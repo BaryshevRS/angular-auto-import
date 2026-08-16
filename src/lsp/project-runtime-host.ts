@@ -3,15 +3,15 @@
  * @module
  */
 
-import { type CoreLogger, silentLogger } from "../core/logging";
+import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../core/logging";
 import { ProjectRuntime } from "./project-runtime";
 
 export interface ProjectRuntimeHostOptions {
-  logger?: CoreLogger;
+  logger?: InstrumentedLogger;
   /** Directory the client set aside for caches, passed on to every runtime. */
   storagePath?: string;
   /** Overrides how a runtime is built, for tests and for future runtime variants. */
-  createRuntime?(rootPath: string, logger: CoreLogger): ProjectRuntime;
+  createRuntime?(rootPath: string, logger: InstrumentedLogger): ProjectRuntime;
 }
 
 /**
@@ -22,11 +22,11 @@ export interface ProjectRuntimeHostOptions {
  */
 export class ProjectRuntimeHost {
   private readonly runtimes = new Map<string, ProjectRuntime>();
-  private readonly logger: CoreLogger;
-  private readonly createRuntime: (rootPath: string, logger: CoreLogger) => ProjectRuntime;
+  private readonly logger: InstrumentedLogger;
+  private readonly createRuntime: (rootPath: string, logger: InstrumentedLogger) => ProjectRuntime;
 
   constructor(options: ProjectRuntimeHostOptions = {}) {
-    this.logger = options.logger ?? silentLogger;
+    this.logger = options.logger ?? withInstrumentation(silentLogger);
     this.createRuntime =
       options.createRuntime ??
       ((rootPath, logger) => new ProjectRuntime(rootPath, { logger, storagePath: options.storagePath }));

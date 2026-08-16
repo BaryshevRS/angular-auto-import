@@ -9,8 +9,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ClassDeclaration, Decorator } from "ts-morph";
 import { SyntaxKind } from "ts-morph";
-import { STANDARD_ANGULAR_ELEMENTS } from "../config";
-import { logger } from "../logger";
+import { STANDARD_ANGULAR_ELEMENTS } from "../config/angular-elements";
+import { sharedLogger } from "../core/logging";
 import type { AngularIndexer } from "../services";
 import { AngularElementData } from "../types";
 
@@ -101,7 +101,7 @@ function extractStandaloneFlagFromDecorator(
 
     return undefined;
   } catch (error) {
-    logger.error(
+    sharedLogger().error(
       `Error checking standalone flag for ${classDeclaration.getName() ?? "unknown class"}:`,
       error as Error
     );
@@ -353,7 +353,7 @@ function findIndexedElements(
 
     return uniqueElements;
   } catch (error) {
-    logger.warn(`Error getting element from indexer for selector '${selector}': ${(error as Error).message}`);
+    sharedLogger().warn(`Error getting element from indexer for selector '${selector}': ${(error as Error).message}`);
     return [];
   }
 }
@@ -471,7 +471,7 @@ async function getBestMatchUsingAngularMatcher(
     // Parse the incoming selector using Angular compiler
     const templateCssSelectors = CssSelector.parse(selector);
     if (templateCssSelectors.length === 0) {
-      logger.warn(`Could not parse selector: "${selector}"`);
+      sharedLogger().warn(`Could not parse selector: "${selector}"`);
       return candidates[0];
     }
 
@@ -521,7 +521,7 @@ async function getBestMatchUsingAngularMatcher(
 
     return bestMatches[0];
   } catch (error) {
-    logger.error("Error using Angular SelectorMatcher:", error as Error);
+    sharedLogger().error("Error using Angular SelectorMatcher:", error as Error);
     return candidates[0];
   }
 }

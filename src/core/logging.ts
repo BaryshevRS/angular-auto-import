@@ -23,6 +23,26 @@ export const silentLogger: CoreLogger = {
   error: () => undefined,
 };
 
+let sharedLoggerInstance: CoreLogger = silentLogger;
+
+/**
+ * Installs the logger the shared analysis helpers report through.
+ *
+ * Those helpers are plain functions called from every layer, so threading a logger
+ * through each of them would say nothing useful. Each runtime installs its own logger
+ * once at startup instead; until then the helpers stay silent rather than reaching for
+ * an editor-bound one.
+ * @param logger The logger to report through from now on.
+ */
+export function installSharedLogger(logger: CoreLogger): void {
+  sharedLoggerInstance = logger;
+}
+
+/** The logger the shared analysis helpers report through. */
+export function sharedLogger(): CoreLogger {
+  return sharedLoggerInstance;
+}
+
 /** Process resource usage, as long-running work reports it around its phases. */
 export interface PerformanceMetrics {
   memoryUsage: NodeJS.MemoryUsage;

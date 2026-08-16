@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 in progress — the server owns the `initialize` handshake and lazy project discovery; representative performance measurements remain
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 1 complete; Phase 2 in progress — the server owns the handshake, lazy project discovery, one runtime per root, source indexing, and its own cache; watched-file handling, log forwarding, and cancellation remain, as do representative performance measurements
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -227,13 +227,14 @@ Exit criteria:
 - [x] Create and dispose one project runtime per discovered Angular root.
   - [x] Move tsconfig discovery and alias resolution into core as a per-root `TsConfigResolver` (`core/tsconfig`); the Extension Host service is now one shared instance of it.
   - [x] Give the server a `ProjectRuntime` per root (`lsp/project-runtime`) owning that root's tsconfig and element index, with a `ProjectRuntimeHost` creating exactly one per root and disposing it when the root leaves the workspace or the server shuts down.
-- [ ] Implement full and incremental source indexing in the server.
+- [x] Implement full and incremental source indexing in the server.
   - [x] Persist through the `CacheStore` port instead of `vscode.ExtensionContext`: `AngularIndexer` takes its ports at construction and no indexing method receives an editor object any more.
   - [x] Replace the indexer's direct host-logger import with an injected `InstrumentedLogger` (`core/logging`), which adds timers and process metrics over any logger; the host passes its own logger through unchanged.
   - [x] Watch through a `FileWatcherFactory` port (`core/file-watching`) instead of `workspace.createFileSystemWatcher`, so watched-file notifications can drive the same incremental updates in the server.
-  - [ ] Port `utils/angular` (and the `config` barrel it pulls) off `vscode`; they are the indexer's last transitive editor dependency.
   - [x] Describe searches structurally instead of as glob strings (`core/file-system`), so the server can satisfy `FileSystem` with a plain directory walk (`adapters/node/file-system`) that never enters an excluded directory; the source-file rule itself now lives once in `core/source-files` and backs both the search and the watcher predicate.
-  - [ ] Instantiate the indexer from `ProjectRuntime`, which already exposes the project's source list and its cache.
+  - [x] Give the shared analysis helpers an installable logger (`installSharedLogger`) instead of the editor-bound one, which was the indexer's last transitive `vscode` dependency; every port is now required rather than defaulted to a VS Code adapter.
+  - [x] Instantiate the indexer from `ProjectRuntime`: it restores the index from the project's cache when that is still valid and falls back to a full scan, and it starts watching afterwards.
+  - [ ] Feed incremental updates from the client instead of the inert watcher factory the runtime currently uses (next item).
 - [ ] Implement source/dependency watched-file handling and periodic reindex.
 - [x] Implement the versioned file cache under the provided storage directory.
   - [x] One JSON file per root under the client's storage directory (`lsp/file-cache-store`), loaded once at open because `CacheStore` reads synchronously, written through a temporary file so a crash cannot truncate it.

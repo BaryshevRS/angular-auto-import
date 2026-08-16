@@ -13,9 +13,22 @@ import * as path from "node:path";
 import { Project, SyntaxKind } from "ts-morph";
 import * as vscode from "vscode";
 import { createVsCodeCacheStore } from "../../adapters/vscode/cache-store";
+import { createVsCodeFileSystem } from "../../adapters/vscode/file-system";
+import { createVsCodeFileWatcherFactory } from "../../adapters/vscode/file-watching";
+import { createVsCodeProgressHost } from "../../adapters/vscode/progress";
 import { logger } from "../../logger";
 import { AngularIndexer } from "../../services";
 import type { FileElementsInfo } from "../../types";
+
+/** The ports the Extension Host gives every indexer. */
+function hostPorts() {
+  return {
+    logger,
+    fileSystem: createVsCodeFileSystem(),
+    progressHost: createVsCodeProgressHost(),
+    fileWatchers: createVsCodeFileWatcherFactory(),
+  };
+}
 
 describe("AngularIndexer", function () {
   // Set timeout for all tests in this suite
@@ -74,7 +87,7 @@ describe("AngularIndexer", function () {
       logPath: "",
     } as unknown as vscode.ExtensionContext;
 
-    indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
+    indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), ...hostPorts() });
   });
 
   afterEach(() => {
@@ -484,7 +497,10 @@ export class TempComponent {}
       assert.ok(mockWorkspaceState.has(indexCacheKey), "Should save index cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
+      const newIndexer = new AngularIndexer({
+        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
+        ...hostPorts(),
+      });
       newIndexer.setProjectRoot(testProjectPath);
 
       const loaded = await newIndexer.loadFromWorkspace();
@@ -523,7 +539,10 @@ export class TempComponent {}
       };
       mockWorkspaceState.set(fileCacheKey, cachedFiles);
 
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
+      const newIndexer = new AngularIndexer({
+        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
+        ...hostPorts(),
+      });
       newIndexer.setProjectRoot(testProjectPath);
 
       const loaded = await newIndexer.loadFromWorkspace();
@@ -680,7 +699,10 @@ export class TempComponent {}
     });
 
     it("should handle dispose without initialization", () => {
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
+      const newIndexer = new AngularIndexer({
+        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
+        ...hostPorts(),
+      });
       assert.doesNotThrow(() => {
         newIndexer.dispose();
       }, "Should handle dispose without initialization");
@@ -1230,7 +1252,10 @@ export class ChipsModule {}
       assert.ok(chipsModuleExports?.has("InputText"), "Should have transitive exports before cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), logger });
+      const newIndexer = new AngularIndexer({
+        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
+        ...hostPorts(),
+      });
       newIndexer.setProjectRoot(testProjectPath);
       const loaded = await newIndexer.loadFromWorkspace();
       assert.ok(loaded, "Should successfully load from cache");
