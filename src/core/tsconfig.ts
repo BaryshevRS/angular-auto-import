@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type getTsconfig, parseTsconfig } from "get-tsconfig";
 import type { ProcessedTsConfig } from "../types/tsconfig";
-import { getRelativeFilePath, normalizePath, switchFileType } from "../utils/path";
+import { getRelativeFilePath, isPathInside, normalizePath, switchFileType } from "../utils/path";
 import { type CoreLogger, silentLogger } from "./logging";
 
 /**
@@ -168,7 +168,7 @@ class PathAliasTrie {
   private getTargetPath(absoluteTargetPath: string, projectRoot?: string): string {
     let targetPath = normalizePath(absoluteTargetPath);
 
-    if (projectRoot && absoluteTargetPath.startsWith(projectRoot)) {
+    if (projectRoot && isPathInside(projectRoot, absoluteTargetPath)) {
       targetPath = normalizePath(path.relative(projectRoot, absoluteTargetPath));
     }
 
@@ -321,7 +321,7 @@ export class TsConfigResolver {
       }
 
       // Validate that the found tsconfig is actually within our project directory
-      if (tsconfigResult && !tsconfigResult.path.startsWith(projectRoot)) {
+      if (tsconfigResult && !isPathInside(projectRoot, tsconfigResult.path)) {
         this.logger.warn(`[TsConfigHelper] Found tsconfig outside project root: ${tsconfigResult.path}`);
         tsconfigResult = null;
       }
@@ -332,7 +332,7 @@ export class TsConfigResolver {
           `[TsConfigHelper] get-tsconfig returned different path than expected: ${tsconfigResult.path} vs ${actualTsconfigPath}`
         );
         // Only allow if it's still within our project directory
-        if (!tsconfigResult.path.startsWith(projectRoot)) {
+        if (!isPathInside(projectRoot, tsconfigResult.path)) {
           tsconfigResult = null;
         }
       }
@@ -441,13 +441,13 @@ export class TsConfigResolver {
     projectRoot: string
   ): { shouldReturn: boolean; path: string } {
     // Check that target file is within the project boundaries
-    if (!absoluteTargetModulePathNoExt.startsWith(projectRoot)) {
+    if (!isPathInside(projectRoot, absoluteTargetModulePathNoExt)) {
       this.logger.warn(`[TsConfigHelper] Target file is outside project root, using absolute path`);
       return { shouldReturn: true, path: absoluteTargetModulePathNoExt };
     }
 
     // Check that current file is within the project boundaries
-    if (!absoluteCurrentFilePath.startsWith(projectRoot)) {
+    if (!isPathInside(projectRoot, absoluteCurrentFilePath)) {
       this.logger.warn(`[TsConfigHelper] Current file is outside project root, using relative path fallback`);
       const relativePath = getRelativeFilePath(absoluteCurrentFilePath, absoluteTargetModulePathNoExt);
       return { shouldReturn: true, path: relativePath };

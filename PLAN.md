@@ -328,7 +328,7 @@ Exit criteria:
 - [x] Run unit, extension-host, and E2E suites throughout the transition.
 - [x] Preserve the Angular 19/21/22 E2E matrix and add protocol-specific regressions for dirty files, external HTML, nested roots, server restart, and dependency changes.
   - [x] Dirty files and external HTML in `lsp-protocol`; nested and sibling roots, URI round trips, and files created or deleted on disk in `lsp-regressions`; server restart in the Extension Host lifecycle suite, which is the only place a real process can be killed.
-  - [ ] Run the suites on Windows. The URI test asserts a round trip rather than a fixed string, so it is meaningful there, but it has only ever been executed on macOS.
+  - [x] Audit what Windows would break rather than waiting for a Windows machine, and fix it: paths compared with `startsWith`, which is wrong on every platform at a boundary (`C:\WorkApp` "starts with" `C:\Work`) and wrong again on Windows for drive-letter case, now go through `isPathInside`; and the cache that remembers what a component imports was keyed by ts-morph's forward-slash spelling while invalidated by the platform's, so on Windows it would never have been invalidated at all. Each has a test that fails without its fix on any platform.
 - [x] Add direct handler tests that do not require a JSON-RPC connection.
 - [x] Add a client/server integration harness for initialization, document sync, diagnostics refresh, workspace edits, and custom requests (`src/test/node/harness/lsp-harness`).
 - [x] Compare against the recorded corpus. `lsp-parity` replays `src/e2e/cases` — the descriptors the previous implementation was held to — against the server; all 17 v22 cases agree on diagnostics, ranges, and quick-fix titles.

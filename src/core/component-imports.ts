@@ -16,6 +16,7 @@ import {
 } from "ts-morph";
 import { getStandardModuleExports } from "../config/standard-modules";
 import type { AngularElementData } from "../types";
+import { normalizePath } from "../utils/path";
 import { type CoreLogger, silentLogger } from "./logging";
 
 /** The slice of an element index that resolves NgModule exports. */
@@ -55,7 +56,7 @@ export class ComponentImports {
         return false;
       }
 
-      const cacheKey = sourceFile.getFilePath();
+      const cacheKey = cacheKeyFor(sourceFile.getFilePath());
       const cached = this.cache.get(cacheKey)?.get(element.name);
       if (cached !== undefined) {
         return cached;
@@ -119,7 +120,7 @@ export class ComponentImports {
    * @param filePath The file whose answers are stale.
    */
   public invalidate(filePath: string): void {
-    this.cache.delete(filePath);
+    this.cache.delete(cacheKeyFor(filePath));
   }
 
   /** Drops every cached answer, for example after the index was rebuilt. */
@@ -289,4 +290,17 @@ function getImportNamesForElement(element: AngularElementData): string[] {
     names.push(element.exportingModuleName);
   }
   return names;
+}
+
+/**
+ * One spelling of a path, so a key written by one caller is found by another.
+ *
+ * ts-morph reports paths with forward slashes whatever the platform, while a path taken
+ * from a document URI keeps the platform's own separator. On Windows those are two
+ * different strings for one file, and a cache keyed by one would never be invalidated
+ * through the other — leaving diagnostics that never noticed the component had changed.
+ * @internal
+ */
+function cacheKeyFor(filePath: string): string {
+  return normalizePath(filePath);
 }

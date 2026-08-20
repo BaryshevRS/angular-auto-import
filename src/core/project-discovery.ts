@@ -10,8 +10,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { isPathInside } from "../utils/path";
 import { type CoreLogger, silentLogger } from "./logging";
-import { isPathInside } from "./project-registry";
 
 /** The file access discovery needs, kept separate from the glob-based {@link FileSystem}. */
 export interface ManifestReader {

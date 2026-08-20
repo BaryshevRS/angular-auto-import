@@ -3,7 +3,8 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AngularProjectDiscovery } from "../../core/project-discovery";
-import { findDeepestContainingProjectRoot, isPathInside } from "../../core/project-registry";
+import { findDeepestContainingProjectRoot } from "../../core/project-registry";
+import { isPathInside } from "../../utils/path";
 
 /** Counts manifest reads performed while running `run`, so cached lookups are observable. */
 async function countManifestReads(run: () => Promise<void>): Promise<number> {

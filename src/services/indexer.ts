@@ -35,6 +35,7 @@ import { AngularElementData, type ComponentInfo, type FileElementsInfo } from ".
 import { isStandalone, parseAngularSelector } from "../utils/angular";
 import { debounce } from "../utils/debounce";
 import { findAngularDependencies, getLibraryEntryPoints } from "../utils/package-json";
+import { isPathInside } from "../utils/path";
 
 /**
  * Glob (relative to the project root) matching dependency manifests and lock files.
@@ -762,7 +763,7 @@ export class AngularIndexer {
       this.logger.error(`AngularIndexer.updateFileIndex: projectRootPath not set for ${filePath}. Aborting update.`);
       return false;
     }
-    if (!filePath.startsWith(this.projectRootPath)) {
+    if (!isPathInside(this.projectRootPath, filePath)) {
       this.logger.warn(
         `AngularIndexer.updateFileIndex: File ${filePath} is outside of project root ${this.projectRootPath}. Skipping.`
       );
@@ -1169,7 +1170,7 @@ export class AngularIndexer {
     for (const filePath of this.index.files.keys()) {
       // External library files live under node_modules and are refreshed by the
       // dependency watcher; skip them to avoid unnecessary full reindexes.
-      if (filePath.startsWith(nodeModulesPath)) {
+      if (isPathInside(nodeModulesPath, filePath)) {
         continue;
       }
       if (!fs.existsSync(filePath)) {

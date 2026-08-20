@@ -6,15 +6,7 @@
  */
 
 import * as path from "node:path";
-
-/** Returns whether candidatePath is rootPath itself or one of its descendants. */
-export function isPathInside(rootPath: string, candidatePath: string): boolean {
-  const relativePath = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
-  return (
-    relativePath === "" ||
-    (!path.isAbsolute(relativePath) && !relativePath.startsWith(`..${path.sep}`) && relativePath !== "..")
-  );
-}
+import { isPathInside } from "../utils/path";
 
 /** Finds the most specific known project root containing a document. */
 export function findDeepestContainingProjectRoot(filePath: string, roots: Iterable<string>): string | undefined {
