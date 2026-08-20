@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   createConnection,
   DidChangeConfigurationNotification,
@@ -13,9 +14,12 @@ import { type AngularCompilerApi, loadAngularCompiler } from "../core/angular-co
 import { fileUriToPath } from "../core/document";
 import { installSharedLogger } from "../core/logging";
 import { DEFAULT_EXTENSION_CONFIG, resolveExtensionConfig } from "../core/settings";
+import { CodeActionHandler } from "./code-actions";
 import { CompletionHandler } from "./completion";
+import { DefinitionHandler } from "./definition";
 import { DiagnosticsHandler } from "./diagnostics";
 import { APPLY_IMPORT_COMMAND, ImportCommandHandler } from "./import-command";
+import { ImportEditPlanner } from "./import-edit";
 import { OpenDocuments } from "./open-documents";
 import { ProjectRouter } from "./project-router";
 import { ProjectRuntimeHost } from "./project-runtime-host";
@@ -81,10 +85,25 @@ const diagnostics = new DiagnosticsHandler({
   logger: serverLogger,
 });
 
+const definitions = new DefinitionHandler({ router, diagnostics, logger: serverLogger });
+
 const importCommand = new ImportCommandHandler({
   router,
   documents: openDocuments,
   applyEdit: async (edit) => (await connection.workspace.applyEdit(edit)).applied,
+  logger: serverLogger,
+});
+
+const codeActions = new CodeActionHandler({
+  router,
+  diagnostics,
+  planner: new ImportEditPlanner({
+    router,
+    documents: openDocuments,
+    readFile: (filePath) => readFileSync(filePath, "utf-8"),
+    logger: serverLogger,
+  }),
+  resolvesActions: () => environment?.client.codeActionResolve === true,
   logger: serverLogger,
 });
 
@@ -263,6 +282,21 @@ connection.languages.diagnostics.on((params) => {
 
 // A closed document keeps no report and no parsed template; the client stops asking.
 documents.onDidClose(({ document }) => diagnostics.forget(document.uri));
+
+connection.onDefinition((params) => {
+  const document = documents.get(params.textDocument.uri);
+  return document ? definitions.provide(toDocumentView(document), params.position) : [];
+});
+
+connection.onCodeAction((params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) {
+    return [];
+  }
+  return codeActions.provide(toDocumentView(document), params.range, params.context.only);
+});
+
+connection.onCodeActionResolve((action) => codeActions.resolve(action));
 
 connection.onExecuteCommand(async (params) => {
   if (params.command !== APPLY_IMPORT_COMMAND) {

@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 in progress — the server serves completion, its cross-file import execution, and pull diagnostics; code actions, fix-all, and definitions are next
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 nearly complete — the server serves completion, imports, pull diagnostics, quick fixes, fix-all, and definitions; request cancellation is the remaining item, after which Phase 4 wires the commands and reports
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -268,7 +268,10 @@ Exit criteria:
   - [x] Execute the import through a server command (`lsp/import-command`) that plans against the file as the user currently sees it and returns a versioned `workspace/applyEdit`; nothing is written to disk and nothing is saved.
   - [x] Share the element-to-specifier rule between both hosts (`core/import-resolution`) instead of keeping a second copy in `utils/import`.
   - [ ] Attach the import as `additionalTextEdits` for an inline template. Blocked on the planner still returning a full-document replacement, which would overlap the completion's own edit; unblocked by the minimal-edit work below.
-- [ ] Implement definition responses with multiple `LocationLink` results.
+- [x] Implement definition responses with multiple `LocationLink` results (`lsp/definition`).
+  - [x] Answer only where the server has a retained candidate, so an already-imported element stays the Angular Language Service's to resolve and one Ctrl+Click never shows the same result twice.
+  - [x] Return every declaration answering to the selector; a selector like `[nzButton]` legitimately belongs to several, and picking one would hide the rest.
+  - [x] Point at the class name where the project has already parsed the file, and at its first line where it has not, rather than paying for a parse on a Ctrl+Click.
 - [x] Implement pull diagnostics, inter-file invalidation, and diagnostic refresh.
   - [x] Move the analysis both hosts run onto one implementation: the dynamically imported compiler behind a named surface (`core/angular-compiler`), inline-template extraction (`core/inline-template`), source-file synchronization (`core/source-file-sync`), and the parse/walk/decide pipeline with its version-keyed AST cache (`core/template-diagnostics`). The direct provider now wires those together instead of owning them, and lost 190 lines doing so.
   - [x] Answer `textDocument/diagnostic` from the server (`lsp/diagnostics`), advertising `interFileDependencies` because a component's TypeScript file decides its external template's report.
@@ -276,10 +279,17 @@ Exit criteria:
   - [x] Drop the cached "already imported" answers when the index changes, since every one of them was decided against an index that no longer exists.
 - [x] Implement `quickfix-only` candidate storage independent of visible diagnostics.
   - [x] `full` returns the items, `quickfix-only` retains them and returns none, `disabled` computes nothing and forgets what it had. Every retained result is tagged with the document version and index generation it was computed against, so a code action can refuse one that has gone stale.
-- [ ] Implement quick-fix code actions with cross-file workspace edits.
-- [ ] Implement `source.fixAll.angular-auto-import` and preserve deduplication/import ordering.
-- [ ] Ensure TypeScript document changes refresh related HTML diagnostics and vice versa.
-- [ ] Reject stale completion, diagnostic, and edit results after document or index versions change.
+- [x] Implement quick-fix code actions with cross-file workspace edits (`lsp/code-actions`).
+  - [x] Offer the fixes from the retained candidates rather than from what the client was shown, which is what makes `quickfix-only` mode work.
+  - [x] Return the edit through `codeAction/resolve`, because computing it means rewriting the component with ts-morph — far too expensive for actions the editor merely lists. A client without resolve support gets the edit up front, or the command when there is no edit to give.
+  - [x] Share one planner with the completion command (`lsp/import-edit`), so a quick fix, a fix-all, and an accepted completion all produce the same versioned cross-file edit.
+- [x] Implement `source.fixAll.angular-auto-import` and preserve deduplication/import ordering.
+  - [x] One action covering every element the document is missing, deduplicated by element name in template order; it is not offered when there is only one thing to fix, which the quick fix already covers.
+- [x] Ensure TypeScript document changes refresh related HTML diagnostics and vice versa. Covered by the refresh triggers above: the client re-pulls every open document, and an external template's report is computed from its component's current text either way.
+- [x] Reject stale completion, diagnostic, and edit results after document or index versions change.
+  - [x] Completion is synchronous, so no index can change under it.
+  - [x] A retained diagnostic result carries the document version and index generation it was computed against, and code actions recompute rather than reuse one that no longer describes the document.
+  - [x] An import plan is discarded when the document version or index generation moved while its import paths were being resolved, and the edit that survives is versioned so the client can refuse it too.
 - [ ] Propagate cancellation tokens through parsing and expensive lookup boundaries.
 
 Exit criteria:

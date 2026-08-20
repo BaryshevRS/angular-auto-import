@@ -1,6 +1,7 @@
 import * as assert from "node:assert";
 import type { InitializeParams } from "vscode-languageserver/node";
 import { DEFAULT_EXTENSION_CONFIG } from "../../core/settings";
+import { FIX_ALL_KIND } from "../../lsp/code-actions";
 import { APPLY_IMPORT_COMMAND } from "../../lsp/import-command";
 import {
   applyWorkspaceFolderChange,
@@ -27,6 +28,7 @@ const fullClient: Partial<InitializeParams> = {
       didChangeWatchedFiles: { dynamicRegistration: true },
       diagnostics: { refreshSupport: true },
     },
+    textDocument: { codeAction: { resolveSupport: { properties: ["edit"] } } },
   },
 };
 
@@ -110,6 +112,7 @@ describe("LSP server environment", () => {
       workspaceFolders: true,
       didChangeWatchedFiles: true,
       diagnosticRefresh: true,
+      codeActionResolve: true,
     });
 
     assert.deepStrictEqual(resolveServerEnvironment(initializeParams()).client, {
@@ -117,6 +120,7 @@ describe("LSP server environment", () => {
       workspaceFolders: false,
       didChangeWatchedFiles: false,
       diagnosticRefresh: false,
+      codeActionResolve: false,
     });
   });
 
@@ -132,6 +136,21 @@ describe("LSP server environment", () => {
     const result = buildInitializeResult(resolveServerEnvironment(initializeParams()), "test-server");
 
     assert.deepStrictEqual(result.capabilities.executeCommandProvider?.commands, [APPLY_IMPORT_COMMAND]);
+  });
+
+  it("offers quick fixes and its own fix-all, resolving edits only for a client that asks", () => {
+    const resolving = buildInitializeResult(resolveServerEnvironment(initializeParams(fullClient)), "test-server");
+    const plain = buildInitializeResult(resolveServerEnvironment(initializeParams()), "test-server");
+
+    assert.deepStrictEqual(resolving.capabilities.codeActionProvider, {
+      codeActionKinds: ["quickfix", FIX_ALL_KIND],
+      resolveProvider: true,
+    });
+    assert.strictEqual(
+      typeof plain.capabilities.codeActionProvider === "object" &&
+        plain.capabilities.codeActionProvider.resolveProvider,
+      false
+    );
   });
 
   it("declares that a document's diagnostics depend on other files", () => {

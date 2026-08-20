@@ -28,6 +28,7 @@ import { isInsideTemplateString } from "../utils/template-detection";
 import { APPLY_IMPORT_COMMAND, type ApplyImportArguments } from "./import-command";
 import type { OpenDocuments } from "./open-documents";
 import type { ProjectRouter, RoutedDocument } from "./project-router";
+import { siblingUri } from "./uri";
 
 /** How many components' standalone state is remembered between requests. */
 const STANDALONE_CACHE_SIZE = 50;
@@ -186,17 +187,4 @@ function toCompletionItem(
   }
 
   return item;
-}
-
-/**
- * Names a sibling file by swapping the URI's extension.
- *
- * Rebuilding the URI from the filesystem path instead would re-encode it, and a client
- * that sent a lower-cased Windows drive letter would stop recognizing its own document.
- * The only sibling this server asks for is the template's component, so an extension
- * swap is the whole transformation.
- * @internal
- */
-function siblingUri(documentUri: string, extension: string): string {
-  return documentUri.replace(/\.[^./\\]*$/, extension);
 }

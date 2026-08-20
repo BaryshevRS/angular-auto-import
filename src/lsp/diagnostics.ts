@@ -115,6 +115,25 @@ export class DiagnosticsHandler {
   }
 
   /**
+   * The candidates that describe the document as it is now.
+   *
+   * A retained result computed against an older document version or an older index
+   * would place its fixes at the wrong ranges, so it is recomputed rather than reused.
+   * Code actions go through here so they keep working in `quickfix-only` mode, where
+   * the client has been shown nothing to act on.
+   * @param document The document the actions were requested for.
+   */
+  candidatesFor(document: DocumentView): MissingImportDiagnostic[] {
+    const retained = this.results.get(document.uri);
+    const generation = this.options.router.resolve(document.uri)?.runtime.indexGeneration;
+    if (retained && retained.version === document.version && retained.generation === generation) {
+      return retained.candidates;
+    }
+
+    return this.analyze(document)?.candidates ?? [];
+  }
+
+  /**
    * Drops what is remembered about a component file, so the next pull re-reads it.
    * @param filePath Absolute path of the file that changed.
    */

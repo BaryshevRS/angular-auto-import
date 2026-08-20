@@ -8,9 +8,10 @@
  */
 
 import type { InitializeParams, InitializeResult, ServerCapabilities } from "vscode-languageserver/node";
-import { TextDocumentSyncKind } from "vscode-languageserver/node";
+import { CodeActionKind, TextDocumentSyncKind } from "vscode-languageserver/node";
 import { fileUriToPath } from "../core/document";
 import { type ExtensionConfig, resolveExtensionConfig } from "../core/settings";
+import { FIX_ALL_KIND } from "./code-actions";
 import { APPLY_IMPORT_COMMAND } from "./import-command";
 
 /** Completion trigger characters, kept identical to the direct provider's. */
@@ -26,6 +27,8 @@ export interface ClientSupport {
   didChangeWatchedFiles: boolean;
   /** The client can be asked to re-pull diagnostics for everything it has open. */
   diagnosticRefresh: boolean;
+  /** The client fills in a code action's edit through `codeAction/resolve`. */
+  codeActionResolve: boolean;
 }
 
 /** Everything one server instance needs from the handshake. */
@@ -63,6 +66,7 @@ export function resolveServerEnvironment(params: InitializeParams): ServerEnviro
       workspaceFolders: workspace?.workspaceFolders === true,
       didChangeWatchedFiles: workspace?.didChangeWatchedFiles?.dynamicRegistration === true,
       diagnosticRefresh: workspace?.diagnostics?.refreshSupport === true,
+      codeActionResolve: params.capabilities.textDocument?.codeAction?.resolveSupport !== undefined,
     },
   };
 }
@@ -111,6 +115,13 @@ export function buildServerCapabilities(environment: ServerEnvironment): ServerC
     executeCommandProvider: {
       commands: [APPLY_IMPORT_COMMAND],
     },
+    codeActionProvider: {
+      codeActionKinds: [CodeActionKind.QuickFix, FIX_ALL_KIND],
+      // The edit means rewriting the component with ts-morph, which is far too
+      // expensive for actions the editor only lists.
+      resolveProvider: environment.client.codeActionResolve,
+    },
+    definitionProvider: true,
     diagnosticProvider: {
       // A component's TypeScript file decides its external template's diagnostics, and
       // an index change can decide any open document's, so no document's report can be
