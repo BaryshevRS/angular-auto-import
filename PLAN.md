@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete; Phase 3 complete except for the inline-template `additionalTextEdits` optimization, which the full-document import edit blocks — the server serves completion, imports, pull diagnostics, quick fixes, fix-all, definitions, and request cancellation; Phase 4 (commands, reports, and client UX) is next
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete; Phase 3 complete except for the inline-template `additionalTextEdits` optimization, which the full-document import edit blocks; Phase 4 complete — every contributed command runs against the server, with the webviews, notifications, and progress UI still in the client. Phase 5 (parity, rollout, and cleanup) is next, and the LSP path is still behind the `AAI_LSP_SPIKE` flag
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -303,13 +303,18 @@ Exit criteria:
 
 ### Phase 4 — Commands, reports, and client UX (2–4 days)
 
-- [ ] Route reindex and clear-cache commands to typed server requests.
-- [ ] Route fix-all command-palette behavior to the standard fix-all operation.
-- [ ] Return performance metrics and diagnostics-report DTOs from the server.
-- [ ] Keep webview rendering and notifications in the client.
-- [ ] Map server work-done progress and cancellation to VS Code progress UI.
-- [ ] Preserve existing command IDs and settings.
-- [ ] Make server-unavailable errors actionable without exposing protocol internals to users.
+- [x] Route reindex and clear-cache commands to typed server requests.
+  - [x] Define the custom requests once, as `RequestType` constructors both sides import (`lsp/protocol`), so a change to one end fails to compile at the other. The module depends only on `vscode-languageserver-protocol`, which is now an explicit dependency rather than one borrowed from the client and server packages.
+  - [x] Give `ProjectRuntime` a `reindex` that re-reads the project's TypeScript configuration first — a changed `paths` mapping is the usual reason to ask for one by hand — and a `clearCache` that drops the persisted index with the in-memory one.
+  - [x] Answer both in the server (`lsp/operations`), scoped to the active document's project or to every project, reporting each project's outcome separately so one failure does not read as total failure.
+- [x] Route fix-all command-palette behavior to the standard fix-all operation. The palette command runs `vscode.executeCodeActionProvider` for `source.fixAll.angular-auto-import` and applies what comes back, so it cannot diverge from the code action in what it imports or how it orders it.
+- [x] Return performance metrics and diagnostics-report DTOs from the server.
+  - [x] Metrics describe the server process, which is the point of asking it rather than the Extension Host.
+  - [x] The report (`lsp/report`) scans every template in the scoped projects through the same analysis a pull request uses, so it cannot disagree with what the editor shows. It batches, yields between batches so the connection keeps answering, and stops at the same limits the Extension Host reporter used.
+- [x] Keep webview rendering and notifications in the client. The renderers moved to `commands/webviews` and now take the protocol DTOs, so one implementation serves both hosts; the Extension Host maps its own report onto the DTO on the way in.
+- [x] Map server work-done progress and cancellation to VS Code progress UI. The report attaches to the client's `workDoneToken` and reports real progress; cancelling the notification cancels the request, and a user who cancelled is told nothing they already know.
+- [x] Preserve existing command IDs and settings. Every contributed command keeps its ID; only what happens behind it changes.
+- [x] Make server-unavailable errors actionable without exposing protocol internals to users. A failed request is logged in full and surfaced as one sentence naming the output channel and the reload that would restart the server.
 
 Exit criteria:
 

@@ -15,7 +15,7 @@ import type { FileSystem } from "../core/file-system";
 import type { FileWatcherFactory } from "../core/file-watching";
 import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../core/logging";
 import { type ProgressHost, silentProgressHost } from "../core/progress";
-import { projectSourceQuery } from "../core/source-files";
+import { projectSourceQuery, projectTemplateQuery } from "../core/source-files";
 import { TsConfigResolver } from "../core/tsconfig";
 import { AngularIndexer } from "../services/indexer";
 import type { ProcessedTsConfig } from "../types/tsconfig";
@@ -125,6 +125,14 @@ export class ProjectRuntime {
   }
 
   /**
+   * The project's external templates, which the index itself never reads: only a
+   * whole-project report has any reason to look at a template nobody has opened.
+   */
+  listTemplateFiles(): Promise<string[]> {
+    return this.fileSystem.findFiles(projectTemplateQuery(this.rootPath));
+  }
+
+  /**
    * Brings the project's index up: from the cache when it is still usable, from a full
    * scan otherwise, and then keeps it current from watched changes.
    */
@@ -151,6 +159,38 @@ export class ProjectRuntime {
         this.loadedFromCache ? "restored from cache" : "indexed from source"
       }`
     );
+  }
+
+  /** How many selectors this project has indexed. */
+  get elementCount(): number {
+    return this.indexer.getAllSelectors().length;
+  }
+
+  /**
+   * Rebuilds this project's index from source.
+   *
+   * The TypeScript configuration is re-read first, because the usual reason to ask for
+   * a reindex by hand is that a `paths` mapping changed and the resolved import
+   * specifiers are now wrong.
+   */
+  async reindex(): Promise<void> {
+    this.tsConfigResolver.clearCache(this.rootPath);
+    this.processedTsConfig = await this.tsConfigResolver.findAndParseTsConfig(this.rootPath);
+    if (this.disposed) {
+      return;
+    }
+
+    await this.indexer.generateFullIndex(undefined, this.cancellation.signal);
+    this.loadedFromCache = false;
+  }
+
+  /**
+   * Discards this project's persisted index, and the in-memory one with it, so the next
+   * request rebuilds from source rather than from a cache the user asked to be rid of.
+   */
+  async clearCache(): Promise<void> {
+    await this.indexer.clearCache();
+    this.loadedFromCache = false;
   }
 
   /**

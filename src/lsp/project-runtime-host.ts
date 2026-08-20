@@ -98,6 +98,11 @@ export class ProjectRuntimeHost {
     return Array.from(this.runtimes.keys());
   }
 
+  /** Every runtime that currently exists, in creation order. */
+  all(): ProjectRuntime[] {
+    return Array.from(this.runtimes.values());
+  }
+
   /**
    * Disposes the runtime of one root.
    * @param rootPath The root to release.

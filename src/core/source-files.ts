@@ -32,6 +32,22 @@ export function projectSourceQuery(rootPath: string): FileSearchQuery {
 }
 
 /**
+ * Describes the search for a project's external templates.
+ *
+ * The same exclusions as {@link projectSourceQuery}: a template under `node_modules` or
+ * `dist` belongs to no component the user can edit.
+ * @param rootPath Absolute path of the project root.
+ */
+export function projectTemplateQuery(rootPath: string): FileSearchQuery {
+  return {
+    root: rootPath,
+    extensions: [".html"],
+    excludedDirectories: NON_SOURCE_DIRECTORIES,
+    excludeHiddenDirectories: true,
+  };
+}
+
+/**
  * Whether a file reported by a watcher should be indexed as a project source.
  * @param rootPath Absolute path of the project root.
  * @param filePath Absolute path of the reported file.

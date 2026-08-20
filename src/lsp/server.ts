@@ -22,9 +22,17 @@ import { DiagnosticsHandler } from "./diagnostics";
 import { APPLY_IMPORT_COMMAND, ImportCommandHandler } from "./import-command";
 import { ImportEditPlanner } from "./import-edit";
 import { OpenDocuments } from "./open-documents";
+import { ServerOperations } from "./operations";
 import { ProjectRouter } from "./project-router";
 import { ProjectRuntimeHost } from "./project-runtime-host";
-import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
+import {
+  ClearCacheRequest,
+  DiagnosticsReportRequest,
+  PerformanceMetricsRequest,
+  ReindexRequest,
+  SPIKE_CRASH_NOTIFICATION,
+} from "./protocol";
+import { DiagnosticsReporter } from "./report";
 import {
   applyWorkspaceFolderChange,
   buildInitializeResult,
@@ -87,6 +95,14 @@ const diagnostics = new DiagnosticsHandler({
 });
 
 const definitions = new DefinitionHandler({ router, diagnostics, logger: serverLogger });
+
+const reporter = new DiagnosticsReporter({ diagnostics, logger: serverLogger });
+
+const operations = new ServerOperations({
+  router,
+  runtimes: () => runtimes?.all() ?? [],
+  logger: serverLogger,
+});
 
 const importCommand = new ImportCommandHandler({
   router,
@@ -327,6 +343,38 @@ documents.onDidChangeContent(({ document }) => {
     // Not a file on disk; nothing was cached for it.
   }
   requestDiagnosticRefresh();
+});
+
+connection.onRequest(ReindexRequest, async (scope) => {
+  const result = await operations.reindex(scope);
+  // The index the client's open documents were analyzed against is gone either way.
+  diagnostics.invalidateAll();
+  requestDiagnosticRefresh();
+  return result;
+});
+
+connection.onRequest(ClearCacheRequest, async (scope) => {
+  const result = await operations.clearCache(scope);
+  diagnostics.invalidateAll();
+  requestDiagnosticRefresh();
+  return result;
+});
+
+connection.onRequest(PerformanceMetricsRequest, () => operations.metrics());
+
+connection.onRequest(DiagnosticsReportRequest, (scope, token) => {
+  const progress = scope.workDoneToken ? connection.window.attachWorkDoneProgress(scope.workDoneToken) : undefined;
+  progress?.begin("Angular Auto Import: Generating Diagnostics Report", 0, undefined, true);
+
+  return reporter
+    .run(
+      operations.resolveScope(scope),
+      progress && {
+        report: (message, percentage) => progress.report(percentage, message),
+      },
+      toCancellationSignal(token)
+    )
+    .finally(() => progress?.done());
 });
 
 connection.onNotification(SPIKE_CRASH_NOTIFICATION, () => {

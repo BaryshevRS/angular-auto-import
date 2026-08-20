@@ -220,7 +220,8 @@
         "src/adapters/lsp/**/*.ts",
         "src/adapters/node/**/*.ts",
         "src/test/node/**/*.ts",
-        "!src/lsp/client.ts"
+        "!src/lsp/client.ts",
+        "!src/lsp/client-commands.ts"
       ],
       "linter": {
         "rules": {

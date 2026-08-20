@@ -161,15 +161,17 @@ export class DiagnosticsHandler {
   }
 
   /**
-   * Runs the analysis, or returns `undefined` when this document has nothing to analyze:
-   * no project, no compiler yet, no component file, or a component that cannot hold
-   * imports of its own.
-   * @internal
+   * Runs the analysis for one document, or returns `undefined` when it has nothing to
+   * analyze: no project, no compiler yet, no component file, or a component that cannot
+   * hold imports of its own.
+   *
+   * Public because the workspace report analyzes files the client never opened, and it
+   * must reach that answer the same way a pull does rather than through a second
+   * implementation.
+   * @param document The document to analyze; for the report, one read from disk.
+   * @param cancellation Checked during the analysis.
    */
-  private analyze(
-    document: DocumentView,
-    cancellation: CancellationSignal = neverCancelled
-  ): DiagnosticResult | undefined {
+  analyze(document: DocumentView, cancellation: CancellationSignal = neverCancelled): DiagnosticResult | undefined {
     const compiler = this.options.compiler();
     const routed = this.options.router.resolve(document.uri);
     if (!compiler || !routed) {

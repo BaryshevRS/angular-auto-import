@@ -8,6 +8,7 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 import { getConfiguration } from "../config/settings";
+import { registerClientCommands } from "./client-commands";
 import { SPIKE_CRASH_NOTIFICATION } from "./protocol";
 import type { ServerInitializationOptions } from "./server-environment";
 
@@ -69,6 +70,7 @@ export async function startLspSpike(context: vscode.ExtensionContext): Promise<v
 
   try {
     await nextClient.start();
+    registerClientCommands(context, nextClient);
     context.subscriptions.push(
       vscode.commands.registerCommand("angular-auto-import.lsp-spike.stop", stopLspSpike),
       vscode.commands.registerCommand(

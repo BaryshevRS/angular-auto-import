@@ -26,6 +26,9 @@ importers:
       vscode-languageserver:
         specifier: ^10.1.0
         version: 10.1.0
+      vscode-languageserver-protocol:
+        specifier: 3.18.2
+        version: 3.18.2
       vscode-languageserver-textdocument:
         specifier: ^1.0.12
         version: 1.0.12

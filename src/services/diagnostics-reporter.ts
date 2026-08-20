@@ -9,7 +9,13 @@
 
 import * as fs from "node:fs";
 import * as vscode from "vscode";
+import type { CoreDiagnosticSeverity } from "../core/language-types";
 import { logger } from "../logger";
+import type {
+  DiagnosticsReport as DiagnosticsReportDto,
+  FileDiagnosticsReport,
+  ReportedDiagnostic,
+} from "../lsp/protocol";
 import type { DiagnosticProvider } from "../providers/diagnostics";
 import { getTsDocument, switchFileType } from "../utils";
 
@@ -333,4 +339,54 @@ async function generateFileReport(
   }
 
   return fileReport;
+}
+
+/**
+ * Converts the Extension Host's report into the DTO the webview renders.
+ *
+ * The renderer is shared with the language-server path, so it reads plain data: a
+ * `Date` and a `vscode.Diagnostic` mean nothing to a report that arrived over JSON-RPC.
+ * @param report The report as the scan produced it.
+ */
+export function toDiagnosticsReportDto(report: DiagnosticsReport): DiagnosticsReportDto {
+  return {
+    totalIssues: report.totalIssues,
+    timestamp: report.timestamp.toISOString(),
+    truncated: report.truncated,
+    truncationReason: report.truncationReason,
+    files: report.fileReports.map(
+      (file): FileDiagnosticsReport => ({
+        filePath: file.filePath,
+        templateType: file.templateType,
+        diagnostics: file.diagnostics.map(toReportedDiagnostic),
+      })
+    ),
+  };
+}
+
+/** @internal */
+function toReportedDiagnostic(diagnostic: vscode.Diagnostic): ReportedDiagnostic {
+  return {
+    range: {
+      start: { line: diagnostic.range.start.line, character: diagnostic.range.start.character },
+      end: { line: diagnostic.range.end.line, character: diagnostic.range.end.character },
+    },
+    message: diagnostic.message,
+    code: String(diagnostic.code ?? ""),
+    severity: toCoreSeverity(diagnostic.severity),
+  };
+}
+
+/** @internal */
+function toCoreSeverity(severity: vscode.DiagnosticSeverity | undefined): CoreDiagnosticSeverity {
+  switch (severity) {
+    case vscode.DiagnosticSeverity.Error:
+      return "error";
+    case vscode.DiagnosticSeverity.Warning:
+      return "warning";
+    case vscode.DiagnosticSeverity.Hint:
+      return "hint";
+    default:
+      return "information";
+  }
 }
