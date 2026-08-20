@@ -2,16 +2,19 @@ import {
   createConnection,
   DidChangeConfigurationNotification,
   DidChangeWatchedFilesNotification,
+  DocumentDiagnosticReportKind,
   type InitializeParams,
   type InitializeResult,
   TextDocuments,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { toDocumentView } from "../adapters/lsp/document";
+import { type AngularCompilerApi, loadAngularCompiler } from "../core/angular-compiler";
 import { fileUriToPath } from "../core/document";
 import { installSharedLogger } from "../core/logging";
 import { DEFAULT_EXTENSION_CONFIG, resolveExtensionConfig } from "../core/settings";
 import { CompletionHandler } from "./completion";
+import { DiagnosticsHandler } from "./diagnostics";
 import { APPLY_IMPORT_COMMAND, ImportCommandHandler } from "./import-command";
 import { OpenDocuments } from "./open-documents";
 import { ProjectRouter } from "./project-router";
@@ -31,10 +34,15 @@ import { WatchedFiles } from "./watched-files";
 
 const SERVER_NAME = "Angular Auto Import LSP Spike";
 const CONFIGURATION_SECTION = "angular-auto-import";
+/** How long refresh triggers are coalesced before the client is asked to re-pull. */
+const DIAGNOSTIC_REFRESH_DELAY_MS = 50;
 
 const connection = createConnection();
 const documents = new TextDocuments(TextDocument);
 let runtimeDependenciesLoaded = false;
+let compiler: AngularCompilerApi | undefined;
+/** Whether a diagnostic refresh is already scheduled for the next tick. */
+let refreshPending = false;
 let environment: ServerEnvironment | undefined;
 let projects: ServerProjects | undefined;
 let runtimes: ProjectRuntimeHost | undefined;
@@ -65,6 +73,14 @@ const completions = new CompletionHandler({
   logger: serverLogger,
 });
 
+const diagnostics = new DiagnosticsHandler({
+  router,
+  documents: openDocuments,
+  config: () => environment?.config ?? DEFAULT_EXTENSION_CONFIG,
+  compiler: () => compiler,
+  logger: serverLogger,
+});
+
 const importCommand = new ImportCommandHandler({
   router,
   documents: openDocuments,
@@ -73,11 +89,44 @@ const importCommand = new ImportCommandHandler({
 });
 
 async function loadRuntimeDependencies(): Promise<void> {
-  const [compiler, tsMorph] = await Promise.all([import("@angular/compiler"), import("ts-morph")]);
-  if (typeof compiler.parseTemplate !== "function" || typeof tsMorph.Project !== "function") {
-    throw new Error("Angular compiler or ts-morph did not expose the expected runtime API");
+  const [, tsMorph] = await Promise.all([loadCompiler(), import("ts-morph")]);
+  if (typeof tsMorph.Project !== "function") {
+    throw new Error("ts-morph did not expose the expected runtime API");
   }
   runtimeDependenciesLoaded = true;
+}
+
+/**
+ * Loads the Angular compiler the analysis needs, and re-pulls once it arrives.
+ *
+ * Diagnostics requested before this resolves report nothing, so the client has to be
+ * told to ask again rather than being left with the empty answer.
+ */
+async function loadCompiler(): Promise<void> {
+  if (compiler) {
+    return;
+  }
+  compiler = await loadAngularCompiler(serverLogger);
+  requestDiagnosticRefresh();
+}
+
+/**
+ * Asks the client to re-pull diagnostics for everything it has open.
+ *
+ * Coalesced onto the next tick: a burst of keystrokes, a finished index, and a batch of
+ * watched-file changes all mean the same single thing to the client.
+ */
+function requestDiagnosticRefresh(): void {
+  if (!environment?.client.diagnosticRefresh || refreshPending) {
+    return;
+  }
+  refreshPending = true;
+  setTimeout(() => {
+    refreshPending = false;
+    void connection.languages.diagnostics.refresh().catch((error) => {
+      serverLogger.debug(`Diagnostic refresh failed: ${String(error)}`);
+    });
+  }, DIAGNOSTIC_REFRESH_DELAY_MS).unref?.();
 }
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
@@ -128,6 +177,13 @@ connection.onInitialized(async () => {
     storagePath: environment.storagePath,
     fileWatchers: watchedFiles,
     reindexIntervalMinutes: environment.config.indexRefreshInterval,
+    onDidChangeIndex: () => {
+      // An element that just appeared or disappeared can change any open document's
+      // report, and every cached "already imported" answer was decided against the
+      // index that no longer exists.
+      diagnostics.invalidateAll();
+      requestDiagnosticRefresh();
+    },
   });
   runtimes = runtimeHost;
   projects = new ServerProjects({
@@ -138,6 +194,10 @@ connection.onInitialized(async () => {
   });
   await projects.start(documents);
   serverLogger.info(`Discovered ${projects.knownRoots().length} Angular project root(s)`);
+
+  void loadCompiler().catch(() => {
+    // Already reported by the loader; diagnostics stay empty until a later load succeeds.
+  });
 });
 
 connection.onDidChangeWatchedFiles((params) => {
@@ -193,6 +253,17 @@ connection.onCompletion((params) => {
   return { ...completionList, items: probeCompletion(view, params.position, runtimeDependenciesLoaded) };
 });
 
+connection.languages.diagnostics.on((params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) {
+    return { kind: DocumentDiagnosticReportKind.Full, items: [] };
+  }
+  return diagnostics.provide(toDocumentView(document));
+});
+
+// A closed document keeps no report and no parsed template; the client stops asking.
+documents.onDidClose(({ document }) => diagnostics.forget(document.uri));
+
 connection.onExecuteCommand(async (params) => {
   if (params.command !== APPLY_IMPORT_COMMAND) {
     return undefined;
@@ -204,10 +275,23 @@ connection.onExecuteCommand(async (params) => {
 // A saved file is on disk again, so anything cached about its last-saved state is stale.
 documents.onDidSave(({ document }) => {
   try {
-    completions.invalidate(fileUriToPath(document.uri));
+    const filePath = fileUriToPath(document.uri);
+    completions.invalidate(filePath);
+    diagnostics.invalidate(filePath);
   } catch {
     // Not a file on disk; nothing was cached for it.
   }
+});
+
+// A component's own edits decide what its external template is missing, so that
+// template's report has to be pulled again even though the client saw no change to it.
+documents.onDidChangeContent(({ document }) => {
+  try {
+    diagnostics.invalidate(fileUriToPath(document.uri));
+  } catch {
+    // Not a file on disk; nothing was cached for it.
+  }
+  requestDiagnosticRefresh();
 });
 
 connection.onNotification(SPIKE_CRASH_NOTIFICATION, () => {

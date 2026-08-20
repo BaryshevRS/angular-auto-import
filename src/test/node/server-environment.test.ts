@@ -1,6 +1,7 @@
 import * as assert from "node:assert";
 import type { InitializeParams } from "vscode-languageserver/node";
 import { DEFAULT_EXTENSION_CONFIG } from "../../core/settings";
+import { APPLY_IMPORT_COMMAND } from "../../lsp/import-command";
 import {
   applyWorkspaceFolderChange,
   buildInitializeResult,
@@ -20,7 +21,12 @@ function initializeParams(overrides: Partial<InitializeParams> = {}): Initialize
 /** A client that advertises everything the server currently looks for. */
 const fullClient: Partial<InitializeParams> = {
   capabilities: {
-    workspace: { configuration: true, workspaceFolders: true, didChangeWatchedFiles: { dynamicRegistration: true } },
+    workspace: {
+      configuration: true,
+      workspaceFolders: true,
+      didChangeWatchedFiles: { dynamicRegistration: true },
+      diagnostics: { refreshSupport: true },
+    },
   },
 };
 
@@ -103,12 +109,14 @@ describe("LSP server environment", () => {
       configuration: true,
       workspaceFolders: true,
       didChangeWatchedFiles: true,
+      diagnosticRefresh: true,
     });
 
     assert.deepStrictEqual(resolveServerEnvironment(initializeParams()).client, {
       configuration: false,
       workspaceFolders: false,
       didChangeWatchedFiles: false,
+      diagnosticRefresh: false,
     });
   });
 
@@ -118,6 +126,21 @@ describe("LSP server environment", () => {
     assert.strictEqual(result.serverInfo?.name, "test-server");
     assert.deepStrictEqual(result.capabilities.completionProvider?.triggerCharacters, COMPLETION_TRIGGER_CHARACTERS);
     assert.deepStrictEqual(COMPLETION_TRIGGER_CHARACTERS, ["<", "|", " ", "[", "*"]);
+  });
+
+  it("offers the import command it attaches to completion items", () => {
+    const result = buildInitializeResult(resolveServerEnvironment(initializeParams()), "test-server");
+
+    assert.deepStrictEqual(result.capabilities.executeCommandProvider?.commands, [APPLY_IMPORT_COMMAND]);
+  });
+
+  it("declares that a document's diagnostics depend on other files", () => {
+    const result = buildInitializeResult(resolveServerEnvironment(initializeParams()), "test-server");
+
+    assert.deepStrictEqual(result.capabilities.diagnosticProvider, {
+      interFileDependencies: true,
+      workspaceDiagnostics: false,
+    });
   });
 
   it("announces workspace-folder support only to clients that have it", () => {

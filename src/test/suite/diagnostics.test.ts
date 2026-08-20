@@ -2,6 +2,7 @@ import * as assert from "node:assert";
 import * as path from "node:path";
 import { Project } from "ts-morph";
 import * as vscode from "vscode";
+import { type AngularCompilerApi, adoptAngularCompiler } from "../../core/angular-compiler";
 import type { ComponentImports } from "../../core/component-imports";
 import type { CoreRange } from "../../core/language-types";
 import {
@@ -9,6 +10,7 @@ import {
   type MissingImportContext,
   type MissingImportDiagnostic,
 } from "../../core/missing-imports";
+import { createMissingImportContext, type DiagnosticIndex } from "../../core/template-diagnostics";
 import type { ScannedTemplateElement } from "../../core/template-scan";
 import { DiagnosticProvider } from "../../providers/diagnostics";
 import { AngularElementData } from "../../types";
@@ -19,7 +21,7 @@ describe("DiagnosticProvider", function () {
   const testProjectPath = "/test/project";
   let provider: DiagnosticProvider;
   let sourceFile: import("ts-morph").SourceFile;
-  let compiler: unknown;
+  let compiler: AngularCompilerApi;
   let importedNames = new Set<string>();
 
   const indexEntries = new Map<string, AngularElementData[]>([
@@ -136,16 +138,21 @@ describe("DiagnosticProvider", function () {
   } as unknown as vscode.ExtensionContext;
 
   before(async () => {
-    compiler = await import("@angular/compiler");
+    compiler = adoptAngularCompiler(await import("@angular/compiler"));
   });
 
-  /** Runs the missing-import analysis through the provider's own wiring. */
+  /** Runs the missing-import analysis wired exactly as the provider wires it. */
   function checkElement(
     element: ScannedTemplateElement,
     indexer: unknown,
     componentFile: import("ts-morph").SourceFile
   ): MissingImportDiagnostic[] {
-    const context = (provider as any).createMissingImportContext(indexer, componentFile) as MissingImportContext;
+    const context: MissingImportContext = createMissingImportContext({
+      index: indexer as DiagnosticIndex,
+      componentImports: realComponentImports(),
+      sourceFile: componentFile,
+      compiler,
+    });
     return findMissingImports([element], "warning", context);
   }
 

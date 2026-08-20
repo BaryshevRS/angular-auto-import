@@ -24,6 +24,8 @@ export interface ClientSupport {
   workspaceFolders: boolean;
   /** The client can register file watchers on the server's behalf. */
   didChangeWatchedFiles: boolean;
+  /** The client can be asked to re-pull diagnostics for everything it has open. */
+  diagnosticRefresh: boolean;
 }
 
 /** Everything one server instance needs from the handshake. */
@@ -60,6 +62,7 @@ export function resolveServerEnvironment(params: InitializeParams): ServerEnviro
       configuration: workspace?.configuration === true,
       workspaceFolders: workspace?.workspaceFolders === true,
       didChangeWatchedFiles: workspace?.didChangeWatchedFiles?.dynamicRegistration === true,
+      diagnosticRefresh: workspace?.diagnostics?.refreshSupport === true,
     },
   };
 }
@@ -107,6 +110,13 @@ export function buildServerCapabilities(environment: ServerEnvironment): ServerC
     },
     executeCommandProvider: {
       commands: [APPLY_IMPORT_COMMAND],
+    },
+    diagnosticProvider: {
+      // A component's TypeScript file decides its external template's diagnostics, and
+      // an index change can decide any open document's, so no document's report can be
+      // computed from that document alone.
+      interFileDependencies: true,
+      workspaceDiagnostics: false,
     },
   };
 

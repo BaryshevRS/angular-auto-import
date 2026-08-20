@@ -10,7 +10,6 @@
 
 import { knownTags } from "../consts";
 import type {
-  AngularElementData,
   ControlFlowNode,
   TemplateAstNode,
   TmplAstBoundAttribute,
@@ -21,6 +20,7 @@ import type {
   TmplAstTemplate,
 } from "../types";
 import type { DocumentView } from "./document";
+import type { ElementLookup } from "./element-lookup";
 import type { CoreRange } from "./language-types";
 
 /** An attribute as written on a template element. */
@@ -49,9 +49,7 @@ export interface ScannedTemplateElement {
 }
 
 /** The slice of the element index the walk needs. */
-export interface TemplateElementLookup {
-  getElements(selector: string): AngularElementData[];
-}
+export type TemplateElementLookup = ElementLookup;
 
 /**
  * Angular AST node constructors, taken from the caller's dynamically imported compiler

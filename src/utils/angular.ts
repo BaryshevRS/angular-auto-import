@@ -10,6 +10,7 @@ import * as path from "node:path";
 import type { ClassDeclaration, Decorator } from "ts-morph";
 import { SyntaxKind } from "ts-morph";
 import { STANDARD_ANGULAR_ELEMENTS } from "../config/angular-elements";
+import type { ElementLookup } from "../core/element-lookup";
 import { sharedLogger } from "../core/logging";
 import type { AngularIndexer } from "../services";
 import { AngularElementData } from "../types";
@@ -235,7 +236,7 @@ function processCssSelector(cssSelector: CssSelectorForParsing, collection: stri
  * @param indexer An instance of the AngularIndexer to search for elements.
  * @returns An array of `AngularElementData` that match the selector.
  */
-export function getAngularElements(selector: string, indexer: AngularIndexer): AngularElementData[] {
+export function getAngularElements(selector: string, indexer: ElementLookup): AngularElementData[] {
   // Basic validation
   if (!selector || typeof selector !== "string" || !indexer) {
     return [];
@@ -290,7 +291,7 @@ function addNgForVariants(base: string, selectorsToTry: string[]): void {
   }
 }
 
-function findElementsForSelectors(uniqueSelectors: string[], indexer: AngularIndexer): AngularElementData[] {
+function findElementsForSelectors(uniqueSelectors: string[], indexer: ElementLookup): AngularElementData[] {
   const foundElements: AngularElementData[] = [];
   const seenElements = new Set<string>(); // path:name to avoid duplicates
 
@@ -336,7 +337,7 @@ function findStandardElement(selector: string, seenElements: Set<string>): Angul
 
 function findIndexedElements(
   selector: string,
-  indexer: AngularIndexer,
+  indexer: ElementLookup,
   seenElements: Set<string>
 ): AngularElementData[] {
   try {

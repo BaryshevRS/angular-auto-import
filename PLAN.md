@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 in progress — completion and its cross-file import execution are served by the server
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 in progress — the server serves completion, its cross-file import execution, and pull diagnostics; code actions, fix-all, and definitions are next
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -269,8 +269,13 @@ Exit criteria:
   - [x] Share the element-to-specifier rule between both hosts (`core/import-resolution`) instead of keeping a second copy in `utils/import`.
   - [ ] Attach the import as `additionalTextEdits` for an inline template. Blocked on the planner still returning a full-document replacement, which would overlap the completion's own edit; unblocked by the minimal-edit work below.
 - [ ] Implement definition responses with multiple `LocationLink` results.
-- [ ] Implement pull diagnostics, inter-file invalidation, and diagnostic refresh.
-- [ ] Implement `quickfix-only` candidate storage independent of visible diagnostics.
+- [x] Implement pull diagnostics, inter-file invalidation, and diagnostic refresh.
+  - [x] Move the analysis both hosts run onto one implementation: the dynamically imported compiler behind a named surface (`core/angular-compiler`), inline-template extraction (`core/inline-template`), source-file synchronization (`core/source-file-sync`), and the parse/walk/decide pipeline with its version-keyed AST cache (`core/template-diagnostics`). The direct provider now wires those together instead of owning them, and lost 190 lines doing so.
+  - [x] Answer `textDocument/diagnostic` from the server (`lsp/diagnostics`), advertising `interFileDependencies` because a component's TypeScript file decides its external template's report.
+  - [x] Ask the client to re-pull after a TypeScript document changes, after an index generation advances, and once the compiler finishes loading; the requests are coalesced so a burst means one refresh.
+  - [x] Drop the cached "already imported" answers when the index changes, since every one of them was decided against an index that no longer exists.
+- [x] Implement `quickfix-only` candidate storage independent of visible diagnostics.
+  - [x] `full` returns the items, `quickfix-only` retains them and returns none, `disabled` computes nothing and forgets what it had. Every retained result is tagged with the document version and index generation it was computed against, so a code action can refuse one that has gone stale.
 - [ ] Implement quick-fix code actions with cross-file workspace edits.
 - [ ] Implement `source.fixAll.angular-auto-import` and preserve deduplication/import ordering.
 - [ ] Ensure TypeScript document changes refresh related HTML diagnostics and vice versa.

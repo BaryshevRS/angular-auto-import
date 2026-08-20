@@ -21,6 +21,7 @@ import { SyntaxKind } from "ts-morph";
 import type { AngularElementData } from "../types";
 import type { CoreRange } from "./language-types";
 import { type CoreLogger, silentLogger } from "./logging";
+import { syncSourceFile } from "./source-file-sync";
 
 /** Import statements longer than this are rewritten across several lines. */
 const MULTI_LINE_IMPORT_THRESHOLD = 120;
@@ -106,15 +107,7 @@ export async function planImports(request: ImportPlanRequest): Promise<ImportPla
  * @internal
  */
 function openSourceFile(request: ImportPlanRequest): SourceFile {
-  const sourceFile = request.project.getSourceFile(request.filePath);
-  if (!sourceFile) {
-    return request.project.createSourceFile(request.filePath, request.text, { overwrite: true });
-  }
-
-  if (sourceFile.getFullText() !== request.text) {
-    sourceFile.replaceWithText(request.text);
-  }
-  return sourceFile;
+  return syncSourceFile(request.project, request.filePath, request.text);
 }
 
 /**

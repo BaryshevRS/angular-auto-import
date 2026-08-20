@@ -15,6 +15,8 @@ export interface ProjectRuntimeHostOptions {
   fileWatchers?: FileWatcherFactory;
   /** Minutes between automatic reindexes, passed on to every runtime. */
   reindexIntervalMinutes?: number;
+  /** Called whenever any runtime's index changes, with that root's new generation. */
+  onDidChangeIndex?(rootPath: string, generation: number): void;
   /** Overrides how a runtime is built, for tests and for future runtime variants. */
   createRuntime?(rootPath: string, logger: InstrumentedLogger): ProjectRuntime;
 }
@@ -42,6 +44,7 @@ export class ProjectRuntimeHost {
           storagePath: options.storagePath,
           fileWatchers: options.fileWatchers,
           reindexIntervalMinutes: options.reindexIntervalMinutes,
+          onDidChangeIndex: options.onDidChangeIndex,
         }));
   }
 

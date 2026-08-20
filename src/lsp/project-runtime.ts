@@ -38,6 +38,11 @@ export interface ProjectRuntimeOptions {
   storagePath?: string;
   /** Minutes between automatic reindexes; `0` disables them, matching the setting. */
   reindexIntervalMinutes?: number;
+  /**
+   * Called after this project's index changed and its generation advanced. Anything
+   * computed against the previous generation is now stale.
+   */
+  onDidChangeIndex?(rootPath: string, generation: number): void;
 }
 
 /** Everything the server knows about one Angular project root. */
@@ -79,6 +84,7 @@ export class ProjectRuntime {
     });
     this.indexSubscription = this.indexer.onDidChangeIndex(() => {
       this.generation += 1;
+      options.onDidChangeIndex?.(this.rootPath, this.generation);
     });
   }
 

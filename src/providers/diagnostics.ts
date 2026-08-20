@@ -5,27 +5,19 @@
  * @module
  */
 
-import {
-  type ClassDeclaration,
-  type Decorator,
-  type Node,
-  type NoSubstitutionTemplateLiteral,
-  type ObjectLiteralExpression,
-  type SourceFile,
-  type StringLiteral,
-  SyntaxKind,
-} from "ts-morph";
+import type { SourceFile } from "ts-morph";
 import * as vscode from "vscode";
 import { toDocumentView } from "../adapters/vscode/document";
 import { toVsCodeDiagnosticSeverity, toVsCodeRange } from "../adapters/vscode/language-types";
+import { type AngularCompilerApi, loadAngularCompiler } from "../core/angular-compiler";
 import { ComponentImports } from "../core/component-imports";
+import { findInlineTemplate } from "../core/inline-template";
 import type { CoreDiagnosticSeverity } from "../core/language-types";
-import { findMissingImports, type MissingImportContext, type MissingImportDiagnostic } from "../core/missing-imports";
-import { type ScannedTemplateElement, scanTemplate } from "../core/template-scan";
+import type { MissingImportDiagnostic } from "../core/missing-imports";
+import { syncSourceFile } from "../core/source-file-sync";
+import { analyzeTemplate, TemplateAstCache, type TemplateSource } from "../core/template-diagnostics";
 import { logger } from "../logger";
-import type { AngularIndexer } from "../services";
-import type { TemplateAstNode } from "../types";
-import { getAngularElements, getTsDocument, isStandalone, switchFileType } from "../utils";
+import { getTsDocument, isStandalone, switchFileType } from "../utils";
 import { debounce } from "../utils/debounce";
 import { findDeepestContainingProjectContext, getProjectContextForDocument } from "../utils/project-context";
 import type { ProviderContext } from "./index";
@@ -37,9 +29,8 @@ export class DiagnosticProvider {
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
   private disposables: vscode.Disposable[] = [];
   private readonly candidateDiagnostics: Map<string, vscode.Diagnostic[]> = new Map();
-  private readonly templateCache = new Map<string, { version: number; nodes: unknown[] }>();
-  // biome-ignore lint/suspicious/noExplicitAny: The Angular compiler is dynamically imported and has a complex, undocumented type surface.
-  private compiler: any | null = null;
+  private readonly templateCache = new TemplateAstCache();
+  private compiler: AngularCompilerApi | null = null;
   /**
    * Cache for storing whether a specific Angular element (component, directive, pipe) is imported in a given TypeScript component file.
    * Key: path to the TypeScript component file.
@@ -330,7 +321,7 @@ export class DiagnosticProvider {
       return;
     }
 
-    await this.runDiagnostics(document.getText(), document, 0, sourceFile);
+    await this.runDiagnostics({ text: document.getText(), offset: 0 }, document, sourceFile);
   }
 
   /**
@@ -346,10 +337,10 @@ export class DiagnosticProvider {
       return;
     }
 
-    const componentInfo = this.extractInlineTemplate(document, sourceFile);
-    if (componentInfo) {
+    const inlineTemplate = findInlineTemplate(sourceFile);
+    if (inlineTemplate) {
       this.componentImports.invalidate(document.fileName);
-      await this.runDiagnostics(componentInfo.template, document, componentInfo.templateOffset, sourceFile);
+      await this.runDiagnostics(inlineTemplate, document, sourceFile);
     } else {
       this.clearDiagnosticsForNoTemplate(document);
     }
@@ -389,10 +380,15 @@ export class DiagnosticProvider {
     logger.debug(`[DiagnosticProvider] ${operation} for ${identifier} took ${duration.toFixed(2)} ms`);
   }
 
+  /**
+   * Runs the shared missing-import analysis and publishes what it found.
+   * @param template The template text and where it starts in the document.
+   * @param document The document being diagnosed.
+   * @param sourceFile The component's source file, already holding the current text.
+   */
   private async runDiagnostics(
-    templateText: string,
+    template: TemplateSource,
     document: vscode.TextDocument,
-    offset: number,
     sourceFile: SourceFile
   ): Promise<void> {
     const projCtx = this.getProjectContextForDocument(document);
@@ -406,123 +402,22 @@ export class DiagnosticProvider {
       return;
     }
 
-    const { indexer } = projCtx;
-    const severity = this.getSeverityFromConfig(this.context.extensionConfig.diagnosticsSeverity);
-
-    // Parse the template to get all elements and their full context
-    const parsedElements = this.parseCompleteTemplate(templateText, document, offset, indexer);
-    const missingImports = findMissingImports(
-      parsedElements,
-      severity,
-      this.createMissingImportContext(indexer, sourceFile)
-    );
+    const startTime = process.hrtime.bigint();
+    const missingImports = analyzeTemplate({
+      document: toDocumentView(document),
+      template,
+      sourceFile,
+      index: projCtx.indexer,
+      componentImports: this.componentImports,
+      compiler: this.compiler,
+      severity: this.getSeverityFromConfig(this.context.extensionConfig.diagnosticsSeverity),
+      cache: this.templateCache,
+      logger,
+    });
+    this.logOperationDuration("analyzeTemplate", document.fileName, startTime);
 
     this.candidateDiagnostics.set(document.uri.toString(), missingImports.map(toVsCodeDiagnostic));
     this.publishFilteredDiagnostics(document.uri);
-  }
-
-  /**
-   * Wires the missing-import analysis to this project's index and the component's source file.
-   */
-  private createMissingImportContext(indexer: AngularIndexer, sourceFile: SourceFile): MissingImportContext {
-    const { CssSelector, SelectorMatcher } = this.compiler;
-
-    return {
-      findCandidates: (name) => getAngularElements(name, indexer),
-      isImported: (candidate) => this.componentImports.isImported(sourceFile, candidate),
-      getComponentImportNames: () => this.componentImports.getImportNames(sourceFile),
-      getNamedImportSpecifiers: (importName) => this.componentImports.getNamedImportSpecifiers(sourceFile, importName),
-      getExternalModuleExports: (moduleName) => indexer.getExternalModuleExports(moduleName),
-      selectors: { cssSelector: CssSelector, selectorMatcher: SelectorMatcher },
-    };
-  }
-
-  private parseCompleteTemplate(
-    text: string,
-    document: vscode.TextDocument,
-    offset: number,
-    indexer: AngularIndexer
-  ): ScannedTemplateElement[] {
-    const parseTemplateStartTime = process.hrtime.bigint();
-    try {
-      if (!this.compiler) {
-        logger.warn("[DiagnosticProvider] @angular/compiler not loaded yet, skipping template parsing.");
-        return [];
-      }
-      const {
-        TmplAstBoundAttribute,
-        TmplAstBoundEvent,
-        TmplAstElement,
-        TmplAstReference,
-        TmplAstTemplate,
-        TmplAstBoundText,
-      } = this.compiler;
-
-      const elements = scanTemplate({
-        nodes: this.getTemplateNodes(text, document),
-        document: toDocumentView(document),
-        offset,
-        text,
-        lookup: indexer,
-        constructors: {
-          tmplAstElement: TmplAstElement,
-          tmplAstTemplate: TmplAstTemplate,
-          tmplAstBoundEvent: TmplAstBoundEvent,
-          tmplAstReference: TmplAstReference,
-          tmplAstBoundAttribute: TmplAstBoundAttribute,
-          tmplAstBoundText: TmplAstBoundText,
-        },
-        onError: (message, error) => logger.error(`[DiagnosticProvider] ${message}`, error),
-      });
-
-      this.logOperationDuration("parseCompleteTemplate", document.fileName, parseTemplateStartTime);
-      return elements;
-    } catch (e) {
-      logger.error(`[DiagnosticProvider] Failed to parse template: ${document.uri.fsPath}`, e as Error);
-      return [];
-    }
-  }
-
-  /**
-   * Parses the template, reusing the cached AST while the document version is unchanged.
-   */
-  private getTemplateNodes(text: string, document: vscode.TextDocument): TemplateAstNode[] {
-    const currentVersion = document.version;
-    const cacheKey = document.uri.toString();
-    const cached = this.templateCache.get(cacheKey);
-
-    if (cached && cached.version === currentVersion) {
-      logger.debug(`[DiagnosticProvider] Template cache HIT for ${document.fileName}`);
-      return cached.nodes as TemplateAstNode[];
-    }
-
-    logger.debug(`[DiagnosticProvider] Template cache MISS for ${document.fileName}`);
-    let nodes: TemplateAstNode[];
-    try {
-      // Use alwaysAttemptHtmlToR3AstConversion to parse templates with syntax errors
-      // This option ensures we get partial AST even if template HTML is invalid
-      const parsed = this.compiler.parseTemplate(text, document.uri.fsPath, {
-        alwaysAttemptHtmlToR3AstConversion: true,
-        collectCommentNodes: true,
-      });
-
-      nodes = parsed.nodes;
-
-      // Log parse errors if they exist, but continue with partial AST
-      if (parsed.errors && parsed.errors.length > 0) {
-        logger.debug(
-          `[DiagnosticProvider] Template has parse errors for ${document.fileName}, but continuing with partial AST:`,
-          parsed.errors
-        );
-      }
-    } catch (parseError) {
-      // Fallback for unexpected parsing exceptions
-      logger.error(`[DiagnosticProvider] Unexpected error parsing template ${document.fileName}:`, parseError as Error);
-      nodes = [];
-    }
-
-    this.templateCache.set(cacheKey, { version: currentVersion, nodes });
-    return nodes;
   }
 
   private getSourceFile(document: vscode.TextDocument): SourceFile | undefined {
@@ -531,109 +426,11 @@ export class DiagnosticProvider {
       return undefined;
     }
 
-    const { project } = projCtx.indexer;
-
     // Use the exact document being diagnosed. SCM diff editors can expose a
     // virtual document with the same fileName as the working-tree document;
     // looking up by fileName alone may otherwise substitute the historical
     // snapshot and poison the shared ts-morph SourceFile.
-    const currentContent = document.getText();
-
-    let sourceFile = project.getSourceFile(document.fileName);
-
-    if (sourceFile) {
-      if (sourceFile.getFullText() !== currentContent) {
-        sourceFile.replaceWithText(currentContent);
-      }
-    } else {
-      sourceFile = project.createSourceFile(document.fileName, currentContent, {
-        overwrite: true,
-      });
-    }
-
-    return sourceFile;
-  }
-
-  private extractInlineTemplate(
-    _document: vscode.TextDocument,
-    sourceFile: SourceFile
-  ): { template: string; templateOffset: number } | null {
-    for (const classDeclaration of sourceFile.getClasses()) {
-      const result = this.extractTemplateFromClass(classDeclaration);
-      if (result) {
-        return result;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Extracts template from a class declaration.
-   */
-  private extractTemplateFromClass(
-    classDeclaration: ClassDeclaration
-  ): { template: string; templateOffset: number } | null {
-    const componentDecorator = classDeclaration.getDecorator("Component");
-    if (!componentDecorator) {
-      return null;
-    }
-
-    const objectLiteral = this.getComponentDecoratorObjectLiteral(componentDecorator);
-    if (!objectLiteral) {
-      return null;
-    }
-
-    return this.extractTemplateFromObjectLiteral(objectLiteral);
-  }
-
-  /**
-   * Gets the object literal from a Component decorator.
-   */
-  private getComponentDecoratorObjectLiteral(componentDecorator: Decorator): ObjectLiteralExpression | null {
-    const decoratorArgs = componentDecorator.getArguments();
-    if (decoratorArgs.length === 0) {
-      return null;
-    }
-
-    const firstArg = decoratorArgs[0];
-    if (!firstArg.isKind(SyntaxKind.ObjectLiteralExpression)) {
-      return null;
-    }
-
-    return firstArg as ObjectLiteralExpression;
-  }
-
-  /**
-   * Extracts template from an object literal expression.
-   */
-  private extractTemplateFromObjectLiteral(
-    objectLiteral: ObjectLiteralExpression
-  ): { template: string; templateOffset: number } | null {
-    const templateProperty = objectLiteral.getProperty("template");
-    if (!templateProperty?.isKind(SyntaxKind.PropertyAssignment)) {
-      return null;
-    }
-
-    const initializer = templateProperty.getInitializer();
-    if (!this.isValidTemplateInitializer(initializer)) {
-      return null;
-    }
-
-    const templateString = initializer.getLiteralText();
-    const templateOffset = initializer.getStart() + 1;
-    return { template: templateString, templateOffset };
-  }
-
-  /**
-   * Checks if an initializer is a valid template initializer.
-   */
-  private isValidTemplateInitializer(
-    initializer: Node | undefined
-  ): initializer is StringLiteral | NoSubstitutionTemplateLiteral {
-    return Boolean(
-      initializer &&
-        (initializer.isKind(SyntaxKind.StringLiteral) || initializer.isKind(SyntaxKind.NoSubstitutionTemplateLiteral))
-    );
+    return syncSourceFile(projCtx.indexer.project, document.fileName, document.getText());
   }
 
   private getProjectContextForDocument(document: vscode.TextDocument) {
@@ -687,18 +484,18 @@ export class DiagnosticProvider {
   }
 
   private loadCompiler(): void {
-    void import("@angular/compiler")
+    void loadAngularCompiler(logger)
       .then((compiler) => {
         this.compiler = compiler;
-        logger.info("[DiagnosticProvider] @angular/compiler loaded, retrying open documents...");
+        logger.info("[DiagnosticProvider] Retrying open documents now that the compiler is available");
         for (const document of vscode.workspace.textDocuments) {
           if (document.languageId === "html" || document.languageId === "typescript") {
             void this.updateDiagnostics(document);
           }
         }
       })
-      .catch((error) => {
-        logger.error("[DiagnosticProvider] Failed to pre-load @angular/compiler:", error as Error);
+      .catch(() => {
+        // Already reported by the loader; diagnostics stay off until a later load succeeds.
       });
   }
 }
