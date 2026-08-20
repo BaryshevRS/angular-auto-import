@@ -16,6 +16,10 @@
 - `watch`: Parallel watch for both esbuild and TypeScript
 - `vsce:package` then `vsce:inspect`: build the VSIX and verify it carries both bundles
   and their runtime dependencies
+- `benchmark`: index time, request latency, and server memory (run the underlying script
+  with `node --expose-gc` to include the retention check)
+- `host-cost`: what each implementation costs the Extension Host, measured inside the
+  editor and compared
 
 ### Testing Framework
 

@@ -9,12 +9,21 @@
  * tax, which is the honest form of the "no regression in warm completion p95" gate:
  * both hosts run the same analysis, so the protocol is the only thing that is new.
  *
+ * Memory is asked as two separate questions, because one number cannot answer both.
+ * What the process costs is measured on a spawned `dist/server.js` — that is what a user
+ * actually runs. Whether anything *leaks* is measured in this process, where a garbage
+ * collection can be forced: an RSS that climbs and stays there says nothing on its own,
+ * since V8 does not return freed pages to the operating system.
+ *
  * Two gates are deliberately absent, because nothing outside the Extension Host can
  * measure them: activation time, and Extension Host CPU during a full index. The second
- * is the migration's whole point, and measuring it needs a run inside the editor.
+ * is the migration's whole point, and measuring it needs a run inside the editor —
+ * `src/test/suite/host-cost.test.ts` does that.
  *
- * Usage: node scripts/benchmark.mjs [--project <path>] [--samples N] [--reindexes N] [--json]
- * Requires a compiled `out/`: run `pnpm run compile-tests` first.
+ * Usage: node --expose-gc scripts/benchmark.mjs [--project <path>] [--samples N]
+ *          [--reindexes N] [--json]
+ * Requires a compiled `out/`: run `pnpm run compile-tests` first. Without `--expose-gc`
+ * the leak check is skipped and says so.
  */
 
 import { spawn } from "node:child_process";
@@ -134,9 +143,10 @@ try {
   await writeFile(componentPath, originalComponent, "utf8");
 }
 
-// ── Memory, in the process the server actually ships in ──────────────────────────
+// ── Memory: what it costs, and whether it leaks ──────────────────────────────────
 
 results.server = await measureServerProcess();
+results.retention = await measureRetention();
 
 // ── Packaged size ────────────────────────────────────────────────────────────────
 
@@ -183,6 +193,19 @@ function report() {
     console.log(
       `  growth              ${percentage(trend[trend.length - 1], trend[0], `over ${trend.length - 1} reindexes`)}`
     );
+    console.log("  (RSS is a high-water mark; V8 does not return freed pages to the OS)");
+  }
+
+  console.log("\nRetention, in this process, after a forced collection");
+  if (results.retention.unavailable) {
+    console.log(`  ${results.retention.unavailable}`);
+  } else {
+    const { collectedHeapMb, sourceFileCounts } = results.retention;
+    console.log(`  heap per reindex    ${collectedHeapMb.join(" → ")} MB`);
+    console.log(`  ts-morph files      ${sourceFileCounts.join(" → ")}`);
+    console.log(
+      `  retained            ${percentage(collectedHeapMb[collectedHeapMb.length - 1], collectedHeapMb[0], `over ${collectedHeapMb.length - 1} reindexes`)}`
+    );
   }
 
   console.log("\nBundles");
@@ -193,6 +216,39 @@ function report() {
   console.log("\nNot measured here: activation time and Extension Host CPU during a full");
   console.log("index. Both need a run inside the editor; the second is the whole point of");
   console.log("the migration and cannot be inferred from these numbers.");
+}
+
+/**
+ * Whether repeated reindexing retains anything, measured where a collection can be forced.
+ *
+ * RSS cannot answer this. V8 keeps pages it has already freed internally, so a process
+ * that allocates a lot of short-lived garbage shows an RSS that climbs and stays high
+ * while retaining nothing at all. What settles after a forced collection is the answer.
+ */
+async function measureRetention() {
+  if (typeof global.gc !== "function") {
+    return { unavailable: "run with --expose-gc to check for retention" };
+  }
+
+  const runtime = new ProjectRuntime(project);
+  await runtime.load();
+
+  const collectedHeapMb = [];
+  const sourceFileCounts = [];
+  const settled = () => {
+    global.gc();
+    collectedHeapMb.push(megabytes(process.memoryUsage().heapUsed));
+    sourceFileCounts.push(runtime.indexer.project.getSourceFiles().length);
+  };
+
+  settled();
+  for (let round = 0; round < options.reindexes; round += 1) {
+    await runtime.reindex();
+    settled();
+  }
+  runtime.dispose();
+
+  return { collectedHeapMb, sourceFileCounts };
 }
 
 /**
