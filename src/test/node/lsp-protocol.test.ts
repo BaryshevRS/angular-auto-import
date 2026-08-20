@@ -10,6 +10,7 @@ import {
   DocumentDiagnosticRequest,
   ExecuteCommandRequest,
 } from "vscode-languageserver-protocol";
+import type { CoreRange } from "../../core/language-types";
 import { FIX_ALL_KIND } from "../../lsp/code-actions";
 import { APPLY_IMPORT_COMMAND } from "../../lsp/import-command";
 import {
@@ -19,6 +20,7 @@ import {
   ReindexRequest,
 } from "../../lsp/protocol";
 import { FULL_CLIENT_CAPABILITIES, type Harness, startHarness } from "./harness/lsp-harness";
+import { applyTextEdits } from "./harness/text";
 
 const WHOLE_DOCUMENT = { start: { line: 0, character: 0 }, end: { line: 40, character: 0 } };
 
@@ -221,12 +223,17 @@ describe("LSP protocol", function () {
       assert.strictEqual(action.edit, undefined, "The edit is too expensive to send before it is wanted");
 
       const resolved = (await harness.client.sendRequest(CodeActionResolveRequest.type, action as never)) as {
-        edit?: { documentChanges: Array<{ textDocument: { uri: string }; edits: Array<{ newText: string }> }> };
+        edit?: {
+          documentChanges: Array<{
+            textDocument: { uri: string };
+            edits: Array<{ range: CoreRange; newText: string }>;
+          }>;
+        };
       };
 
       const change = resolved.edit?.documentChanges[0];
       assert.strictEqual(change?.textDocument.uri, harness.uri(hostPath), "The import belongs in the component");
-      assert.match(change.edits[0].newText, /imports: \[ShopCardComponent]/);
+      assert.match(applyTextEdits(HOST, change.edits), /imports: \[ShopCardComponent]/);
     });
 
     it("offers a fix-all for a template missing several elements", async () => {

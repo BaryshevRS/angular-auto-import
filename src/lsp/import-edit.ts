@@ -87,8 +87,7 @@ export class ImportEditPlanner {
       logger: this.logger,
     });
 
-    const [edit] = plan.edits;
-    if (!edit) {
+    if (plan.edits.length === 0) {
       return { addedImports: plan.addedImports };
     }
 
@@ -104,7 +103,7 @@ export class ImportEditPlanner {
         documentChanges: [
           {
             textDocument: { uri, version },
-            edits: [{ range: edit.range, newText: edit.newText }],
+            edits: plan.edits.map((edit) => ({ range: edit.range, newText: edit.newText })),
           },
         ],
       },

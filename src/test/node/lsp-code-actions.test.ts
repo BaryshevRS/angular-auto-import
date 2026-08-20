@@ -8,6 +8,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { toDocumentView } from "../../adapters/lsp/document";
 import { type AngularCompilerApi, adoptAngularCompiler } from "../../core/angular-compiler";
 import type { DocumentView } from "../../core/document";
+import type { CoreRange } from "../../core/language-types";
 import { DEFAULT_EXTENSION_CONFIG, type ExtensionConfig } from "../../core/settings";
 import { type CodeActionData, CodeActionHandler, FIX_ALL_KIND } from "../../lsp/code-actions";
 import { DiagnosticsHandler } from "../../lsp/diagnostics";
@@ -16,6 +17,7 @@ import { ImportEditPlanner } from "../../lsp/import-edit";
 import { OpenDocuments } from "../../lsp/open-documents";
 import { ProjectRouter } from "../../lsp/project-router";
 import { ProjectRuntime } from "../../lsp/project-runtime";
+import { applyTextEdits } from "./harness/text";
 
 function noOpenDocuments(): OpenDocuments {
   const open = new OpenDocuments({
@@ -96,12 +98,11 @@ describe("LSP code actions", function () {
     return { actions, diagnostics };
   }
 
-  /** The text the action's edit would produce. */
+  /** The component as the action's edits would leave it. */
   function editedText(action: CodeAction): string {
     const change = action.edit?.documentChanges?.[0];
     assert.ok(change && "edits" in change, `Expected ${action.title} to carry a document edit`);
-    const [edit] = change.edits as Array<{ newText: string }>;
-    return edit.newText;
+    return applyTextEdits(readFileSync(hostPath, "utf8"), change.edits as Array<{ range: CoreRange; newText: string }>);
   }
 
   beforeEach(async () => {

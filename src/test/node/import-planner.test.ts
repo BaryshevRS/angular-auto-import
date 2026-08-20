@@ -2,6 +2,7 @@ import * as assert from "node:assert";
 import { Project } from "ts-morph";
 import { type ImportPlan, planImports } from "../../core/import-planner";
 import { AngularElementData } from "../../types";
+import { applyTextEdits } from "./harness/text";
 
 const filePath = "/workspace/app/src/app/host.component.ts";
 
@@ -29,9 +30,9 @@ async function plan(text: string, elements: AngularElementData[], version = 7): 
   });
 }
 
-/** The text the plan produces, or the original when the plan is empty. */
+/** The text the plan produces, which is what applying its edits gives. */
 function plannedText(result: ImportPlan, original: string): string {
-  return result.edits[0]?.newText ?? original;
+  return applyTextEdits(original, result.edits);
 }
 
 const bareComponent = `import { Component } from "@angular/core";
@@ -80,14 +81,39 @@ export class HostComponent {}
     assert.deepStrictEqual(result.addedImports, []);
   });
 
-  it("replaces the whole file, so the edit range spans it", async () => {
+  it("touches only the lines it changed, leaving the template between them alone", async () => {
     const result = await plan(bareComponent, [element()]);
 
-    const lines = bareComponent.split("\n");
-    assert.deepStrictEqual(result.edits[0].range, {
-      start: { line: 0, character: 0 },
-      end: { line: lines.length - 1, character: lines[lines.length - 1].length },
-    });
+    const changedLines = new Set<number>();
+    for (const edit of result.edits) {
+      for (let line = edit.range.start.line; line <= edit.range.end.line; line += 1) {
+        changedLines.add(line);
+      }
+    }
+
+    const templateLine = bareComponent.split("\n").findIndex((line) => line.includes("template:"));
+    assert.ok(templateLine >= 0, "The fixture must have a template line to leave alone");
+    assert.ok(
+      !changedLines.has(templateLine),
+      `Edits covered the template line; a completion editing it would collide. Covered: ${[...changedLines].join(", ")}`
+    );
+  });
+
+  it("produces edits an editor can apply together", async () => {
+    const result = await plan(bareComponent, [element()]);
+
+    const starts = result.edits.map((edit) => edit.range.start);
+    const sorted = [...starts].sort((left, right) => left.line - right.line || left.character - right.character);
+    assert.deepStrictEqual(starts, sorted, "Edits must arrive in document order");
+
+    for (let index = 1; index < result.edits.length; index += 1) {
+      const previous = result.edits[index - 1].range.end;
+      const next = result.edits[index].range.start;
+      assert.ok(
+        previous.line < next.line || (previous.line === next.line && previous.character <= next.character),
+        "Edits must not overlap"
+      );
+    }
   });
 
   it("adds an imports array to a decorator that has none", async () => {

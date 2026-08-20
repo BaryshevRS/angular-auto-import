@@ -133,6 +133,8 @@ export function buildServerCapabilities(environment: ServerEnvironment): ServerC
     textDocumentSync: TextDocumentSyncKind.Incremental,
     completionProvider: {
       triggerCharacters: COMPLETION_TRIGGER_CHARACTERS,
+      // An accepted item's import is planned on resolution, not for every item offered.
+      resolveProvider: true,
     },
     executeCommandProvider: {
       commands: [APPLY_IMPORT_COMMAND],

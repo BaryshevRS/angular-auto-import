@@ -161,6 +161,15 @@ function createContext(connection: Connection): ServerContext {
     logger,
   });
 
+  // One planner: an accepted completion, a quick fix, and fix-all all produce the same
+  // edit, and there is no reason for them to compute it three different ways.
+  const planner = new ImportEditPlanner({
+    router,
+    documents: openDocuments,
+    readFile: (filePath) => readFileSync(filePath, "utf-8"),
+    logger,
+  });
+
   const context: ServerContext = {
     connection,
     documents,
@@ -169,7 +178,7 @@ function createContext(connection: Connection): ServerContext {
     state,
     handlers: {
       diagnostics,
-      completions: new CompletionHandler({ router, documents: openDocuments, config, logger }),
+      completions: new CompletionHandler({ router, documents: openDocuments, config, planner, logger }),
       definitions: new DefinitionHandler({ router, diagnostics, logger }),
       reporter: new DiagnosticsReporter({ diagnostics, logger }),
       operations: new ServerOperations({
@@ -187,12 +196,7 @@ function createContext(connection: Connection): ServerContext {
       codeActions: new CodeActionHandler({
         router,
         diagnostics,
-        planner: new ImportEditPlanner({
-          router,
-          documents: openDocuments,
-          readFile: (filePath) => readFileSync(filePath, "utf-8"),
-          logger,
-        }),
+        planner,
         resolvesActions: () => state.environment?.client.codeActionResolve === true,
         logger,
       }),
@@ -401,6 +405,8 @@ function registerLanguageFeatures(context: ServerContext, options: ServerOptions
 
     return handlers.completions.provide(toDocumentView(document), params.position, toCancellationSignal(token));
   });
+
+  connection.onCompletionResolve((item) => handlers.completions.resolve(item));
 
   connection.languages.diagnostics.on((params, token) => {
     const document = documents.get(params.textDocument.uri);

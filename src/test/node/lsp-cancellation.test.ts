@@ -31,6 +31,11 @@ function noOpenDocuments(): OpenDocuments {
   return open;
 }
 
+/** The planner a completion resolves its import through. */
+function plannerFor(router: ProjectRouter, documents: OpenDocuments): ImportEditPlanner {
+  return new ImportEditPlanner({ router, documents, readFile: (file) => readFileSync(file, "utf-8") });
+}
+
 function documentAt(filePath: string, text: string, languageId: string): DocumentView {
   return toDocumentView(TextDocument.create(pathToFileURL(filePath).toString(), languageId, 1, text));
 }
@@ -108,12 +113,17 @@ describe("LSP request cancellation", function () {
       rootForPath: (filePath) => (filePath.startsWith(root) ? root : undefined),
       runtimeForRoot: (rootPath) => (rootPath === root ? runtime : undefined),
     });
-    completions = new CompletionHandler({ router, documents, config: () => config });
+    completions = new CompletionHandler({
+      router,
+      documents,
+      config: () => config,
+      planner: plannerFor(router, documents),
+    });
     diagnostics = new DiagnosticsHandler({ router, documents, config: () => config, compiler: () => compiler });
     codeActions = new CodeActionHandler({
       router,
       diagnostics,
-      planner: new ImportEditPlanner({ router, documents, readFile: (file) => readFileSync(file, "utf-8") }),
+      planner: plannerFor(router, documents),
       resolvesActions: () => true,
     });
     definitions = new DefinitionHandler({ router, diagnostics });

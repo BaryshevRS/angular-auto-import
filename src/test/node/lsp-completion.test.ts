@@ -1,5 +1,5 @@
 import * as assert from "node:assert";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,9 +9,11 @@ import type { DocumentView } from "../../core/document";
 import { DEFAULT_EXTENSION_CONFIG, type ExtensionConfig } from "../../core/settings";
 import { CompletionHandler } from "../../lsp/completion";
 import { APPLY_IMPORT_COMMAND, type ApplyImportArguments } from "../../lsp/import-command";
+import { ImportEditPlanner } from "../../lsp/import-edit";
 import { OpenDocuments, type SynchronizedDocument } from "../../lsp/open-documents";
 import { ProjectRouter } from "../../lsp/project-router";
 import { ProjectRuntime } from "../../lsp/project-runtime";
+import { applyTextEdits } from "./harness/text";
 
 /** Nothing is open unless a test says so; the handler only needs the dirty answer. */
 function noOpenDocuments(): OpenDocuments {
@@ -87,9 +89,17 @@ async function writeHost(root: string, options: { standalone: boolean; external:
 }
 
 /** Builds a document view over text the client would have synchronized. */
+/** The planner a completion resolves its import through. */
+function plannerFor(router: ProjectRouter, documents: OpenDocuments): ImportEditPlanner {
+  return new ImportEditPlanner({ router, documents, readFile: (file) => readFileSync(file, "utf-8") });
+}
+
 function documentAt(filePath: string, text: string, languageId: string): DocumentView {
   return toDocumentView(TextDocument.create(pathToFileURL(filePath).toString(), languageId, 1, text));
 }
+
+/** A range covering nothing, for an item that replaces no text. */
+const EMPTY_RANGE = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
 
 /** The position just past the last occurrence of a marker. */
 function positionAfter(document: DocumentView, marker: string) {
@@ -109,7 +119,7 @@ describe("LSP completion", function () {
       rootForPath: (filePath) => (filePath.startsWith(root) ? root : undefined),
       runtimeForRoot: (rootPath) => (rootPath === root ? runtime : undefined),
     });
-    return new CompletionHandler({ router, documents, config: () => config });
+    return new CompletionHandler({ router, documents, config: () => config, planner: plannerFor(router, documents) });
   }
 
   beforeEach(async () => {
@@ -191,6 +201,52 @@ describe("LSP completion", function () {
     assert.strictEqual(item?.label, "shop-card");
     const [args] = item.command?.arguments as [ApplyImportArguments];
     assert.strictEqual(args.uri, document.uri);
+  });
+
+  it("carries the import as an edit when the template is in the document being completed", async () => {
+    const hostPath = path.join(root, "src", "host.component.ts");
+    const text = [
+      'import { Component } from "@angular/core";',
+      "",
+      "@Component({",
+      '  selector: "app-host",',
+      "  standalone: true,",
+      "  template: `<shop-c`,",
+      "  imports: [],",
+      "})",
+      "export class HostComponent {}",
+      "",
+    ].join("\n");
+    await fs.writeFile(hostPath, text, "utf8");
+    await runtime.load();
+    const handler = await handlerFor();
+    const document = documentAt(hostPath, text, "typescript");
+
+    const [offered] = handler.provide(document, positionAfter(document, "<shop-c")).items;
+    const resolved = await handler.resolve(offered);
+
+    assert.ok(resolved.additionalTextEdits, "An import into this very document needs no round trip");
+    assert.strictEqual(resolved.command, undefined, "Carrying both would import the element twice");
+    const edited = applyTextEdits(text, [
+      ...(resolved.additionalTextEdits ?? []),
+      resolved.textEdit && "range" in resolved.textEdit ? resolved.textEdit : { range: EMPTY_RANGE, newText: "" },
+    ]);
+    assert.match(edited, /import \{ ShopCardComponent } from ".\/shop-card.component";/);
+    assert.match(edited, /imports: \[ShopCardComponent]/);
+    assert.match(edited, /template: `<shop-card`/);
+  });
+
+  it("keeps the command for an external template, whose import lands elsewhere", async () => {
+    await writeHost(root, { standalone: true, external: true });
+    await runtime.load();
+    const handler = await handlerFor();
+    const document = documentAt(path.join(root, "src", "host.component.html"), "<shop-c", "html");
+
+    const [offered] = handler.provide(document, positionAfter(document, "<shop-c")).items;
+    const resolved = await handler.resolve(offered);
+
+    assert.strictEqual(resolved.additionalTextEdits, undefined, "No edit can reach another file");
+    assert.strictEqual(resolved.command?.command, APPLY_IMPORT_COMMAND);
   });
 
   it("stays silent outside an inline template", async () => {

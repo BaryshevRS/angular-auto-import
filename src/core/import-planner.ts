@@ -19,25 +19,23 @@ import type {
 } from "ts-morph";
 import { SyntaxKind } from "ts-morph";
 import type { AngularElementData } from "../types";
-import type { CoreRange } from "./language-types";
 import { type CoreLogger, silentLogger } from "./logging";
 import { syncSourceFile } from "./source-file-sync";
+import type { TextEdit } from "./text-edits";
+import { diffToEdits } from "./text-edits";
 
 /** Import statements longer than this are rewritten across several lines. */
 const MULTI_LINE_IMPORT_THRESHOLD = 120;
 
 /** A replacement the caller applies to the planned file. */
-export interface PlannedEdit {
-  range: CoreRange;
-  newText: string;
-}
+export type PlannedEdit = TextEdit;
 
 /** The edits that add the requested imports, tied to the text they were computed from. */
 export interface ImportPlan {
   filePath: string;
   /** Version of the document the plan was computed from; stale plans must not be applied. */
   version: number;
-  /** Empty when every element is already importable. */
+  /** Non-overlapping and in document order; empty when every element is already importable. */
   edits: PlannedEdit[];
   /** Identifiers added to the component's `imports: [...]`. */
   addedImports: string[];
@@ -97,7 +95,9 @@ export async function planImports(request: ImportPlanRequest): Promise<ImportPla
   return {
     filePath: request.filePath,
     version: request.version,
-    edits: [{ range: fullRangeOf(request.text), newText }],
+    // The smallest set of replacements that produce the rewrite, not the rewrite
+    // itself: see `core/text-edits` for why a whole-file replacement is not usable.
+    edits: diffToEdits(request.text, newText),
     addedImports,
   };
 }
@@ -108,18 +108,6 @@ export async function planImports(request: ImportPlanRequest): Promise<ImportPla
  */
 function openSourceFile(request: ImportPlanRequest): SourceFile {
   return syncSourceFile(request.project, request.filePath, request.text);
-}
-
-/**
- * The range covering a whole document, so a plan can replace it wholesale.
- * @internal
- */
-function fullRangeOf(text: string): CoreRange {
-  const lines = text.split("\n");
-  return {
-    start: { line: 0, character: 0 },
-    end: { line: lines.length - 1, character: lines[lines.length - 1].length },
-  };
 }
 
 /**

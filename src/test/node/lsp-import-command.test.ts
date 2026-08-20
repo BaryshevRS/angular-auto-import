@@ -12,6 +12,7 @@ import {
 import { OpenDocuments, type SynchronizedDocument } from "../../lsp/open-documents";
 import { ProjectRouter } from "../../lsp/project-router";
 import { ProjectRuntime } from "../../lsp/project-runtime";
+import { applyTextEdits } from "./harness/text";
 
 /** Presents whatever documents a test declares as synchronized. */
 function documentSource(documents: SynchronizedDocument[]): OpenDocuments {
@@ -114,8 +115,9 @@ describe("LSP import command", function () {
     assert.strictEqual(applied.length, 1);
     const [change] = applied[0].documentChanges;
     assert.strictEqual(change.textDocument.uri, hostUri);
-    assert.match(change.edits[0].newText, /import \{ ShopCardComponent } from "@shop\/shop-card\.component";/);
-    assert.match(change.edits[0].newText, /imports: \[ShopCardComponent]/);
+    const edited = applyTextEdits(HOST_SOURCE, change.edits);
+    assert.match(edited, /import \{ ShopCardComponent } from "@shop\/shop-card\.component";/);
+    assert.match(edited, /imports: \[ShopCardComponent]/);
   });
 
   it("never writes the file itself, so the edit stays the client's to undo", async () => {
@@ -154,12 +156,12 @@ describe("LSP import command", function () {
 
     await handlerFor([document]).execute([importCardInto()]);
 
-    assert.match(applied[0].documentChanges[0].edits[0].newText, /export class RenamedComponent/);
+    assert.match(applyTextEdits(unsaved, applied[0].documentChanges[0].edits), /export class RenamedComponent/);
   });
 
   it("changes nothing when the element is already imported", async () => {
     await handlerFor().execute([importCardInto()]);
-    const alreadyImported = applied[0].documentChanges[0].edits[0].newText;
+    const alreadyImported = applyTextEdits(HOST_SOURCE, applied[0].documentChanges[0].edits);
     await fs.writeFile(hostPath, alreadyImported, "utf8");
     applied = [];
 

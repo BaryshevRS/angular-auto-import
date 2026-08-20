@@ -116,7 +116,7 @@ Push diagnostics remain an implementation fallback if pull diagnostics expose a 
 - Quick fixes and fix-all will return `CodeAction.edit` with a cross-file `WorkspaceEdit` where possible.
 - Implement fix-all as `source.fixAll.angular-auto-import`, while retaining the existing command-palette command as a client-facing wrapper.
 - Do not automatically save an edited document. Do not write directly to a file that is open in the client.
-- Prefer minimal text edits. A full-document replacement may be retained temporarily for parity, but it must be replaced before the migration is considered complete if it causes conflicts with dirty documents. It is also what currently forces every accepted completion through a server command rather than `additionalTextEdits`, because a whole-file edit overlaps the completion's own range.
+- Prefer minimal text edits. Done: the planner rewrites with ts-morph and then diffs the result back into the smallest set of line replacements (`core/text-edits`). A whole-file replacement was never usable — two edits computed from the same starting text undid each other, an edit spanning the file collided with a completion's own edit inside it, and every replacement discarded selection and folding for lines that never changed.
 
 ### Definitions
 
@@ -268,7 +268,7 @@ Exit criteria:
   - [x] Serve `textDocument/completion` from the shared core ranking (`lsp/completion`), gated by the same settings, template detection, and standalone check as the direct provider. The handler is synchronous, so a result can never describe an index the project no longer has.
   - [x] Execute the import through a server command (`lsp/import-command`) that plans against the file as the user currently sees it and returns a versioned `workspace/applyEdit`; nothing is written to disk and nothing is saved.
   - [x] Share the element-to-specifier rule between both hosts (`core/import-resolution`) instead of keeping a second copy in `utils/import`.
-  - [ ] Attach the import as `additionalTextEdits` for an inline template. Blocked on the planner still returning a full-document replacement, which would overlap the completion's own edit; unblocked by the minimal-edit work below.
+  - [x] Attach the import as `additionalTextEdits` for an inline template, computed on `completionItem/resolve` so nothing is planned for items the user never accepts. The command stays on every item as the fallback, and is dropped only where real edits replaced it — carrying both would import twice.
 - [x] Implement definition responses with multiple `LocationLink` results (`lsp/definition`).
   - [x] Answer only where the server has a retained candidate, so an already-imported element stays the Angular Language Service's to resolve and one Ctrl+Click never shows the same result twice.
   - [x] Return every declaration answering to the selector; a selector like `[nzButton]` legitimately belongs to several, and picking one would hide the rest.
