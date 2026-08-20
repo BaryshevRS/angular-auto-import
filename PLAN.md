@@ -346,6 +346,13 @@ Exit criteria:
 - No direct VS Code language providers, and no `vscode` imports in the server or core. **Met**, enforced by a lint rule and checked on the packaged artifact.
 - Performance and reliability gates pass. **Met** — see [Measured baseline](#measured-baseline).
 
+## What is left
+
+`FIXNEXT.md` records the defects and scheduled work this migration leaves behind — the
+largest being that a nested Angular project's elements are indexed by the project
+containing it, which predates the migration but is worth fixing now that discovery knows
+where every root is.
+
 ## Suggested pull-request boundaries
 
 1. Baseline instrumentation and LSP spike.

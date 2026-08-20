@@ -20,7 +20,7 @@ prefix as a built-in with relevance 3, and the two are ordered arbitrarily. The 
 scales are not comparable, even though the suggestions land in the same list.
 
 Pinned by: "boosts a directive whose class name matches the attribute it offers"
-in `src/test/suite/completion-suggestions.test.ts`.
+in `src/test/node/completion-suggestions.test.ts`.
 
 Suggested fix: one shared scale, and a zero-padded numeric prefix
 (e.g. `String(1000 - relevance).padStart(4, "0")`) instead of arithmetic on char codes.
@@ -57,7 +57,7 @@ Worse, when it does fire the attribute name is extracted from the whole selector
 `<button button[matButton]`.
 
 Pinned by: "boosts a directive selector scoped to the tag under the cursor" in
-`src/test/suite/completion-suggestions.test.ts`.
+`src/test/node/completion-suggestions.test.ts`.
 
 Suggested fix: strip the leading tag name in `extractAttributeName` for
 `tag[attr]`-shaped selectors, and apply the boost on the bare attribute variant so it
@@ -79,6 +79,6 @@ dead for the rest of that tag. Multi-line cases where the quoted `>` is not on t
 opening line work fine.
 
 Pinned by: "stops the backwards search at a line whose last > is quoted (existing
-limitation)" in `src/test/suite/completion-context.test.ts`.
+limitation)" in `src/test/node/completion-context.test.ts`.
 
 Suggested fix: use `containsClosingTagBracket` for the backwards search too.
