@@ -259,6 +259,7 @@
     "coverage:sonar": "pnpm run coverage:generate && node scripts/sonar-scan.js",
     "vsce:package": "vsce package --no-dependencies",
     "vsce:inspect": "node scripts/inspect-vsix.mjs",
+    "benchmark": "pnpm run compile-tests && node scripts/benchmark.mjs",
     "vsce:publish": "vsce publish --no-dependencies",
     "release": "pnpm run vsce:package && pnpm run vsce:publish",
     "docs:build": "rm -rf docs && typedoc",

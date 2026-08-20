@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phases 1 through 4 complete; Phase 3 lacks only the inline-template `additionalTextEdits` optimization, which the full-document import edit blocks. Phase 5's engineering is done: the server is held to the same recorded corpus as the direct implementation and agrees with it, the protocol is exercised over a real connection, and the packaged artifact is verified. What remains in Phase 5 is a release decision and its precondition: the **Phase 0 baseline measurements were never taken**, so the performance gates cannot be evaluated, and until they are the LSP path stays behind the `AAI_LSP_SPIKE` development flag
+- Plan status: in progress — Phase 0 measurements taken except the two that need the editor; Phases 1 through 4 complete; Phase 3 lacks only the inline-template `additionalTextEdits` optimization, which the full-document import edit blocks. Phase 5's engineering is done: the server is held to the same recorded corpus as the direct implementation and agrees with it, the protocol is exercised over a real connection, and the packaged artifact is verified. What remains in Phase 5 is a release decision and its precondition: the **Phase 0 baseline measurements were never taken**, so the performance gates cannot be evaluated, and until they are the LSP path stays behind the `AAI_LSP_SPIKE` development flag
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -165,7 +165,8 @@ Define them with current `RequestType` constructors in a dependency-light shared
 
 ### Phase 0 — Baseline and technical spike (2–3 days)
 
-- [ ] Record activation time, cold/warm index time, Extension Host CPU, server/host RSS, completion latency, diagnostic latency, and packaged size on small and monorepo fixtures.
+- [x] Record cold/warm index time, server RSS, completion latency, diagnostic latency, and packaged size (`scripts/benchmark.mjs`, `pnpm run benchmark`). See [Measured baseline](#measured-baseline).
+  - [ ] Activation time and Extension Host CPU during a full index are still unmeasured. Nothing outside the editor can measure them, and the second is the migration's central claim, so it needs a run inside the Extension Host before that claim is made.
 - [x] Add temporary development-only selection between direct providers and LSP; never activate both implementations simultaneously.
 - [x] Add client and server entry points and two esbuild outputs.
 - [x] Start the server over IPC, complete initialize/initialized/shutdown/exit, and verify `await start()`/`stop()` lifecycle.
@@ -335,7 +336,7 @@ Exit criteria:
   - [x] Two real divergences surfaced and were fixed: a quick fix titled itself with the element's indexed path rather than the specifier the import would be written with, and the server reported duplicates the Extension Host had been dropping at publish time.
 - [x] Package and inspect the VSIX to ensure both bundles and runtime dependencies are present (`pnpm run vsce:inspect`, `scripts/inspect-vsix.mjs`). It checks the artifact rather than the source tree, because that is where bundling fails silently.
 - [ ] Enable LSP for internal/beta builds while keeping a temporary fallback setting. Currently the only switch is the `AAI_LSP_SPIKE` environment variable, which is a development flag, not something a beta user can set.
-- [ ] Make LSP the default after parity and performance gates pass. **Blocked on the Phase 0 measurements**, which were never taken; without a baseline the performance gates below cannot be evaluated.
+- [ ] Make LSP the default after parity and performance gates pass. The baseline now exists; two things stand in the way of reading the gates as passed: Extension Host CPU during indexing has never been measured, and server RSS nearly doubles over repeated reindexes (see [Measured baseline](#measured-baseline)).
 - [ ] Remove direct provider registration and the fallback after at least one stable release without a migration blocker.
 - [ ] Remove obsolete workspace-state cache keys only after fallback removal.
 - [x] Update architecture, troubleshooting, logging, and development documentation (`docs/architecture.md`, `CLAUDE.md`).
@@ -405,6 +406,54 @@ Capture exact thresholds from the Phase 0 baseline, then require:
 - no stale diagnostics after edits, dependency changes, project switches, or server restart;
 - no forced save and no lost dirty-document changes;
 - successful server restart without requiring a VS Code window reload.
+
+## Measured baseline
+
+Taken with `pnpm run benchmark` against `src/e2e/projects/v22` — 94 project source files
+resolving to 1256 indexed elements, most of them from the dependencies (Material, CDK,
+ng-zorro, PrimeNG, Taiga). One machine, macOS, Node 25. These are the numbers the gates
+below are judged against; re-take them on the same fixture rather than comparing across
+machines.
+
+| | |
+| --- | --- |
+| Cold index | 8.1 s |
+| Warm index, from cache | 23 ms |
+| Server ready (spawned `dist/server.js`, initialize → indexed) | 8.2 s |
+| `extension.js` / `server.js` | 7.0 MB / 6.7 MB |
+| Packaged VSIX | 3.3 MB |
+
+Latency, 50 samples on a template with 47 findings:
+
+| | p50 | p95 | max |
+| --- | --- | --- | --- |
+| Completion, handler called directly | 0.1 ms | 0.4 ms | 0.6 ms |
+| Completion, over the protocol | 0.2 ms | 0.6 ms | 4.4 ms |
+| Diagnostics, handler called directly | 1.2 ms | 9.0 ms | 67.6 ms |
+| Diagnostics, over the protocol | 1.6 ms | 11.8 ms | 34.1 ms |
+
+The direct/protocol pair is what stands in for the direct-implementation comparison the
+plan originally called for. Since Phase 3 both hosts run the same analysis, so comparing
+them would compare a function to itself; the protocol round trip is the only thing the
+migration actually adds to a request. It costs roughly 0.2 ms, which is a large relative
+number on a sub-millisecond completion and an irrelevant absolute one.
+
+### The one measurement that is not comfortable
+
+Server RSS over repeated full reindexes of the same project:
+
+```text
+779 → 897 → 1142 → 1403 → 1351 → 1265 → 1381 MB
+```
+
+It plateaus rather than climbing without limit, so the "no unbounded growth" gate is met
+as written. But it nearly doubles from the first index and settles there, and 1.4 GB is a
+lot for a fixture this size. The likely cause is the ts-morph project accumulating
+library source files across reindexes; `AngularIndexer` already has release logic for
+them, so the question is whether it covers every path a reindex takes.
+
+**This should be understood before LSP becomes the default.** A user who never reindexes
+pays 780 MB; one who leaves a window open for a week pays twice that.
 
 ## Main risks and mitigations
 
