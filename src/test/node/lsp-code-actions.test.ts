@@ -141,7 +141,7 @@ describe("LSP code actions", function () {
     const offered = await actions.provide(document, WHOLE_DOCUMENT);
 
     assert.strictEqual(offered.length, 1);
-    assert.match(offered[0].title, /^⟐ Import ShopCardComponent from '/);
+    assert.strictEqual(offered[0].title, "⟐ Import ShopCardComponent from './shop-card.component'");
     assert.strictEqual(offered[0].kind, CodeActionKind.QuickFix);
     assert.strictEqual(offered[0].isPreferred, true);
   });

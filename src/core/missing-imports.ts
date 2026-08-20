@@ -80,6 +80,11 @@ export function findMissingImports(
   cancellation: CancellationSignal = neverCancelled
 ): MissingImportDiagnostic[] {
   const diagnostics: MissingImportDiagnostic[] = [];
+  // One template construct can be scanned more than once — a property binding is also
+  // an attribute, and a tag with attributes matches under several indexed selectors —
+  // and saying the same sentence about the same text twice helps nobody. The first
+  // finding wins, which is the most specific selector Angular matched.
+  const seen = new Set<string>();
 
   for (const element of elements) {
     // Every element runs Angular's selector matcher against the index, so a template
@@ -87,10 +92,30 @@ export function findMissingImports(
     if (cancellation.isCancelled) {
       break;
     }
-    diagnostics.push(...checkElement(element, severity, context));
+
+    for (const diagnostic of checkElement(element, severity, context)) {
+      const key = identityOf(diagnostic);
+      if (!seen.has(key)) {
+        seen.add(key);
+        diagnostics.push(diagnostic);
+      }
+    }
   }
 
   return diagnostics;
+}
+
+/**
+ * What makes two diagnostics the same finding: the same message about the same text.
+ *
+ * The code is deliberately not part of it. One element matched under two of its own
+ * selectors produces two codes for one problem, and the user would see the identical
+ * sentence twice; both codes resolve to the same element, so either fixes it.
+ * @internal
+ */
+function identityOf(diagnostic: MissingImportDiagnostic): string {
+  const { start, end } = diagnostic.range;
+  return `${start.line}:${start.character}-${end.line}:${end.character}|${diagnostic.message}`;
 }
 
 /**

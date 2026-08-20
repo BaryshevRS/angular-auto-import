@@ -169,7 +169,13 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       const deadline = Date.now() + 15000;
       for (;;) {
         const metrics = await client.sendRequest(PerformanceMetricsRequest);
-        if (metrics.projects.length >= count && metrics.projects.every((project) => project.elementCount > 0)) {
+        // The compiler matters as much as the index: without it every diagnostic
+        // request answers with nothing, which reads exactly like a clean workspace.
+        if (
+          metrics.analysisReady &&
+          metrics.projects.length >= count &&
+          metrics.projects.every((project) => project.elementCount > 0)
+        ) {
           return;
         }
         if (Date.now() > deadline) {

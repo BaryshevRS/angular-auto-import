@@ -17,6 +17,8 @@ export interface ServerOperationsOptions {
   router: ProjectRouter;
   /** Every project that currently has a runtime, in discovery order. */
   runtimes(): ProjectRuntime[];
+  /** Whether the Angular compiler has finished loading. */
+  analysisReady(): boolean;
   logger?: CoreLogger;
 }
 
@@ -57,6 +59,7 @@ export class ServerOperations {
         external: memory.external,
       },
       cpu: { user: cpu.user, system: cpu.system },
+      analysisReady: this.options.analysisReady(),
       projects: this.options.runtimes().map((runtime) => ({
         rootPath: runtime.rootPath,
         elementCount: runtime.elementCount,

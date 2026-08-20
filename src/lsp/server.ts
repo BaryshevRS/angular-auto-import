@@ -175,7 +175,12 @@ function createContext(connection: Connection): ServerContext {
       completions: new CompletionHandler({ router, documents: openDocuments, config, logger }),
       definitions: new DefinitionHandler({ router, diagnostics, logger }),
       reporter: new DiagnosticsReporter({ diagnostics, logger }),
-      operations: new ServerOperations({ router, runtimes: () => state.runtimes?.all() ?? [], logger }),
+      operations: new ServerOperations({
+        router,
+        runtimes: () => state.runtimes?.all() ?? [],
+        analysisReady: () => state.compiler !== undefined,
+        logger,
+      }),
       importCommand: new ImportCommandHandler({
         router,
         documents: openDocuments,

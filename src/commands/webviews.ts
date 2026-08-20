@@ -44,6 +44,7 @@ export function formatPerformanceMetrics(metrics: PerformanceMetrics, subject: s
 • System: ${Math.round(metrics.cpu.system / 1000)} ms
 
 🗂️ **Indexing Stats:**
+• Angular compiler: ${metrics.analysisReady ? "loaded" : "still loading — diagnostics report nothing until it lands"}
 • Projects: ${metrics.projects.length}
 • Total Elements: ${totalElements}${projectDetails}
 

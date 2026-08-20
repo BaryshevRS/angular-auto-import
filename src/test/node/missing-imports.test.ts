@@ -141,8 +141,23 @@ describe("Missing import analysis", () => {
 
   it("reports each element in the template it was given", () => {
     const card = angularElement({});
-    const diagnostics = findMissingImports([element(), element()], "warning", contextOf([card]));
+    const secondUse = element({
+      range: { start: { line: 4, character: 2 }, end: { line: 4, character: 12 } },
+    });
+
+    const diagnostics = findMissingImports([element(), secondUse], "warning", contextOf([card]));
 
     assert.strictEqual(diagnostics.length, 2);
+  });
+
+  it("says the same thing about the same text only once", () => {
+    const card = angularElement({});
+
+    // A tag with attributes is scanned as both a tag and an attribute, and matches the
+    // same element under more than one of its selectors; the user must still see one
+    // problem, not one per selector that happened to match.
+    const diagnostics = findMissingImports([element(), element()], "warning", contextOf([card]));
+
+    assert.strictEqual(diagnostics.length, 1);
   });
 });

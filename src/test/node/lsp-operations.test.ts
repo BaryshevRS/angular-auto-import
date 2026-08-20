@@ -45,7 +45,7 @@ describe("LSP server operations", function () {
           .sort((a, b) => b.length - a.length)[0],
       runtimeForRoot: (rootPath) => runtimes.find((runtime) => runtime.rootPath === rootPath),
     });
-    return new ServerOperations({ router, runtimes: () => runtimes });
+    return new ServerOperations({ router, runtimes: () => runtimes, analysisReady: () => true });
   }
 
   beforeEach(async () => {
@@ -162,6 +162,7 @@ describe("LSP server operations", function () {
     assert.ok(metrics.memory.rss > 0, "RSS must describe a real process");
     assert.ok(metrics.memory.heapUsed > 0);
     assert.ok(metrics.cpu.user >= 0 && metrics.cpu.system >= 0);
+    assert.strictEqual(metrics.analysisReady, true);
   });
 
   it("reports each project's index size", () => {

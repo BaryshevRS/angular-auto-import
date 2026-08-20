@@ -18,6 +18,7 @@ import { type CodeAction, CodeActionKind, type Range } from "vscode-languageserv
 import { toLspDiagnostic } from "../adapters/lsp/language-types";
 import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import type { DocumentView } from "../core/document";
+import { resolveElementImportPath } from "../core/import-resolution";
 import { type CoreLogger, silentLogger } from "../core/logging";
 import type { MissingImportDiagnostic } from "../core/missing-imports";
 import type { AngularElementData } from "../types";
@@ -136,7 +137,7 @@ export class CodeActionHandler {
       actions.set(
         element.name,
         await this.buildAction({
-          title: `⟐ Import ${element.name} from '${element.path}'`,
+          title: `⟐ Import ${element.name} from '${await this.specifierOf(element, routed)}'`,
           kind: CodeActionKind.QuickFix,
           elements: [element],
           routed,
@@ -228,6 +229,28 @@ export class CodeActionHandler {
       arguments: [{ uri: componentUri, elements: request.elements } satisfies ApplyImportArguments],
     };
     return action;
+  }
+
+  /**
+   * The module specifier the import will actually be written with.
+   *
+   * The title has to name what the user will see in their file, not the project-relative
+   * path the element happens to be indexed under; for a project element behind a
+   * tsconfig alias those are not remotely the same string.
+   * @internal
+   */
+  private async specifierOf(element: AngularElementData, routed: RoutedDocument): Promise<string> {
+    try {
+      return await resolveElementImportPath(
+        element,
+        routed.componentFilePath,
+        routed.runtime.rootPath,
+        (modulePath, fromFile) => routed.runtime.resolveImportPath(modulePath, fromFile)
+      );
+    } catch (error) {
+      this.logger.debug(`[CodeActions] Could not resolve an import path for ${element.name}: ${String(error)}`);
+      return element.path;
+    }
   }
 
   /**

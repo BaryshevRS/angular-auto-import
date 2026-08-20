@@ -80,6 +80,13 @@ export interface PerformanceMetrics {
     system: number;
   };
   projects: ProjectSummary[];
+  /**
+   * Whether the Angular compiler has finished loading.
+   *
+   * It is imported lazily, and until it arrives the server answers every diagnostic
+   * request with nothing — which looks exactly like a workspace with no problems.
+   */
+  analysisReady: boolean;
 }
 
 /**

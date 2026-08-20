@@ -146,6 +146,9 @@ export function registerCommands(context: vscode.ExtensionContext, commandContex
             external: measured.memoryUsage.external,
           },
           cpu: { user: measured.cpuUsage.user, system: measured.cpuUsage.system },
+          // The Extension Host loads the compiler into the diagnostic provider itself,
+          // and never reaches this command before that has been attempted.
+          analysisReady: true,
           projects: Array.from(commandContext.projectIndexers.entries(), ([projectPath, indexer]) => ({
             rootPath: projectPath,
             elementCount: indexer.getAllSelectors().length,
