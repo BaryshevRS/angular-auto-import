@@ -9,6 +9,7 @@
 
 import { getStandardModuleExports } from "../config/standard-modules";
 import type { AngularElementData } from "../types";
+import { type CancellationSignal, neverCancelled } from "./cancellation";
 import type { CoreDiagnosticSeverity, CoreRange } from "./language-types";
 import type { ScannedTemplateElement } from "./template-scan";
 
@@ -70,15 +71,22 @@ export interface MissingImportContext {
  * @param elements The elements found in the template.
  * @param severity The severity configured for missing imports.
  * @param context Answers about the component file and the index.
+ * @param cancellation Checked between elements; a cancelled pass returns what it had.
  */
 export function findMissingImports(
   elements: ScannedTemplateElement[],
   severity: CoreDiagnosticSeverity,
-  context: MissingImportContext
+  context: MissingImportContext,
+  cancellation: CancellationSignal = neverCancelled
 ): MissingImportDiagnostic[] {
   const diagnostics: MissingImportDiagnostic[] = [];
 
   for (const element of elements) {
+    // Every element runs Angular's selector matcher against the index, so a template
+    // with hundreds of them is where an abandoned request costs the most.
+    if (cancellation.isCancelled) {
+      break;
+    }
     diagnostics.push(...checkElement(element, severity, context));
   }
 

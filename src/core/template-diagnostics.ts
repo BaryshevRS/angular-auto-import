@@ -12,6 +12,7 @@ import type { SourceFile } from "ts-morph";
 import type { TemplateAstNode } from "../types";
 import { getAngularElements } from "../utils/angular";
 import type { AngularCompilerApi } from "./angular-compiler";
+import { type CancellationSignal, neverCancelled } from "./cancellation";
 import type { ComponentImports, ModuleExportsIndex } from "./component-imports";
 import type { DocumentView } from "./document";
 import type { ElementLookup } from "./element-lookup";
@@ -44,6 +45,8 @@ export interface TemplateDiagnosticsRequest {
   severity: CoreDiagnosticSeverity;
   /** Parsed templates to reuse; omit to parse every time. */
   cache?: TemplateAstCache;
+  /** Checked before parsing and between elements; a cancelled pass returns early. */
+  cancellation?: CancellationSignal;
   logger?: CoreLogger;
 }
 
@@ -88,12 +91,17 @@ export class TemplateAstCache {
  * @returns Diagnostics in document coordinates; empty when nothing is missing.
  */
 export function analyzeTemplate(request: TemplateDiagnosticsRequest): MissingImportDiagnostic[] {
+  const cancellation = request.cancellation ?? neverCancelled;
+  if (cancellation.isCancelled) {
+    return [];
+  }
+
   const elements = scanParsedTemplate(request);
   if (elements.length === 0) {
     return [];
   }
 
-  return findMissingImports(elements, request.severity, createMissingImportContext(request));
+  return findMissingImports(elements, request.severity, createMissingImportContext(request), cancellation);
 }
 
 /** What the analysis needs to know about one component and the index it belongs to. */

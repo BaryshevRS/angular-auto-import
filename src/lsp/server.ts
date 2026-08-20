@@ -9,6 +9,7 @@ import {
   TextDocuments,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { toCancellationSignal } from "../adapters/lsp/cancellation";
 import { toDocumentView } from "../adapters/lsp/document";
 import { type AngularCompilerApi, loadAngularCompiler } from "../core/angular-compiler";
 import { fileUriToPath } from "../core/document";
@@ -257,14 +258,14 @@ async function pullConfiguration(): Promise<void> {
   logging.configure(environment.config.logging);
 }
 
-connection.onCompletion((params) => {
+connection.onCompletion((params, token) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) {
     return { isIncomplete: true, items: [] };
   }
 
   const view = toDocumentView(document);
-  const completionList = completions.provide(view, params.position);
+  const completionList = completions.provide(view, params.position, toCancellationSignal(token));
   if (completionList.items.length > 0) {
     return completionList;
   }
@@ -272,28 +273,28 @@ connection.onCompletion((params) => {
   return { ...completionList, items: probeCompletion(view, params.position, runtimeDependenciesLoaded) };
 });
 
-connection.languages.diagnostics.on((params) => {
+connection.languages.diagnostics.on((params, token) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) {
     return { kind: DocumentDiagnosticReportKind.Full, items: [] };
   }
-  return diagnostics.provide(toDocumentView(document));
+  return diagnostics.provide(toDocumentView(document), toCancellationSignal(token));
 });
 
 // A closed document keeps no report and no parsed template; the client stops asking.
 documents.onDidClose(({ document }) => diagnostics.forget(document.uri));
 
-connection.onDefinition((params) => {
+connection.onDefinition((params, token) => {
   const document = documents.get(params.textDocument.uri);
-  return document ? definitions.provide(toDocumentView(document), params.position) : [];
+  return document ? definitions.provide(toDocumentView(document), params.position, toCancellationSignal(token)) : [];
 });
 
-connection.onCodeAction((params) => {
+connection.onCodeAction((params, token) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) {
     return [];
   }
-  return codeActions.provide(toDocumentView(document), params.range, params.context.only);
+  return codeActions.provide(toDocumentView(document), params.range, params.context.only, toCancellationSignal(token));
 });
 
 connection.onCodeActionResolve((action) => codeActions.resolve(action));

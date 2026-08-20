@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { LocationLink, Position } from "vscode-languageserver/node";
+import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import type { DocumentView } from "../core/document";
 import type { CoreRange } from "../core/language-types";
 import { type CoreLogger, silentLogger } from "../core/logging";
@@ -51,11 +52,16 @@ export class DefinitionHandler {
    * Resolves the declarations behind the element at a position.
    * @param document The document the request arrived for.
    * @param position The cursor position.
+   * @param cancellation Checked before the analysis the candidates come from.
    * @returns One link per matching declaration, or none where this server does not answer.
    */
-  provide(document: DocumentView, position: Position): LocationLink[] {
+  provide(
+    document: DocumentView,
+    position: Position,
+    cancellation: CancellationSignal = neverCancelled
+  ): LocationLink[] {
     const routed = this.options.router.resolve(document.uri);
-    if (!routed) {
+    if (!routed || cancellation.isCancelled) {
       return [];
     }
 

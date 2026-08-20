@@ -15,6 +15,7 @@
 
 import type { CompletionItem, CompletionList } from "vscode-languageserver/node";
 import { toLspCompletionKind } from "../adapters/lsp/language-types";
+import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import { type CompletionContextData, detectCompletionContext } from "../core/completion-context";
 import { buildCompletionSuggestions, type CompletionSuggestion } from "../core/completion-suggestions";
 import type { DocumentPosition, DocumentView } from "../core/document";
@@ -60,10 +61,16 @@ export class CompletionHandler {
    * returning, so a result can never describe an index the project no longer has.
    * @param document The document the request arrived for.
    * @param position The cursor position.
+   * @param cancellation Checked once, before the work starts; there is no later
+   * checkpoint because nothing here yields for the token to flip in.
    */
-  provide(document: DocumentView, position: DocumentPosition): CompletionList {
+  provide(
+    document: DocumentView,
+    position: DocumentPosition,
+    cancellation: CancellationSignal = neverCancelled
+  ): CompletionList {
     const routed = this.options.router.resolve(document.uri);
-    if (!routed) {
+    if (!routed || cancellation.isCancelled) {
       return NOTHING;
     }
 

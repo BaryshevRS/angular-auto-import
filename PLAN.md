@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 nearly complete — the server serves completion, imports, pull diagnostics, quick fixes, fix-all, and definitions; request cancellation is the remaining item, after which Phase 4 wires the commands and reports
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete; Phase 3 complete except for the inline-template `additionalTextEdits` optimization, which the full-document import edit blocks — the server serves completion, imports, pull diagnostics, quick fixes, fix-all, definitions, and request cancellation; Phase 4 (commands, reports, and client UX) is next
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -290,7 +290,10 @@ Exit criteria:
   - [x] Completion is synchronous, so no index can change under it.
   - [x] A retained diagnostic result carries the document version and index generation it was computed against, and code actions recompute rather than reuse one that no longer describes the document.
   - [x] An import plan is discarded when the document version or index generation moved while its import paths were being resolved, and the edit that survives is versioned so the client can refuse it too.
-- [ ] Propagate cancellation tokens through parsing and expensive lookup boundaries.
+- [x] Propagate cancellation tokens through parsing and expensive lookup boundaries.
+  - [x] Adapt the request token to the core's cooperative signal (`adapters/lsp/cancellation`), reading through it rather than snapshotting, because a token flips after the work has already started.
+  - [x] Check between template elements in `core/missing-imports`, which is where an abandoned request costs the most: every element runs Angular's selector matcher against the index.
+  - [x] Discard a cancelled diagnostic pass instead of retaining it — a partial result would leave code actions offering a subset of the fixes — and drop a cancelled fix-all rather than importing less than its title promises.
 
 Exit criteria:
 

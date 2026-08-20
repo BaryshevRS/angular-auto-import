@@ -16,6 +16,7 @@ import type { Diagnostic, DocumentDiagnosticReport } from "vscode-languageserver
 import { DocumentDiagnosticReportKind } from "vscode-languageserver/node";
 import { toLspDiagnostic } from "../adapters/lsp/language-types";
 import type { AngularCompilerApi } from "../core/angular-compiler";
+import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import { ComponentImports } from "../core/component-imports";
 import type { DocumentView } from "../core/document";
 import { findInlineTemplate } from "../core/inline-template";
@@ -78,18 +79,25 @@ export class DiagnosticsHandler {
   /**
    * Computes the diagnostics for one document.
    * @param document The document the client pulled diagnostics for.
+   * @param cancellation Checked during and after the analysis.
    * @returns The report to answer with, which is empty in every mode but `full`.
    */
-  provide(document: DocumentView): DocumentDiagnosticReport {
+  provide(document: DocumentView, cancellation: CancellationSignal = neverCancelled): DocumentDiagnosticReport {
     const { diagnosticsMode } = this.options.config();
     if (diagnosticsMode === "disabled") {
       this.forget(document.uri);
       return NOTHING;
     }
 
-    const result = this.analyze(document);
+    const result = this.analyze(document, cancellation);
     if (!result) {
       this.forget(document.uri);
+      return NOTHING;
+    }
+
+    // A cancelled pass returns whatever it had reached, which describes only part of
+    // the template. Keeping it would leave code actions offering a subset of the fixes.
+    if (cancellation.isCancelled) {
       return NOTHING;
     }
 
@@ -158,7 +166,10 @@ export class DiagnosticsHandler {
    * imports of its own.
    * @internal
    */
-  private analyze(document: DocumentView): DiagnosticResult | undefined {
+  private analyze(
+    document: DocumentView,
+    cancellation: CancellationSignal = neverCancelled
+  ): DiagnosticResult | undefined {
     const compiler = this.options.compiler();
     const routed = this.options.router.resolve(document.uri);
     if (!compiler || !routed) {
@@ -200,6 +211,7 @@ export class DiagnosticsHandler {
         compiler,
         severity: severityOf(this.options.config()),
         cache: this.templates,
+        cancellation,
         logger: this.logger,
       }),
     };

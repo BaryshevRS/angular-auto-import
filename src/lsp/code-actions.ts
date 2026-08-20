@@ -16,6 +16,7 @@
 
 import { type CodeAction, CodeActionKind, type Range } from "vscode-languageserver/node";
 import { toLspDiagnostic } from "../adapters/lsp/language-types";
+import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import type { DocumentView } from "../core/document";
 import { type CoreLogger, silentLogger } from "../core/logging";
 import type { MissingImportDiagnostic } from "../core/missing-imports";
@@ -60,8 +61,14 @@ export class CodeActionHandler {
    * @param document The document the actions were requested for.
    * @param range The range the client asked about.
    * @param only The action kinds the client wants, or `undefined` for all of them.
+   * @param cancellation Checked between the elements each action has to resolve.
    */
-  async provide(document: DocumentView, range: Range, only?: readonly string[]): Promise<CodeAction[]> {
+  async provide(
+    document: DocumentView,
+    range: Range,
+    only?: readonly string[],
+    cancellation: CancellationSignal = neverCancelled
+  ): Promise<CodeAction[]> {
     const routed = this.options.router.resolve(document.uri);
     const candidates = this.options.diagnostics.candidatesFor(document);
     if (!routed || candidates.length === 0) {
@@ -69,9 +76,17 @@ export class CodeActionHandler {
     }
 
     const inRange = candidates.filter((candidate) => intersects(candidate.range, range));
-    const quickFixes = wants(only, CodeActionKind.QuickFix) ? await this.quickFixes(inRange, routed, document.uri) : [];
+    const quickFixes = wants(only, CodeActionKind.QuickFix)
+      ? await this.quickFixes(inRange, routed, document.uri, cancellation)
+      : [];
 
-    const fixAll = wants(only, FIX_ALL_KIND) ? await this.fixAll(candidates, routed, document.uri) : undefined;
+    const fixAll = wants(only, FIX_ALL_KIND)
+      ? await this.fixAll(candidates, routed, document.uri, cancellation)
+      : undefined;
+
+    if (cancellation.isCancelled) {
+      return [];
+    }
 
     return fixAll ? [...quickFixes, fixAll] : quickFixes;
   }
@@ -104,11 +119,15 @@ export class CodeActionHandler {
   private async quickFixes(
     candidates: MissingImportDiagnostic[],
     routed: RoutedDocument,
-    documentUri: string
+    documentUri: string,
+    cancellation: CancellationSignal
   ): Promise<CodeAction[]> {
     const actions = new Map<string, CodeAction>();
 
     for (const candidate of candidates) {
+      if (cancellation.isCancelled) {
+        break;
+      }
       const element = await this.resolveElement(candidate, routed);
       if (!element || actions.has(element.name)) {
         continue;
@@ -139,10 +158,15 @@ export class CodeActionHandler {
   private async fixAll(
     candidates: MissingImportDiagnostic[],
     routed: RoutedDocument,
-    documentUri: string
+    documentUri: string,
+    cancellation: CancellationSignal
   ): Promise<CodeAction | undefined> {
     const elements = new Map<string, AngularElementData>();
     for (const candidate of candidates) {
+      if (cancellation.isCancelled) {
+        // A partial fix-all would silently import less than its title promises.
+        return undefined;
+      }
       const element = await this.resolveElement(candidate, routed);
       if (element) {
         elements.set(element.name, element);
