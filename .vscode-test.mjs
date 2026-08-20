@@ -63,11 +63,13 @@ export default defineConfig({
       },
     },
     {
-      label: 'lsp-spike',
+      label: 'lsp-lifecycle',
       files: 'out/test/lsp/**/*.test.js',
       workspaceFolder: './src/test/fixtures/simple-project',
       env: {
-        AAI_LSP_SPIKE: '1',
+        // Killing the server on purpose is a test's business; the command that does it
+        // exists only when this says so.
+        AAI_ENABLE_CRASH_COMMAND: '1',
       },
       mocha: {
         ui: 'bdd',
@@ -78,24 +80,20 @@ export default defineConfig({
     },
     ...e2eTests,
     ...generateTests,
-    // The Extension Host cost of each implementation, measured on the same fixture and
-    // the same scenario. scripts/host-cost.mjs runs both and compares them.
-    ...['direct', 'lsp'].map(mode => ({
-      label: `host-cost:${mode}`,
+    // What the extension costs the Extension Host, measured on a real fixture.
+    {
+      label: 'host-cost',
       files: 'out/test/host-cost/**/*.test.js',
       workspaceFolder: `${projectsDir}/v22`,
       launchArgs: isolationArgs,
-      env: {
-        ...(mode === 'lsp' ? { AAI_LSP_SPIKE: '1' } : {}),
-        ...(process.env.AAI_HOST_COST_OUTPUT ? { AAI_HOST_COST_OUTPUT: process.env.AAI_HOST_COST_OUTPUT } : {}),
-      },
+      env: process.env.AAI_HOST_COST_OUTPUT ? { AAI_HOST_COST_OUTPUT: process.env.AAI_HOST_COST_OUTPUT } : {},
       mocha: {
         ui: 'bdd',
         timeout: 240000,
         color: true,
         reporter: 'spec',
       },
-    })),
+    },
     // Legacy aliases pointing to v19 (default version)
     {
       label: 'e2e',

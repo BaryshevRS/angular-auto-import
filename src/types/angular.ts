@@ -3,8 +3,6 @@
  * @module
  */
 
-import type { ProcessedTsConfig } from "./tsconfig";
-
 /**
  * Defines the possible types for an Angular element.
  */
@@ -132,22 +130,4 @@ export interface FileElementsInfo {
    * An array of component information found in the file.
    */
   elements: ComponentInfo[];
-}
-
-/**
- * The project context to be passed to providers.
- */
-export interface ProjectContext {
-  /**
-   * The root path of the Angular project.
-   */
-  projectRootPath: string;
-  /**
-   * An instance of the Angular indexer.
-   */
-  indexer: import("../services").AngularIndexer;
-  /**
-   * The processed tsconfig for the project.
-   */
-  tsConfig: ProcessedTsConfig | null;
 }

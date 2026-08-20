@@ -1,16 +1,14 @@
 /**
  * What the extension costs the Extension Host.
  *
- * This is the migration's central claim — that indexing and Angular analysis stop
- * competing with the editor for its own process — and it is the one measurement no
- * benchmark outside the editor can take. So it is taken inside one, twice: once with the
- * direct providers and once with the language server, against the same fixture, running
- * the same scenario.
+ * No benchmark outside the editor can take this measurement, so it is taken inside one.
+ * It is what justified moving the analysis into a language server: the recorded
+ * comparison against the previous in-process implementation is in `PLAN.md`, and this
+ * suite is what keeps the number honest as the server changes.
  *
- * The numbers are written to `AAI_HOST_COST_OUTPUT` so the two runs can be compared;
- * `scripts/host-cost.mjs` runs both and prints the difference. The assertions here only
- * check that the scenario really happened, because a benchmark that silently measured
- * nothing is worse than no benchmark.
+ * The assertions only check that the scenario really happened, because a benchmark that
+ * silently measured nothing is worse than no benchmark. Set `AAI_HOST_COST_OUTPUT` to
+ * also write the numbers to a file.
  * @module
  */
 
@@ -73,7 +71,7 @@ async function waitForDiagnostics(uri: vscode.Uri): Promise<void> {
   }
 }
 
-describe(`Extension Host cost (${process.env.AAI_LSP_SPIKE === "1" ? "language server" : "direct providers"})`, function () {
+describe("Extension Host cost", function () {
   this.timeout(READY_TIMEOUT_MS + 60000);
 
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -98,15 +96,7 @@ describe(`Extension Host cost (${process.env.AAI_LSP_SPIKE === "1" ? "language s
 
     const output = process.env.AAI_HOST_COST_OUTPUT;
     if (output) {
-      writeFileSync(
-        output,
-        JSON.stringify(
-          { mode: process.env.AAI_LSP_SPIKE === "1" ? "lsp" : "direct", workspaceRoot, measurements },
-          null,
-          2
-        ),
-        "utf8"
-      );
+      writeFileSync(output, JSON.stringify({ workspaceRoot, measurements }, null, 2), "utf8");
     }
   });
 

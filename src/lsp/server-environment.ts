@@ -7,6 +7,8 @@
  * @module
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { InitializeParams, InitializeResult, ServerCapabilities } from "vscode-languageserver/node";
 import { CodeActionKind, TextDocumentSyncKind } from "vscode-languageserver/node";
 import { fileUriToPath } from "../core/document";
@@ -45,8 +47,6 @@ export interface ServerEnvironment {
 export interface ServerInitializationOptions {
   settings?: unknown;
   storagePath?: string;
-  /** Development-only: verify that the heavy runtime dependencies load in this process. */
-  verifyRuntimeDependencies?: boolean;
 }
 
 /**
@@ -56,11 +56,12 @@ export interface ServerInitializationOptions {
 export function resolveServerEnvironment(params: InitializeParams): ServerEnvironment {
   const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
   const workspace = params.capabilities.workspace;
+  const config = resolveExtensionConfig(options.settings);
 
   return {
-    workspaceRoots: resolveWorkspaceRoots(params),
+    workspaceRoots: resolveWorkspaceRoots(params, config),
     storagePath: typeof options.storagePath === "string" ? options.storagePath : undefined,
-    config: resolveExtensionConfig(options.settings),
+    config,
     client: {
       configuration: workspace?.configuration === true,
       workspaceFolders: workspace?.workspaceFolders === true,
@@ -72,11 +73,23 @@ export function resolveServerEnvironment(params: InitializeParams): ServerEnviro
 }
 
 /**
- * Prefers the workspace folders the client advertised, falling back to the deprecated
- * single-root fields older clients still send.
+ * Decides which roots this server serves.
+ *
+ * A configured `projectPath` wins outright: the user naming one directory means they do
+ * not want the rest of the workspace indexed. Otherwise the folders the client
+ * advertised, falling back to the deprecated single-root fields older clients still send.
  * @internal
  */
-function resolveWorkspaceRoots(params: InitializeParams): string[] {
+function resolveWorkspaceRoots(params: InitializeParams, config: ExtensionConfig): string[] {
+  const configured = config.projectPath?.trim();
+  if (configured) {
+    const resolved = path.resolve(configured);
+    // A configured path that is not a directory yields no roots at all, rather than
+    // quietly falling back to the workspace: the user named one place, and indexing
+    // somewhere else instead would be a surprise they never asked for.
+    return isDirectory(resolved) ? [resolved] : [];
+  }
+
   const folders = params.workspaceFolders;
   if (folders && folders.length > 0) {
     return folders.map((folder) => toPath(folder.uri)).filter((path): path is string => path !== undefined);
@@ -88,6 +101,15 @@ function resolveWorkspaceRoots(params: InitializeParams): string[] {
   }
 
   return params.rootPath ? [params.rootPath] : [];
+}
+
+/** @internal */
+function isDirectory(candidate: string): boolean {
+  try {
+    return fs.statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**

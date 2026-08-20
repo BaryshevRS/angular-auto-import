@@ -79,12 +79,10 @@ export function findMissingImports(
   context: MissingImportContext,
   cancellation: CancellationSignal = neverCancelled
 ): MissingImportDiagnostic[] {
-  const diagnostics: MissingImportDiagnostic[] = [];
   // One template construct can be scanned more than once — a property binding is also
-  // an attribute, and a tag with attributes matches under several indexed selectors —
-  // and saying the same sentence about the same text twice helps nobody. The first
-  // finding wins, which is the most specific selector Angular matched.
-  const seen = new Set<string>();
+  // an attribute, and a tag with attributes matches under several of an element's own
+  // selectors — and saying the same sentence about the same text twice helps nobody.
+  const found = new Map<string, MissingImportDiagnostic>();
 
   for (const element of elements) {
     // Every element runs Angular's selector matcher against the index, so a template
@@ -95,14 +93,32 @@ export function findMissingImports(
 
     for (const diagnostic of checkElement(element, severity, context)) {
       const key = identityOf(diagnostic);
-      if (!seen.has(key)) {
-        seen.add(key);
-        diagnostics.push(diagnostic);
+      const kept = found.get(key);
+      if (!kept || isMoreSpecific(diagnostic, kept)) {
+        found.set(key, diagnostic);
       }
     }
   }
 
-  return diagnostics;
+  return Array.from(found.values());
+}
+
+/**
+ * Which of two findings about the same text to keep.
+ *
+ * `table[jupiter-table]` and `table[jupiter-table][bigRows]` are the same element matched
+ * under two of its selectors, and the second says more about why it matched. Choosing by
+ * specificity rather than by arrival order also makes the answer stable: what the index
+ * happened to return first is not something a user should be able to notice.
+ * @internal
+ */
+function isMoreSpecific(candidate: MissingImportDiagnostic, incumbent: MissingImportDiagnostic): boolean {
+  return selectorOf(candidate).length > selectorOf(incumbent).length;
+}
+
+/** The selector half of a `missing-<type>-import:<selector>` code. @internal */
+function selectorOf(diagnostic: MissingImportDiagnostic): string {
+  return diagnostic.code.slice(diagnostic.code.indexOf(":") + 1);
 }
 
 /**

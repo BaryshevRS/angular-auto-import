@@ -11,22 +11,47 @@ import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Project, SyntaxKind } from "ts-morph";
-import * as vscode from "vscode";
-import { createVsCodeCacheStore } from "../../adapters/vscode/cache-store";
-import { createVsCodeFileSystem } from "../../adapters/vscode/file-system";
-import { createVsCodeFileWatcherFactory } from "../../adapters/vscode/file-watching";
-import { createVsCodeProgressHost } from "../../adapters/vscode/progress";
-import { logger } from "../../logger";
+import { createNodeFileSystem } from "../../adapters/node/file-system";
+import { type CacheStore, createMemoryCacheStore } from "../../core/cache";
+import type { FileSystem } from "../../core/file-system";
+import type { FileChange, FileWatcherFactory } from "../../core/file-watching";
+import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../../core/logging";
+import type { ProgressHost } from "../../core/progress";
+import { silentProgressHost } from "../../core/progress";
 import { AngularIndexer } from "../../services";
 import type { FileElementsInfo } from "../../types";
 
-/** The ports the Extension Host gives every indexer. */
-function hostPorts() {
+/**
+ * The ports a server gives every indexer, with the watcher's reporting under test control.
+ *
+ * In the server nothing polls the filesystem: the client reports changes and they are
+ * dispatched to whichever subscription watches that root. These tests do the same, which
+ * is both faster and free of the races a live watcher introduces.
+ */
+function hostPorts(): {
+  logger: InstrumentedLogger;
+  fileSystem: FileSystem;
+  progressHost: ProgressHost;
+  fileWatchers: FileWatcherFactory;
+  report(change: FileChange): void;
+} {
+  const listeners = new Set<(change: FileChange) => void>();
+
   return {
-    logger,
-    fileSystem: createVsCodeFileSystem(),
-    progressHost: createVsCodeProgressHost(),
-    fileWatchers: createVsCodeFileWatcherFactory(),
+    logger: withInstrumentation(silentLogger),
+    fileSystem: createNodeFileSystem(),
+    progressHost: silentProgressHost,
+    fileWatchers: {
+      watch: (_watch, listener) => {
+        listeners.add(listener);
+        return { dispose: () => listeners.delete(listener) };
+      },
+    },
+    report: (change) => {
+      for (const listener of listeners) {
+        listener(change);
+      }
+    },
   };
 }
 
@@ -35,13 +60,13 @@ describe("AngularIndexer", function () {
   this.timeout(30000);
 
   let indexer: AngularIndexer;
-  let mockContext: vscode.ExtensionContext;
+  /** Shared between the indexer and the tests, which assert on what it holds. */
+  let cacheStore: CacheStore;
+  /** Reports a filesystem change to the indexer, as the client's watcher would. */
+  let ports: ReturnType<typeof hostPorts>;
   const fixturesPath = path.join(__dirname, "..", "fixtures");
   const testProjectPath = path.join(fixturesPath, "test-angular-project");
   const mockNodeModulesPath = path.join(testProjectPath, "node_modules");
-
-  // Mock workspace state for testing
-  const mockWorkspaceState = new Map<string, any>();
 
   before(async () => {
     // Create comprehensive test project structure
@@ -49,45 +74,9 @@ describe("AngularIndexer", function () {
   });
 
   beforeEach(() => {
-    mockWorkspaceState.clear();
-
-    // Enhanced mock extension context
-    mockContext = {
-      subscriptions: [],
-      workspaceState: {
-        get: (key: string) => mockWorkspaceState.get(key),
-        update: async (key: string, value: any) => {
-          mockWorkspaceState.set(key, value);
-        },
-        keys: () => Array.from(mockWorkspaceState.keys()),
-      },
-      globalState: {
-        get: () => undefined,
-        update: async () => {
-          // Mock implementation
-        },
-        keys: () => [],
-        setKeysForSync: () => {
-          // Mock implementation
-        },
-      },
-      extensionPath: "",
-      extensionUri: vscode.Uri.file(""),
-      environmentVariableCollection: {} as any,
-      extensionMode: vscode.ExtensionMode.Test,
-      logUri: vscode.Uri.file(""),
-      storageUri: vscode.Uri.file(""),
-      globalStorageUri: vscode.Uri.file(""),
-      secrets: {} as any,
-      extension: {} as any,
-      languageModelAccessInformation: {} as any,
-      asAbsolutePath: (relativePath: string) => relativePath,
-      storagePath: undefined,
-      globalStoragePath: "",
-      logPath: "",
-    } as unknown as vscode.ExtensionContext;
-
-    indexer = new AngularIndexer({ cacheStore: createVsCodeCacheStore(mockContext.workspaceState), ...hostPorts() });
+    cacheStore = createMemoryCacheStore();
+    ports = hostPorts();
+    indexer = new AngularIndexer({ cacheStore, ...ports });
   });
 
   afterEach(() => {
@@ -373,9 +362,9 @@ describe("AngularIndexer", function () {
 
       try {
         const indexerInternal = indexer as unknown as {
-          reindexNodeModulesAfterDependencyChange: (ctx: vscode.ExtensionContext) => Promise<void>;
+          reindexNodeModulesAfterDependencyChange: () => Promise<void>;
         };
-        await indexerInternal.reindexNodeModulesAfterDependencyChange(mockContext);
+        await indexerInternal.reindexNodeModulesAfterDependencyChange();
         assert.strictEqual(fired, 1, "onDidIndexNodeModules should fire once after a dependency change");
         assert.strictEqual(indexChanged, 1, "Dependency changes should also request a diagnostics refresh");
       } finally {
@@ -394,11 +383,11 @@ describe("AngularIndexer", function () {
 
       const indexerInternal = indexer as unknown as {
         isIndexing: boolean;
-        reindexNodeModulesAfterDependencyChange: (ctx: vscode.ExtensionContext) => Promise<void>;
+        reindexNodeModulesAfterDependencyChange: () => Promise<void>;
       };
       try {
         indexerInternal.isIndexing = true;
-        await indexerInternal.reindexNodeModulesAfterDependencyChange(mockContext);
+        await indexerInternal.reindexNodeModulesAfterDependencyChange();
         assert.strictEqual(fired, 0, "Should not re-index or emit while a full index is in progress");
       } finally {
         indexerInternal.isIndexing = false;
@@ -428,8 +417,9 @@ export class NewComponent {}
           });
         });
 
-        // Create new file
+        // Create the file and report it, as the client's watcher would.
         fs.writeFileSync(newComponentPath, newComponentContent);
+        ports.report({ filePath: newComponentPath, kind: "create" });
 
         // Wait for the watcher to finish updating the index.
         await Promise.race([indexChanged, new Promise((resolve) => setTimeout(resolve, 1000))]);
@@ -493,14 +483,11 @@ export class TempComponent {}
       const fileCacheKey = indexer.workspaceFileCacheKey;
       const indexCacheKey = indexer.workspaceIndexCacheKey;
 
-      assert.ok(mockWorkspaceState.has(fileCacheKey), "Should save file cache");
-      assert.ok(mockWorkspaceState.has(indexCacheKey), "Should save index cache");
+      assert.ok(cacheStore.get(fileCacheKey) !== undefined, "Should save file cache");
+      assert.ok(cacheStore.get(indexCacheKey) !== undefined, "Should save index cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer({
-        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
-        ...hostPorts(),
-      });
+      const newIndexer = new AngularIndexer({ cacheStore, ...hostPorts() });
       newIndexer.setProjectRoot(testProjectPath);
 
       const loaded = await newIndexer.loadFromWorkspace();
@@ -529,7 +516,10 @@ export class TempComponent {}
       // Simulate a file that was moved/deleted while the extension was not running:
       // the cached fileCache still references its old (now missing) path.
       const fileCacheKey = indexer.workspaceFileCacheKey;
-      const cachedFiles = mockWorkspaceState.get(fileCacheKey) as Record<string, FileElementsInfo>;
+      const cachedFiles = cacheStore.get<Record<string, FileElementsInfo>>(fileCacheKey) as Record<
+        string,
+        FileElementsInfo
+      >;
       const stalePath = path.join(testProjectPath, "src", "app", "__moved-away__.component.ts");
       cachedFiles[stalePath] = {
         filePath: stalePath,
@@ -537,12 +527,9 @@ export class TempComponent {}
         hash: "stale",
         elements: [],
       };
-      mockWorkspaceState.set(fileCacheKey, cachedFiles);
+      await cacheStore.set(fileCacheKey, cachedFiles);
 
-      const newIndexer = new AngularIndexer({
-        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
-        ...hostPorts(),
-      });
+      const newIndexer = new AngularIndexer({ cacheStore, ...hostPorts() });
       newIndexer.setProjectRoot(testProjectPath);
 
       const loaded = await newIndexer.loadFromWorkspace();
@@ -562,7 +549,7 @@ export class TempComponent {}
 
       // Check that the cached data uses the new FileElementsInfo format
       const fileCacheKey = indexer.workspaceFileCacheKey;
-      const cachedData = mockWorkspaceState.get(fileCacheKey) as Record<string, FileElementsInfo>;
+      const cachedData = cacheStore.get<Record<string, FileElementsInfo>>(fileCacheKey);
 
       assert.ok(cachedData, "Should have cached file data");
 
@@ -607,7 +594,7 @@ export class TempComponent {}
     });
 
     it("keeps node_modules out of the project file scan", async () => {
-      type UpdateFileIndex = (filePath: string, context: vscode.ExtensionContext) => Promise<void>;
+      type UpdateFileIndex = (filePath: string) => Promise<void>;
       const testIndexer = indexer as unknown as { updateFileIndex: UpdateFileIndex };
       const originalUpdateFileIndex = testIndexer.updateFileIndex.bind(indexer);
       const scannedPaths: string[] = [];
@@ -699,10 +686,7 @@ export class TempComponent {}
     });
 
     it("should handle dispose without initialization", () => {
-      const newIndexer = new AngularIndexer({
-        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
-        ...hostPorts(),
-      });
+      const newIndexer = new AngularIndexer({ cacheStore, ...hostPorts() });
       assert.doesNotThrow(() => {
         newIndexer.dispose();
       }, "Should handle dispose without initialization");
@@ -1252,10 +1236,7 @@ export class ChipsModule {}
       assert.ok(chipsModuleExports?.has("InputText"), "Should have transitive exports before cache");
 
       // Create new indexer and load from cache
-      const newIndexer = new AngularIndexer({
-        cacheStore: createVsCodeCacheStore(mockContext.workspaceState),
-        ...hostPorts(),
-      });
+      const newIndexer = new AngularIndexer({ cacheStore, ...hostPorts() });
       newIndexer.setProjectRoot(testProjectPath);
       const loaded = await newIndexer.loadFromWorkspace();
       assert.ok(loaded, "Should successfully load from cache");

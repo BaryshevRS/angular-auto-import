@@ -534,10 +534,3 @@ function findMatchingQuote(text: string, openQuotePos: number, quoteChar: string
 export function clearTemplateCache(documentUri: string): void {
   templateCache.delete(documentUri);
 }
-
-/**
- * Clear all template cache (useful for cleanup).
- */
-export function clearAllTemplateCache(): void {
-  templateCache.clear();
-}

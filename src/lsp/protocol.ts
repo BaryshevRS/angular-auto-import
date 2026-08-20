@@ -15,8 +15,12 @@
 import { RequestType, RequestType0 } from "vscode-languageserver-protocol";
 import type { CoreDiagnosticSeverity, CoreRange } from "../core/language-types";
 
-/** Development-only notification used to verify automatic language-server recovery. */
-export const SPIKE_CRASH_NOTIFICATION = "angularAutoImport/spikeCrash";
+/**
+ * Kills the server, so a test can prove the client brings a new one up.
+ *
+ * The server only listens for it when its host says to; nothing a user runs can reach it.
+ */
+export const CRASH_NOTIFICATION = "angularAutoImport/testCrash";
 
 /** What one project's index looks like from the outside. */
 export interface ProjectSummary {

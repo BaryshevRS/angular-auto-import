@@ -1,9 +1,8 @@
 import * as assert from "node:assert";
 import * as path from "node:path";
 import { Project } from "ts-morph";
-import * as vscode from "vscode";
 import { type AngularCompilerApi, adoptAngularCompiler } from "../../core/angular-compiler";
-import type { ComponentImports } from "../../core/component-imports";
+import { ComponentImports, type ModuleExportsIndex } from "../../core/component-imports";
 import type { CoreRange } from "../../core/language-types";
 import {
   findMissingImports,
@@ -12,14 +11,13 @@ import {
 } from "../../core/missing-imports";
 import { createMissingImportContext, type DiagnosticIndex } from "../../core/template-diagnostics";
 import type { ScannedTemplateElement } from "../../core/template-scan";
-import { DiagnosticProvider } from "../../providers/diagnostics";
 import { AngularElementData } from "../../types";
 
-describe("DiagnosticProvider", function () {
+describe("Missing-import suppression", function () {
   this.timeout(15000);
 
   const testProjectPath = "/test/project";
-  let provider: DiagnosticProvider;
+  let componentImports: ComponentImports;
   let sourceFile: import("ts-morph").SourceFile;
   let compiler: AngularCompilerApi;
   let importedNames = new Set<string>();
@@ -108,40 +106,11 @@ describe("DiagnosticProvider", function () {
     getElements: (selector: string) => indexEntries.get(selector) || [],
   };
 
-  const mockExtensionContext = {
-    subscriptions: [],
-    workspaceState: {
-      get: () => undefined,
-      update: async () => undefined,
-      keys: () => [],
-    },
-    globalState: {
-      get: () => undefined,
-      update: async () => undefined,
-      keys: () => [],
-      setKeysForSync: () => undefined,
-    },
-    extensionPath: "",
-    extensionUri: vscode.Uri.file(""),
-    environmentVariableCollection: {} as any,
-    extensionMode: vscode.ExtensionMode.Test,
-    logUri: vscode.Uri.file(""),
-    storageUri: vscode.Uri.file(""),
-    globalStorageUri: vscode.Uri.file(""),
-    secrets: {} as any,
-    extension: {} as any,
-    languageModelAccessInformation: {} as any,
-    asAbsolutePath: (relativePath: string) => relativePath,
-    storagePath: undefined,
-    globalStoragePath: "",
-    logPath: "",
-  } as unknown as vscode.ExtensionContext;
-
   before(async () => {
     compiler = adoptAngularCompiler(await import("@angular/compiler"));
   });
 
-  /** Runs the missing-import analysis wired exactly as the provider wires it. */
+  /** Runs the missing-import analysis wired the way both hosts wire it. */
   function checkElement(
     element: ScannedTemplateElement,
     indexer: unknown,
@@ -149,57 +118,28 @@ describe("DiagnosticProvider", function () {
   ): MissingImportDiagnostic[] {
     const context: MissingImportContext = createMissingImportContext({
       index: indexer as DiagnosticIndex,
-      componentImports: realComponentImports(),
+      componentImports,
       sourceFile: componentFile,
       compiler,
     });
     return findMissingImports([element], "warning", context);
   }
 
-  /** The resolver the provider wired up, answering from the real ts-morph AST. */
+  /** The resolver as it runs for real, answering from the ts-morph AST. */
   function realComponentImports(): ComponentImports {
-    return (provider as any).componentImports as ComponentImports;
+    return componentImports;
   }
 
   /** Answers "already imported" from `importedNames` instead of reading the AST. */
   function stubImportedNames(): void {
-    (provider as any).componentImports.isImported = (
-      _sourceFile: import("ts-morph").SourceFile,
-      element: AngularElementData
-    ) =>
+    componentImports.isImported = (_sourceFile: import("ts-morph").SourceFile, element: AngularElementData) =>
       importedNames.has(element.name) ||
       Boolean(element.exportingModuleName && importedNames.has(element.exportingModuleName));
   }
 
   beforeEach(() => {
     importedNames = new Set<string>();
-
-    provider = new DiagnosticProvider({
-      projectIndexers: new Map([[testProjectPath, mockIndexer as any]]),
-      projectTsConfigs: new Map([[testProjectPath, null]]),
-      extensionConfig: {
-        projectPath: null,
-        indexRefreshInterval: 60,
-        completion: {
-          pipes: true,
-          components: true,
-          directives: true,
-        },
-        diagnosticsMode: "full",
-        diagnosticsSeverity: "warning" as const,
-        logging: {
-          enabled: false,
-          level: "INFO",
-          fileLoggingEnabled: false,
-          logDirectory: null,
-          rotationMaxSize: 5,
-          rotationMaxFiles: 5,
-          outputFormat: "plain",
-        },
-      },
-      extensionContext: mockExtensionContext,
-    });
-    (provider as any).compiler = compiler;
+    componentImports = new ComponentImports({ resolveIndex: () => mockIndexer as unknown as ModuleExportsIndex });
 
     const project = new Project({ useInMemoryFileSystem: true });
     sourceFile = project.createSourceFile(
@@ -207,10 +147,6 @@ describe("DiagnosticProvider", function () {
       "export class PlaygroundComponent {}",
       { overwrite: true }
     );
-  });
-
-  afterEach(() => {
-    provider.deactivate();
   });
 
   it("should suppress auxiliary diagnostics for nz-button when NzButtonComponent is already imported", async () => {
@@ -448,107 +384,6 @@ export class DatePlaygroundComponent {}
       "missing-pipe-import:date",
       "explicit module export data should win over the module-name fallback"
     );
-  });
-
-  it("refreshOpenDocuments clears the import resolution cache", async () => {
-    // A "not imported" answer captured before a library was indexed must not survive
-    // an index rebuild, or the refreshed resolution is never seen.
-    const componentImports = realComponentImports();
-    const project = new Project({ useInMemoryFileSystem: true });
-    const componentFile = project.createSourceFile(
-      path.join(testProjectPath, "src/app/cached.component.ts"),
-      `
-@Component({ selector: "app-cached", standalone: true, template: "", imports: [] })
-export class CachedComponent {}
-`,
-      { overwrite: true }
-    );
-    const card = new AngularElementData({
-      path: "./src/app/card",
-      name: "CardComponent",
-      type: "component",
-      originalSelector: "app-card",
-      selectors: ["app-card"],
-      isStandalone: true,
-      isExternal: false,
-    });
-
-    assert.strictEqual(componentImports.isImported(componentFile, card), false, "precondition: not imported yet");
-
-    componentFile.replaceWithText(`
-import { CardComponent } from "./card";
-
-@Component({ selector: "app-cached", standalone: true, template: "", imports: [CardComponent] })
-export class CachedComponent {}
-`);
-    assert.strictEqual(componentImports.isImported(componentFile, card), false, "the stale answer is cached");
-
-    await provider.refreshOpenDocuments();
-
-    assert.strictEqual(componentImports.isImported(componentFile, card), true, "the refreshed answer is used");
-  });
-
-  it("clears diagnostics for Source Control virtual documents", async () => {
-    const filePath = path.join(testProjectPath, "src/app/review.component.ts");
-    const uri = vscode.Uri.from({ scheme: "git", path: filePath, query: JSON.stringify({ ref: "HEAD" }) });
-    const diagnostic = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), "stale review diagnostic");
-    const candidateDiagnostics = (provider as any).candidateDiagnostics as Map<string, vscode.Diagnostic[]>;
-    const diagnosticCollection = (provider as any).diagnosticCollection as vscode.DiagnosticCollection;
-    candidateDiagnostics.set(uri.toString(), [diagnostic]);
-    diagnosticCollection.set(uri, [diagnostic]);
-
-    const reviewDocument = {
-      uri,
-      fileName: filePath,
-      languageId: "typescript",
-      version: 1,
-      getText: () => "export class HistoricalSnapshot {}",
-    } as unknown as vscode.TextDocument;
-
-    await (provider as any).updateDiagnostics(reviewDocument);
-
-    assert.deepStrictEqual(provider.getDiagnosticsForDocument(uri), []);
-    assert.deepStrictEqual(
-      [...(diagnosticCollection.get(uri) || [])],
-      [],
-      "Virtual-document diagnostics should be removed"
-    );
-  });
-
-  it("uses the exact file document text when Source Control has a document with the same path", () => {
-    const filePath = path.join(testProjectPath, "src/app/exact-document.component.ts");
-    const currentText = "export class CurrentWorkingTreeComponent {}";
-    const historicalDocument = {
-      uri: vscode.Uri.from({ scheme: "git", path: filePath, query: JSON.stringify({ ref: "HEAD" }) }),
-      fileName: filePath,
-      languageId: "typescript",
-      version: 1,
-      getText: () => "export class HistoricalSnapshotComponent {}",
-    } as unknown as vscode.TextDocument;
-    const workingTreeDocument = {
-      uri: vscode.Uri.file(filePath),
-      fileName: filePath,
-      languageId: "typescript",
-      version: 2,
-      getText: () => currentText,
-    } as unknown as vscode.TextDocument;
-    (mockIndexer as any).project = sourceFile.getProject();
-    const originalTextDocuments = vscode.workspace.textDocuments;
-    Object.defineProperty(vscode.workspace, "textDocuments", {
-      configurable: true,
-      get: () => [historicalDocument, workingTreeDocument],
-    });
-
-    try {
-      const exactSourceFile = (provider as any).getSourceFile(workingTreeDocument) as import("ts-morph").SourceFile;
-
-      assert.strictEqual(exactSourceFile.getFullText(), currentText);
-    } finally {
-      Object.defineProperty(vscode.workspace, "textDocuments", {
-        configurable: true,
-        get: () => originalTextDocuments,
-      });
-    }
   });
 });
 

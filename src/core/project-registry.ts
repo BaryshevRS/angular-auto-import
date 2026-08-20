@@ -33,39 +33,6 @@ export function findDeepestContainingProjectRoot(filePath: string, roots: Iterab
   return deepestRoot;
 }
 
-/**
- * Finds the entry of the most specific root containing a file.
- * @param filePath Absolute path of the file to route.
- * @param contexts Per-root values keyed by the root path.
- */
-export function findDeepestContainingEntry<T>(
-  filePath: string,
-  contexts: ReadonlyMap<string, T>
-): [string, T] | undefined {
-  const normalizedFilePath = path.resolve(filePath);
-  let deepestEntry: [string, T] | undefined;
-
-  for (const [rootPath, context] of contexts) {
-    const normalizedRoot = path.resolve(rootPath);
-    if (
-      isPathInside(normalizedRoot, normalizedFilePath) &&
-      (!deepestEntry || normalizedRoot.length > deepestEntry[0].length)
-    ) {
-      deepestEntry = [normalizedRoot, context];
-    }
-  }
-
-  return deepestEntry;
-}
-
-/** Returns the value belonging to the deepest root that contains filePath. */
-export function findDeepestContainingProjectContext<T>(
-  filePath: string,
-  contexts: ReadonlyMap<string, T>
-): T | undefined {
-  return findDeepestContainingEntry(filePath, contexts)?.[1];
-}
-
 /** The subset of a text document the registry needs to route it to a project root. */
 export type RegistryDocument = {
   uri: { scheme: string; fsPath: string };

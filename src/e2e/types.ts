@@ -27,8 +27,13 @@ export interface ExpectedImport {
 export interface QuickfixDescriptor {
   diagnosticCode: string;
   title: string;
-  command: string;
   expectedImport: ExpectedImport;
+  /**
+   * Which command the action ran, in descriptors recorded before code actions carried
+   * their edit directly. Nothing reads it; it survives so old descriptors still parse.
+   * @deprecated
+   */
+  command?: string;
 }
 
 /**

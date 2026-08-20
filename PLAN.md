@@ -323,30 +323,28 @@ Exit criteria:
 - Reports and metrics contain the same user-relevant information as before.
 - Reindex and report cancellation leave project state usable.
 
-### Phase 5 — Parity, rollout, and cleanup (4–6 days)
+### Phase 5 — Parity and cleanup (4–6 days)
 
-- [x] Run unit, extension-host, and E2E suites for both direct and LSP modes during the transition. Every change since Phase 3 has been landed against all three.
-- [x] Preserve the Angular 19/21/22 E2E matrix and add protocol-specific regressions for dirty files, external HTML, nested roots, server restart, Windows URIs, and dependency changes.
-  - [x] Dirty files and external HTML are covered by `lsp-protocol`; nested and sibling roots, URI round trips, and files created or deleted on disk by `lsp-regressions`; server restart by the existing Extension Host lifecycle suite, which is the only place a real process can be killed.
-  - [ ] Run the regression suites on Windows. The URI test asserts a round trip rather than a fixed string, so it is meaningful there, but it has only ever been executed on macOS.
-- [x] Add direct handler tests that do not require a JSON-RPC connection. Every handler has its own suite calling it directly (`lsp-completion`, `lsp-diagnostics`, `lsp-code-actions`, `lsp-definition`, `lsp-import-command`, `lsp-operations`, `lsp-report`, `lsp-cancellation`).
-- [x] Add a small client/server integration harness for initialization, document sync, diagnostics refresh, workspace edits, and custom requests (`src/test/node/harness/lsp-harness`). It runs the real `createServer` over an in-memory duplex pair, which required splitting the server into `createServer(connection)` and a thin `server-main` entry point.
-- [x] Compare completion/diagnostic snapshots between implementations.
-  - [x] Done as a corpus replay rather than a snapshot diff: since Phase 3 both hosts call the same core analysis, so comparing them directly would compare a function to itself. `lsp-parity` replays the recorded `src/e2e/cases` descriptors — the same corpus the direct implementation is held to — against the server, and all 17 v22 cases agree on diagnostics, ranges, and quick-fix titles.
-  - [x] Two real divergences surfaced and were fixed: a quick fix titled itself with the element's indexed path rather than the specifier the import would be written with, and the server reported duplicates the Extension Host had been dropping at publish time.
-- [x] Package and inspect the VSIX to ensure both bundles and runtime dependencies are present (`pnpm run vsce:inspect`, `scripts/inspect-vsix.mjs`). It checks the artifact rather than the source tree, because that is where bundling fails silently.
-- [ ] Enable LSP for internal/beta builds while keeping a temporary fallback setting. Currently the only switch is the `AAI_LSP_SPIKE` environment variable, which is a development flag, not something a beta user can set.
-- [ ] Make LSP the default after parity and performance gates pass. Every gate that can be measured now passes — see [Measured baseline](#measured-baseline). What remains is the decision itself, and the beta period that should precede it.
-- [ ] Remove direct provider registration and the fallback after at least one stable release without a migration blocker.
-- [ ] Remove obsolete workspace-state cache keys only after fallback removal.
+- [x] Run unit, extension-host, and E2E suites throughout the transition.
+- [x] Preserve the Angular 19/21/22 E2E matrix and add protocol-specific regressions for dirty files, external HTML, nested roots, server restart, and dependency changes.
+  - [x] Dirty files and external HTML in `lsp-protocol`; nested and sibling roots, URI round trips, and files created or deleted on disk in `lsp-regressions`; server restart in the Extension Host lifecycle suite, which is the only place a real process can be killed.
+  - [ ] Run the suites on Windows. The URI test asserts a round trip rather than a fixed string, so it is meaningful there, but it has only ever been executed on macOS.
+- [x] Add direct handler tests that do not require a JSON-RPC connection.
+- [x] Add a client/server integration harness for initialization, document sync, diagnostics refresh, workspace edits, and custom requests (`src/test/node/harness/lsp-harness`).
+- [x] Compare against the recorded corpus. `lsp-parity` replays `src/e2e/cases` — the descriptors the previous implementation was held to — against the server; all 17 v22 cases agree on diagnostics, ranges, and quick-fix titles.
+- [x] Package and inspect the VSIX (`pnpm run vsce:inspect`).
+- [x] Remove the previous implementation. The server is now the only one: the direct providers, their commands, the Extension Host adapters, and the flag that used to choose between them are gone, and `src/extension.ts` does nothing but start and stop the client.
+  - [x] Move what those suites were really testing rather than deleting it: the indexer's 41 tests and the tsconfig resolver's 32 now run under plain Node, and the missing-import suppression rules with them.
+  - [x] Keep `projectPath` working. Its meaning — one configured directory overrides the workspace, and naming a directory that does not exist yields no roots at all — moved into the handshake and kept its own tests.
+  - [x] Clear the template-string cache when a document closes, which the previous entry point did and the server had stopped doing.
 - [x] Update architecture, troubleshooting, logging, and development documentation (`docs/architecture.md`, `CLAUDE.md`).
+- [ ] Remove the workspace-state cache keys the previous implementation wrote. They are no longer read; deleting them is a separate, reversible cleanup.
 
 Exit criteria:
 
-- All CI and E2E suites pass with LSP as the default.
-- No direct VS Code language providers or `vscode` imports remain in the server/core layers.
-- Performance and reliability gates below pass.
-- The old implementation can be removed without deleting unique business logic.
+- All CI and E2E suites pass. **Met**: 453 Node tests, 27 Extension Host tests, and the 45-test v22 E2E matrix.
+- No direct VS Code language providers, and no `vscode` imports in the server or core. **Met**, enforced by a lint rule and checked on the packaged artifact.
+- Performance and reliability gates pass. **Met** — see [Measured baseline](#measured-baseline).
 
 ## Suggested pull-request boundaries
 

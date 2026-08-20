@@ -10,10 +10,19 @@
 import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as TsConfigHelper from "../../services/tsconfig";
+import { TsConfigResolver } from "../../core/tsconfig";
 import type { ProcessedTsConfig } from "../../types";
 
-describe("TsConfigHelper", function () {
+/**
+ * A fresh resolver per test, which is what a project runtime owns.
+ *
+ * The Extension Host once shared a single instance across every project; the server
+ * gives each root its own, so clearing "the" cache between tests is now just building a
+ * new resolver.
+ */
+let TsConfigHelper: TsConfigResolver;
+
+describe("TsConfigResolver", function () {
   // Set timeout for all tests in this suite - increased for complex operations
   this.timeout(10000);
 
@@ -25,8 +34,7 @@ describe("TsConfigHelper", function () {
   const testProjectPath = path.join(fixturesPath, "test-project");
 
   beforeEach(() => {
-    // Clear cache before each test to ensure clean state
-    TsConfigHelper.clearCache();
+    TsConfigHelper = new TsConfigResolver();
   });
 
   after(() => {

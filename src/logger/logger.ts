@@ -232,6 +232,16 @@ export class Logger {
     this.fatal("An unhandled exception occurred", error, context);
   }
 
+  /**
+   * The extension's output channel, once logging has been initialized.
+   *
+   * The language client writes the server's forwarded logs here too, so everything the
+   * extension has to say arrives in one place.
+   */
+  public get channel(): vscode.LogOutputChannel | undefined {
+    return this.transports.find((t): t is ChannelTransport => t instanceof ChannelTransport)?.channel;
+  }
+
   /** Shows the Output Channel panel and selects the Angular Auto Import channel. */
   public showChannel(): void {
     const channelTransport = this.transports.find((t): t is ChannelTransport => t instanceof ChannelTransport);

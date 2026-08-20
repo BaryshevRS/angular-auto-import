@@ -28,6 +28,7 @@ import { type AngularCompilerApi, loadAngularCompiler } from "../core/angular-co
 import { fileUriToPath } from "../core/document";
 import { installSharedLogger } from "../core/logging";
 import { DEFAULT_EXTENSION_CONFIG, resolveExtensionConfig } from "../core/settings";
+import { clearTemplateCache } from "../utils/template-detection";
 import { CodeActionHandler } from "./code-actions";
 import { CompletionHandler } from "./completion";
 import { DefinitionHandler } from "./definition";
@@ -40,10 +41,10 @@ import { ProjectRouter } from "./project-router";
 import { ProjectRuntimeHost } from "./project-runtime-host";
 import {
   ClearCacheRequest,
+  CRASH_NOTIFICATION,
   DiagnosticsReportRequest,
   PerformanceMetricsRequest,
   ReindexRequest,
-  SPIKE_CRASH_NOTIFICATION,
 } from "./protocol";
 import { DiagnosticsReporter } from "./report";
 import {
@@ -51,11 +52,9 @@ import {
   buildInitializeResult,
   resolveServerEnvironment,
   type ServerEnvironment,
-  type ServerInitializationOptions,
 } from "./server-environment";
 import { ServerLogging } from "./server-logging";
 import { ServerProjects } from "./server-projects";
-import { probeCompletion } from "./spike-probe";
 import { WatchedFiles } from "./watched-files";
 
 const SERVER_NAME = "Angular Auto Import LSP Spike";
@@ -66,10 +65,10 @@ const DIAGNOSTIC_REFRESH_DELAY_MS = 50;
 /** How a caller may vary the server it builds. */
 export interface ServerOptions {
   /**
-   * Whether the development-only crash notification really kills the process. A harness
-   * running the server in its own process must say no, or the test run dies with it.
+   * Whether the test-only crash notification really kills the process. A harness running
+   * the server inside its own process must say no, or the test run dies with it.
    */
-  exitOnSpikeCrash?: boolean;
+  exitOnCrashNotification?: boolean;
 }
 
 /**
@@ -103,8 +102,6 @@ interface ServerState {
   runtimes?: ProjectRuntimeHost;
   watchedFiles?: WatchedFiles;
   compiler?: AngularCompilerApi;
-  /** Whether the development-only dependency check has run and passed. */
-  runtimeDependenciesLoaded: boolean;
   /** The scheduled diagnostic refresh, if one is pending. */
   refreshTimer?: NodeJS.Timeout;
 }
@@ -147,7 +144,7 @@ function createContext(connection: Connection): ServerContext {
   const openDocuments = new OpenDocuments(documents);
   const logging = new ServerLogging(connection.console);
   const logger = logging.logger;
-  const state: ServerState = { runtimeDependenciesLoaded: false };
+  const state: ServerState = {};
 
   const router = new ProjectRouter({
     rootForPath: (filePath) => state.projects?.rootForPath(filePath),
@@ -215,16 +212,11 @@ function registerLifecycle(context: ServerContext): void {
   const { connection, logging, state } = context;
   const logger = logging.logger;
 
-  connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
+  connection.onInitialize((params: InitializeParams): InitializeResult => {
     installSharedLogger(logger);
     const environment = resolveServerEnvironment(params);
     state.environment = environment;
     logging.configure(environment.config.logging);
-
-    const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
-    if (options.verifyRuntimeDependencies) {
-      await verifyRuntimeDependencies(context);
-    }
 
     logger.info(
       `Initialized for ${environment.workspaceRoots.length} workspace root(s); storage: ${environment.storagePath ?? "none"}`
@@ -371,8 +363,12 @@ async function startProjects(context: ServerContext, environment: ServerEnvironm
 function registerDocumentTracking(context: ServerContext): void {
   const { documents, handlers } = context;
 
-  // A closed document keeps no report and no parsed template; the client stops asking.
-  documents.onDidClose(({ document }) => handlers.diagnostics.forget(document.uri));
+  // A closed document keeps nothing: no report, no parsed template AST, and no cached
+  // template-string ranges. The client will not ask about it again.
+  documents.onDidClose(({ document }) => {
+    handlers.diagnostics.forget(document.uri);
+    clearTemplateCache(document.uri);
+  });
 
   // A saved file is on disk again, so anything cached about its last-saved state is stale.
   documents.onDidSave(({ document }) => {
@@ -395,7 +391,7 @@ function registerDocumentTracking(context: ServerContext): void {
  * @internal
  */
 function registerLanguageFeatures(context: ServerContext, options: ServerOptions): void {
-  const { connection, documents, handlers, state } = context;
+  const { connection, documents, handlers } = context;
 
   connection.onCompletion((params, token) => {
     const document = documents.get(params.textDocument.uri);
@@ -403,13 +399,7 @@ function registerLanguageFeatures(context: ServerContext, options: ServerOptions
       return { isIncomplete: true, items: [] };
     }
 
-    const view = toDocumentView(document);
-    const completionList = handlers.completions.provide(view, params.position, toCancellationSignal(token));
-    if (completionList.items.length > 0) {
-      return completionList;
-    }
-
-    return { ...completionList, items: probeCompletion(view, params.position, state.runtimeDependenciesLoaded) };
+    return handlers.completions.provide(toDocumentView(document), params.position, toCancellationSignal(token));
   });
 
   connection.languages.diagnostics.on((params, token) => {
@@ -451,8 +441,8 @@ function registerLanguageFeatures(context: ServerContext, options: ServerOptions
     return undefined;
   });
 
-  if (options.exitOnSpikeCrash !== false) {
-    connection.onNotification(SPIKE_CRASH_NOTIFICATION, () => {
+  if (options.exitOnCrashNotification !== false) {
+    connection.onNotification(CRASH_NOTIFICATION, () => {
       process.exit(86);
     });
   }
@@ -509,19 +499,6 @@ async function pullConfiguration(context: ServerContext): Promise<void> {
   const [settings] = await context.connection.workspace.getConfiguration([{ section: CONFIGURATION_SECTION }]);
   environment.config = resolveExtensionConfig(settings);
   context.logging.configure(environment.config.logging);
-}
-
-/**
- * Development-only: proves the heavy dependencies really load in this process before the
- * spike claims the bundling works.
- * @internal
- */
-async function verifyRuntimeDependencies(context: ServerContext): Promise<void> {
-  const [, tsMorph] = await Promise.all([context.loadCompiler(), import("ts-morph")]);
-  if (typeof tsMorph.Project !== "function") {
-    throw new Error("ts-morph did not expose the expected runtime API");
-  }
-  context.state.runtimeDependenciesLoaded = true;
 }
 
 /**

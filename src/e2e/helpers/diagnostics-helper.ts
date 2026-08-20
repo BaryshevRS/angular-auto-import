@@ -1,6 +1,15 @@
 import * as vscode from "vscode";
 
 /**
+ * How many of the offered actions are resolved by default.
+ *
+ * Resolving one means rewriting a component with ts-morph, and a range rarely offers
+ * more than a couple of fixes plus a fix-all. Asking for many more makes the request
+ * slow enough that the editor cancels it when the next one arrives.
+ */
+const DEFAULT_RESOLVE_LIMIT = 5;
+
+/**
  * Waits for diagnostics to stabilize (stop changing) for a given URI.
  * Uses event-based approach via `vscode.languages.onDidChangeDiagnostics`.
  *
@@ -86,7 +95,7 @@ export function waitForDiagnosticsToStabilize(
 export async function collectQuickFixes(
   uri: vscode.Uri,
   diagnostics: vscode.Diagnostic[],
-  commandFilter: string
+  resolveLimit = DEFAULT_RESOLVE_LIMIT
 ): Promise<Map<string, vscode.CodeAction[]>> {
   const result = new Map<string, vscode.CodeAction[]>();
   const seenCodes = new Set<string>();
@@ -101,16 +110,48 @@ export async function collectQuickFixes(
     const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
       "vscode.executeCodeActionProvider",
       uri,
-      diagnostic.range
+      diagnostic.range,
+      vscode.CodeActionKind.QuickFix.value,
+      // An action's edit is computed on demand, so without this every action arrives
+      // with nothing to apply. Pass 0 when only the titles are wanted.
+      resolveLimit
     );
 
-    if (actions) {
-      const filtered = actions.filter((a) => a.command?.command === commandFilter);
-      if (filtered.length > 0) {
-        result.set(code, filtered);
-      }
+    const quickFixes = (actions ?? []).filter((action) => action.kind?.contains(vscode.CodeActionKind.QuickFix));
+    if (quickFixes.length > 0) {
+      result.set(code, quickFixes);
     }
   }
 
   return result;
+}
+
+/**
+ * Applies a code action the way the editor would: its edit first, then its command.
+ *
+ * The extension deliberately does not save what it edits — the edit belongs to the
+ * user's undo stack and is theirs to keep or discard. So this saves afterwards, which is
+ * what a user does, and what lets an assertion read the result off disk.
+ * @param action The action to apply.
+ * @param edited The file the action was expected to change.
+ */
+export async function applyCodeAction(action: vscode.CodeAction, edited: vscode.Uri): Promise<void> {
+  if (!action.edit && !action.command) {
+    throw new Error(`"${action.title}" carries neither an edit nor a command`);
+  }
+
+  if (action.edit) {
+    const applied = await vscode.workspace.applyEdit(action.edit);
+    if (!applied) {
+      throw new Error(`The editor refused the edit of "${action.title}"`);
+    }
+  }
+  if (action.command) {
+    await vscode.commands.executeCommand(action.command.command, ...(action.command.arguments ?? []));
+  }
+
+  const document = await vscode.workspace.openTextDocument(edited);
+  if (document.isDirty) {
+    await document.save();
+  }
 }

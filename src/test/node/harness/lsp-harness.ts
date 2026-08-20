@@ -110,7 +110,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     new StreamMessageReader(clientToServer),
     new StreamMessageWriter(serverToClient)
   );
-  createServer(serverConnection, { exitOnSpikeCrash: false });
+  createServer(serverConnection, { exitOnCrashNotification: false });
   serverConnection.listen();
 
   const client = createProtocolConnection(

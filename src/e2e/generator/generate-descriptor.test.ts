@@ -12,7 +12,6 @@ import type { CaseConfig, QuickfixDescriptor } from "../types";
 import { severityToString } from "../types";
 
 const DIAGNOSTIC_SOURCE = "angular-auto-import";
-const IMPORT_COMMAND = "angular-auto-import.importElement";
 const CASE_FILTER = process.env.AAI_E2E_CASE;
 
 function isInlineTemplateCase(caseConfig: CaseConfig): boolean {
@@ -145,7 +144,7 @@ async function buildDescriptor(caseConfig: CaseConfig, templateUri: vscode.Uri, 
   }));
 
   // Collect quickfixes for each unique diagnostic code
-  const quickfixMap = await collectQuickFixes(templateUri, diagnostics, IMPORT_COMMAND);
+  const quickfixMap = await collectQuickFixes(templateUri, diagnostics);
 
   const quickfixDescriptors: QuickfixDescriptor[] = [];
   for (const [code, actions] of quickfixMap) {
@@ -169,7 +168,6 @@ async function buildDescriptor(caseConfig: CaseConfig, templateUri: vscode.Uri, 
       quickfixDescriptors.push({
         diagnosticCode: code,
         title: action.title,
-        command: action.command?.command ?? "",
         expectedImport: { className, moduleSpecifier },
       });
     }
