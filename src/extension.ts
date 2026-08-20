@@ -10,6 +10,7 @@
 
 import type * as vscode from "vscode";
 import { installSharedLogger } from "./core/logging";
+import { clearLegacyCacheInBackground } from "./legacy-cache";
 import { logger } from "./logger";
 import { startLanguageClient, stopLanguageClient } from "./lsp/client";
 
@@ -20,6 +21,10 @@ import { startLanguageClient, stopLanguageClient } from "./lsp/client";
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   logger.initialize(context);
   installSharedLogger(logger);
+
+  // Nothing waits on this: it clears storage the extension no longer reads, and a
+  // workspace that cannot be written is not a reason to refuse to start.
+  clearLegacyCacheInBackground(context, logger);
 
   try {
     await startLanguageClient(context);

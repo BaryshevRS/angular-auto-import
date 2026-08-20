@@ -338,11 +338,11 @@ Exit criteria:
   - [x] Keep `projectPath` working. Its meaning — one configured directory overrides the workspace, and naming a directory that does not exist yields no roots at all — moved into the handshake and kept its own tests.
   - [x] Clear the template-string cache when a document closes, which the previous entry point did and the server had stopped doing.
 - [x] Update architecture, troubleshooting, logging, and development documentation (`docs/architecture.md`, `CLAUDE.md`).
-- [ ] Remove the workspace-state cache keys the previous implementation wrote. They are no longer read; deleting them is a separate, reversible cleanup.
+- [x] Remove the workspace-state cache keys the previous implementation wrote (`src/legacy-cache.ts`). Nothing reads them, but they do not disappear on their own, and for a large monorepo they are megabytes of dead JSON VS Code loads with the workspace. The cleanup runs at activation without being waited on, and is itself temporary: once users have opened their workspaces once with a version that includes it, it should be deleted.
 
 Exit criteria:
 
-- All CI and E2E suites pass. **Met**: 453 Node tests, 27 Extension Host tests, and the 45-test v22 E2E matrix.
+- All CI and E2E suites pass. **Met**: 474 Node tests, 27 Extension Host tests, and the 45-test v22 E2E matrix.
 - No direct VS Code language providers, and no `vscode` imports in the server or core. **Met**, enforced by a lint rule and checked on the packaged artifact.
 - Performance and reliability gates pass. **Met** — see [Measured baseline](#measured-baseline).
 

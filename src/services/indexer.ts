@@ -272,19 +272,6 @@ export class AngularIndexer {
   }
 
   /**
-   * Ensures cache keys are set for the given project root path.
-   * If cache keys are not set, attempts to set them now.
-   *
-   * @param projectRootPath - The project root path to ensure cache keys for
-   */
-  public ensureCacheKeys(projectRootPath: string): void {
-    if (this.workspaceFileCacheKey === "" || this.workspaceIndexCacheKey === "") {
-      this.logger.warn(`Cache keys not set for ${projectRootPath}, attempting to set them now`);
-      this.setProjectRoot(projectRootPath);
-    }
-  }
-
-  /**
    * Starts watching the project's sources and dependency manifests so the index
    * follows changes made outside the editor.
    */
