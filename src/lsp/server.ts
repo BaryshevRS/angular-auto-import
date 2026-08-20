@@ -1,6 +1,19 @@
+/**
+ * The language server, assembled onto a connection.
+ *
+ * Everything the server owns is built here rather than at module load, so a test can
+ * put a server on an in-memory transport and drive it through the real protocol. The
+ * process entry point in `server-main` does nothing but supply a real connection.
+ *
+ * The registrations are grouped by what they are for — lifecycle, document tracking,
+ * language features, the extension's own operations — because that is how they change:
+ * a new language feature touches one group and none of the others.
+ * @module
+ */
+
 import { readFileSync } from "node:fs";
 import {
-  createConnection,
+  type Connection,
   DidChangeConfigurationNotification,
   DidChangeWatchedFilesNotification,
   DocumentDiagnosticReportKind,
@@ -50,166 +63,276 @@ const CONFIGURATION_SECTION = "angular-auto-import";
 /** How long refresh triggers are coalesced before the client is asked to re-pull. */
 const DIAGNOSTIC_REFRESH_DELAY_MS = 50;
 
-const connection = createConnection();
-const documents = new TextDocuments(TextDocument);
-let runtimeDependenciesLoaded = false;
-let compiler: AngularCompilerApi | undefined;
-/** Whether a diagnostic refresh is already scheduled for the next tick. */
-let refreshPending = false;
-let environment: ServerEnvironment | undefined;
-let projects: ServerProjects | undefined;
-let runtimes: ProjectRuntimeHost | undefined;
-let watchedFiles: WatchedFiles | undefined;
-
-/** Routes the server's logs to the client's output channel, filtered by the user's settings. */
-const logging = new ServerLogging(connection.console);
-const serverLogger = logging.logger;
-
-/** Path-keyed access to the synchronized documents, shared by every language feature. */
-const openDocuments = new OpenDocuments(documents);
+/** How a caller may vary the server it builds. */
+export interface ServerOptions {
+  /**
+   * Whether the development-only crash notification really kills the process. A harness
+   * running the server in its own process must say no, or the test run dies with it.
+   */
+  exitOnSpikeCrash?: boolean;
+}
 
 /**
- * Routes a URI to the project runtime that answers for it. Both lookups go through the
- * mutable module state on purpose: a request that arrives before discovery has run, or
- * after shutdown released everything, must resolve to nothing rather than to a stale runtime.
+ * What one server instance holds, and what every registration reads.
+ * @internal
  */
-const router = new ProjectRouter({
-  rootForPath: (filePath) => projects?.rootForPath(filePath),
-  runtimeForRoot: (rootPath) => runtimes?.get(rootPath),
-});
+interface ServerContext {
+  connection: Connection;
+  documents: TextDocuments<TextDocument>;
+  openDocuments: OpenDocuments;
+  logging: ServerLogging;
+  handlers: ServerHandlers;
+  /** Everything the handshake and discovery produce. */
+  state: ServerState;
+  /** Asks the client to re-pull diagnostics, coalescing bursts into one request. */
+  requestDiagnosticRefresh(): void;
+  /** Loads the Angular compiler, then asks the client to re-pull. */
+  loadCompiler(): Promise<void>;
+}
 
-const completions = new CompletionHandler({
-  router,
-  documents: openDocuments,
+/**
+ * The parts that only exist after the handshake.
+ *
+ * Mutable on purpose: a request arriving before discovery has run, or after shutdown
+ * released everything, must find nothing rather than something stale.
+ * @internal
+ */
+interface ServerState {
+  environment?: ServerEnvironment;
+  projects?: ServerProjects;
+  runtimes?: ProjectRuntimeHost;
+  watchedFiles?: WatchedFiles;
+  compiler?: AngularCompilerApi;
+  /** Whether the development-only dependency check has run and passed. */
+  runtimeDependenciesLoaded: boolean;
+  /** The scheduled diagnostic refresh, if one is pending. */
+  refreshTimer?: NodeJS.Timeout;
+}
+
+/** @internal */
+interface ServerHandlers {
+  completions: CompletionHandler;
+  diagnostics: DiagnosticsHandler;
+  definitions: DefinitionHandler;
+  codeActions: CodeActionHandler;
+  importCommand: ImportCommandHandler;
+  operations: ServerOperations;
+  reporter: DiagnosticsReporter;
+}
+
+/**
+ * Wires one server onto a connection. The caller starts the connection when it is ready
+ * to receive.
+ * @param connection The connection to serve on.
+ * @param options How to vary the server.
+ */
+export function createServer(connection: Connection, options: ServerOptions = {}): void {
+  const context = createContext(connection);
+
+  registerLifecycle(context);
+  registerDocumentTracking(context);
+  registerLanguageFeatures(context, options);
+  registerOperations(context);
+
+  context.openDocuments.listen();
+  context.documents.listen(connection);
+}
+
+/**
+ * Builds everything one server holds, in dependency order.
+ * @internal
+ */
+function createContext(connection: Connection): ServerContext {
+  const documents = new TextDocuments(TextDocument);
+  const openDocuments = new OpenDocuments(documents);
+  const logging = new ServerLogging(connection.console);
+  const logger = logging.logger;
+  const state: ServerState = { runtimeDependenciesLoaded: false };
+
+  const router = new ProjectRouter({
+    rootForPath: (filePath) => state.projects?.rootForPath(filePath),
+    runtimeForRoot: (rootPath) => state.runtimes?.get(rootPath),
+  });
   // Re-read per request: the user can change these while the server runs.
-  config: () => environment?.config ?? DEFAULT_EXTENSION_CONFIG,
-  logger: serverLogger,
-});
+  const config = () => state.environment?.config ?? DEFAULT_EXTENSION_CONFIG;
 
-const diagnostics = new DiagnosticsHandler({
-  router,
-  documents: openDocuments,
-  config: () => environment?.config ?? DEFAULT_EXTENSION_CONFIG,
-  compiler: () => compiler,
-  logger: serverLogger,
-});
-
-const definitions = new DefinitionHandler({ router, diagnostics, logger: serverLogger });
-
-const reporter = new DiagnosticsReporter({ diagnostics, logger: serverLogger });
-
-const operations = new ServerOperations({
-  router,
-  runtimes: () => runtimes?.all() ?? [],
-  logger: serverLogger,
-});
-
-const importCommand = new ImportCommandHandler({
-  router,
-  documents: openDocuments,
-  applyEdit: async (edit) => (await connection.workspace.applyEdit(edit)).applied,
-  logger: serverLogger,
-});
-
-const codeActions = new CodeActionHandler({
-  router,
-  diagnostics,
-  planner: new ImportEditPlanner({
+  const diagnostics = new DiagnosticsHandler({
     router,
     documents: openDocuments,
-    readFile: (filePath) => readFileSync(filePath, "utf-8"),
-    logger: serverLogger,
-  }),
-  resolvesActions: () => environment?.client.codeActionResolve === true,
-  logger: serverLogger,
-});
+    config,
+    compiler: () => state.compiler,
+    logger,
+  });
 
-async function loadRuntimeDependencies(): Promise<void> {
-  const [, tsMorph] = await Promise.all([loadCompiler(), import("ts-morph")]);
-  if (typeof tsMorph.Project !== "function") {
-    throw new Error("ts-morph did not expose the expected runtime API");
-  }
-  runtimeDependenciesLoaded = true;
+  const context: ServerContext = {
+    connection,
+    documents,
+    openDocuments,
+    logging,
+    state,
+    handlers: {
+      diagnostics,
+      completions: new CompletionHandler({ router, documents: openDocuments, config, logger }),
+      definitions: new DefinitionHandler({ router, diagnostics, logger }),
+      reporter: new DiagnosticsReporter({ diagnostics, logger }),
+      operations: new ServerOperations({ router, runtimes: () => state.runtimes?.all() ?? [], logger }),
+      importCommand: new ImportCommandHandler({
+        router,
+        documents: openDocuments,
+        applyEdit: async (edit) => (await connection.workspace.applyEdit(edit)).applied,
+        logger,
+      }),
+      codeActions: new CodeActionHandler({
+        router,
+        diagnostics,
+        planner: new ImportEditPlanner({
+          router,
+          documents: openDocuments,
+          readFile: (filePath) => readFileSync(filePath, "utf-8"),
+          logger,
+        }),
+        resolvesActions: () => state.environment?.client.codeActionResolve === true,
+        logger,
+      }),
+    },
+    requestDiagnosticRefresh: () => requestDiagnosticRefresh(context),
+    loadCompiler: () => loadCompiler(context),
+  };
+
+  return context;
 }
 
 /**
- * Loads the Angular compiler the analysis needs, and re-pulls once it arrives.
- *
- * Diagnostics requested before this resolves report nothing, so the client has to be
- * told to ask again rather than being left with the empty answer.
+ * Registers the handshake, discovery, configuration, and shutdown.
+ * @internal
  */
-async function loadCompiler(): Promise<void> {
-  if (compiler) {
-    return;
-  }
-  compiler = await loadAngularCompiler(serverLogger);
-  requestDiagnosticRefresh();
+function registerLifecycle(context: ServerContext): void {
+  const { connection, logging, state } = context;
+  const logger = logging.logger;
+
+  connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
+    installSharedLogger(logger);
+    const environment = resolveServerEnvironment(params);
+    state.environment = environment;
+    logging.configure(environment.config.logging);
+
+    const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
+    if (options.verifyRuntimeDependencies) {
+      await verifyRuntimeDependencies(context);
+    }
+
+    logger.info(
+      `Initialized for ${environment.workspaceRoots.length} workspace root(s); storage: ${environment.storagePath ?? "none"}`
+    );
+
+    return buildInitializeResult(environment, SERVER_NAME);
+  });
+
+  connection.onInitialized(async () => {
+    const environment = state.environment;
+    if (!environment) {
+      return;
+    }
+
+    if (environment.client.configuration) {
+      await connection.client.register(DidChangeConfigurationNotification.type, { section: CONFIGURATION_SECTION });
+      await pullConfiguration(context);
+    }
+
+    followWorkspaceFolders(context, environment);
+    await startProjects(context, environment);
+
+    void context.loadCompiler().catch(() => {
+      // Already reported by the loader; diagnostics stay empty until a later load succeeds.
+    });
+  });
+
+  connection.onDidChangeWatchedFiles((params) => {
+    state.watchedFiles?.dispatch(params.changes);
+  });
+
+  registerConfiguration(context);
+
+  connection.onShutdown(() => {
+    // A refresh still on the clock would fire against a connection that is gone.
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = undefined;
+    state.projects?.dispose();
+    state.projects = undefined;
+    state.runtimes?.disposeAll();
+    state.runtimes = undefined;
+    state.watchedFiles?.dispose();
+    state.watchedFiles = undefined;
+  });
 }
 
 /**
- * Asks the client to re-pull diagnostics for everything it has open.
+ * Keeps the tracked roots following the folders the client reports.
  *
- * Coalesced onto the next tick: a burst of keystrokes, a finished index, and a batch of
- * watched-file changes all mean the same single thing to the client.
+ * A client that does not report them is left alone: its workspace cannot change under
+ * us, so there is nothing to follow.
+ * @internal
  */
-function requestDiagnosticRefresh(): void {
-  if (!environment?.client.diagnosticRefresh || refreshPending) {
+function followWorkspaceFolders(context: ServerContext, environment: ServerEnvironment): void {
+  if (!environment.client.workspaceFolders) {
     return;
   }
-  refreshPending = true;
-  setTimeout(() => {
-    refreshPending = false;
-    void connection.languages.diagnostics.refresh().catch((error) => {
-      serverLogger.debug(`Diagnostic refresh failed: ${String(error)}`);
-    });
-  }, DIAGNOSTIC_REFRESH_DELAY_MS).unref?.();
+
+  const { connection, state } = context;
+  connection.workspace.onDidChangeWorkspaceFolders((event) => {
+    if (!state.environment) {
+      return;
+    }
+    state.environment.workspaceRoots = applyWorkspaceFolderChange(state.environment.workspaceRoots, event);
+    context.logging.logger.info(`Workspace roots now: ${state.environment.workspaceRoots.length}`);
+    void state.projects?.setWorkspaceRoots(state.environment.workspaceRoots);
+  });
 }
 
-connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
-  installSharedLogger(serverLogger);
-  environment = resolveServerEnvironment(params);
-  logging.configure(environment.config.logging);
-  const options = (params.initializationOptions ?? {}) as ServerInitializationOptions;
-  if (options.verifyRuntimeDependencies) {
-    await loadRuntimeDependencies();
-  }
+/**
+ * Keeps the settings current, from whichever direction the client supplies them.
+ * @internal
+ */
+function registerConfiguration(context: ServerContext): void {
+  const { connection, logging, state } = context;
 
-  serverLogger.info(
-    `Initialized for ${environment.workspaceRoots.length} workspace root(s); storage: ${environment.storagePath ?? "none"}`
-  );
+  connection.onDidChangeConfiguration(async (params) => {
+    const environment = state.environment;
+    if (!environment) {
+      return;
+    }
 
-  return buildInitializeResult(environment, SERVER_NAME);
-});
+    // A client that answers configuration requests is the authority on its own settings;
+    // what it pushed with the notification may be less than the whole section.
+    if (environment.client.configuration) {
+      await pullConfiguration(context);
+      return;
+    }
 
-connection.onInitialized(async () => {
-  if (!environment) {
-    return;
-  }
+    const pushed = (params.settings as Record<string, unknown> | null)?.[CONFIGURATION_SECTION];
+    environment.config = resolveExtensionConfig(pushed);
+    logging.configure(environment.config.logging);
+  });
+}
 
-  if (environment.client.configuration) {
-    await connection.client.register(DidChangeConfigurationNotification.type, { section: CONFIGURATION_SECTION });
-    await pullConfiguration();
-  }
+/**
+ * Starts watching, the project runtimes, and lazy discovery.
+ * @internal
+ */
+async function startProjects(context: ServerContext, environment: ServerEnvironment): Promise<void> {
+  const { connection, state, handlers } = context;
+  const logger = context.logging.logger;
 
-  if (environment.client.workspaceFolders) {
-    connection.workspace.onDidChangeWorkspaceFolders((event) => {
-      if (!environment) {
-        return;
-      }
-      environment.workspaceRoots = applyWorkspaceFolderChange(environment.workspaceRoots, event);
-      serverLogger.info(`Workspace roots now: ${environment.workspaceRoots.length}`);
-      void projects?.setWorkspaceRoots(environment.workspaceRoots);
-    });
-  }
-
-  watchedFiles = new WatchedFiles({
-    logger: serverLogger,
+  const watchedFiles = new WatchedFiles({
+    logger,
     register: environment.client.didChangeWatchedFiles
       ? (watchers) => connection.client.register(DidChangeWatchedFilesNotification.type, { watchers })
       : undefined,
   });
+  state.watchedFiles = watchedFiles;
+
   const runtimeHost = new ProjectRuntimeHost({
-    logger: serverLogger,
+    logger,
     storagePath: environment.storagePath,
     fileWatchers: watchedFiles,
     reindexIntervalMinutes: environment.config.indexRefreshInterval,
@@ -217,170 +340,235 @@ connection.onInitialized(async () => {
       // An element that just appeared or disappeared can change any open document's
       // report, and every cached "already imported" answer was decided against the
       // index that no longer exists.
-      diagnostics.invalidateAll();
-      requestDiagnosticRefresh();
+      handlers.diagnostics.invalidateAll();
+      context.requestDiagnosticRefresh();
     },
   });
-  runtimes = runtimeHost;
-  projects = new ServerProjects({
+  state.runtimes = runtimeHost;
+
+  const projects = new ServerProjects({
     workspaceRoots: environment.workspaceRoots,
-    logger: serverLogger,
+    logger,
     initializeRoot: (rootPath) => runtimeHost.create(rootPath),
     disposeRoot: (rootPath) => runtimeHost.dispose(rootPath),
   });
-  await projects.start(documents);
-  serverLogger.info(`Discovered ${projects.knownRoots().length} Angular project root(s)`);
+  state.projects = projects;
 
-  void loadCompiler().catch(() => {
-    // Already reported by the loader; diagnostics stay empty until a later load succeeds.
-  });
-});
-
-connection.onDidChangeWatchedFiles((params) => {
-  watchedFiles?.dispatch(params.changes);
-});
-
-connection.onShutdown(() => {
-  projects?.dispose();
-  projects = undefined;
-  runtimes?.disposeAll();
-  runtimes = undefined;
-  watchedFiles?.dispose();
-  watchedFiles = undefined;
-});
-
-connection.onDidChangeConfiguration(async (params) => {
-  if (!environment) {
-    return;
-  }
-
-  if (environment.client.configuration) {
-    await pullConfiguration();
-    return;
-  }
-
-  const pushed = (params.settings as Record<string, unknown> | null)?.[CONFIGURATION_SECTION];
-  environment.config = resolveExtensionConfig(pushed);
-  logging.configure(environment.config.logging);
-});
-
-/** Reads the authoritative settings from a client that answers configuration requests. */
-async function pullConfiguration(): Promise<void> {
-  if (!environment) {
-    return;
-  }
-  const [settings] = await connection.workspace.getConfiguration([{ section: CONFIGURATION_SECTION }]);
-  environment.config = resolveExtensionConfig(settings);
-  logging.configure(environment.config.logging);
+  await projects.start(context.documents);
+  logger.info(`Discovered ${projects.knownRoots().length} Angular project root(s)`);
 }
 
-connection.onCompletion((params, token) => {
-  const document = documents.get(params.textDocument.uri);
-  if (!document) {
-    return { isIncomplete: true, items: [] };
-  }
+/**
+ * Registers what the server does when a document changes, rather than when it is asked
+ * a question about one.
+ * @internal
+ */
+function registerDocumentTracking(context: ServerContext): void {
+  const { documents, handlers } = context;
 
-  const view = toDocumentView(document);
-  const completionList = completions.provide(view, params.position, toCancellationSignal(token));
-  if (completionList.items.length > 0) {
-    return completionList;
-  }
+  // A closed document keeps no report and no parsed template; the client stops asking.
+  documents.onDidClose(({ document }) => handlers.diagnostics.forget(document.uri));
 
-  return { ...completionList, items: probeCompletion(view, params.position, runtimeDependenciesLoaded) };
-});
+  // A saved file is on disk again, so anything cached about its last-saved state is stale.
+  documents.onDidSave(({ document }) => {
+    withFilePath(document.uri, (filePath) => {
+      handlers.completions.invalidate(filePath);
+      handlers.diagnostics.invalidate(filePath);
+    });
+  });
 
-connection.languages.diagnostics.on((params, token) => {
-  const document = documents.get(params.textDocument.uri);
-  if (!document) {
-    return { kind: DocumentDiagnosticReportKind.Full, items: [] };
-  }
-  return diagnostics.provide(toDocumentView(document), toCancellationSignal(token));
-});
+  // A component's own edits decide what its external template is missing, so that
+  // template's report has to be pulled again even though the client saw no change to it.
+  documents.onDidChangeContent(({ document }) => {
+    withFilePath(document.uri, (filePath) => handlers.diagnostics.invalidate(filePath));
+    context.requestDiagnosticRefresh();
+  });
+}
 
-// A closed document keeps no report and no parsed template; the client stops asking.
-documents.onDidClose(({ document }) => diagnostics.forget(document.uri));
+/**
+ * Registers completion, diagnostics, definitions, code actions, and the import command.
+ * @internal
+ */
+function registerLanguageFeatures(context: ServerContext, options: ServerOptions): void {
+  const { connection, documents, handlers, state } = context;
 
-connection.onDefinition((params, token) => {
-  const document = documents.get(params.textDocument.uri);
-  return document ? definitions.provide(toDocumentView(document), params.position, toCancellationSignal(token)) : [];
-});
+  connection.onCompletion((params, token) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+      return { isIncomplete: true, items: [] };
+    }
 
-connection.onCodeAction((params, token) => {
-  const document = documents.get(params.textDocument.uri);
-  if (!document) {
-    return [];
-  }
-  return codeActions.provide(toDocumentView(document), params.range, params.context.only, toCancellationSignal(token));
-});
+    const view = toDocumentView(document);
+    const completionList = handlers.completions.provide(view, params.position, toCancellationSignal(token));
+    if (completionList.items.length > 0) {
+      return completionList;
+    }
 
-connection.onCodeActionResolve((action) => codeActions.resolve(action));
+    return { ...completionList, items: probeCompletion(view, params.position, state.runtimeDependenciesLoaded) };
+  });
 
-connection.onExecuteCommand(async (params) => {
-  if (params.command !== APPLY_IMPORT_COMMAND) {
-    return undefined;
-  }
-  await importCommand.execute(params.arguments);
-  return undefined;
-});
+  connection.languages.diagnostics.on((params, token) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+      return { kind: DocumentDiagnosticReportKind.Full, items: [] };
+    }
+    return handlers.diagnostics.provide(toDocumentView(document), toCancellationSignal(token));
+  });
 
-// A saved file is on disk again, so anything cached about its last-saved state is stale.
-documents.onDidSave(({ document }) => {
-  try {
-    const filePath = fileUriToPath(document.uri);
-    completions.invalidate(filePath);
-    diagnostics.invalidate(filePath);
-  } catch {
-    // Not a file on disk; nothing was cached for it.
-  }
-});
+  connection.onDefinition((params, token) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+      return [];
+    }
+    return handlers.definitions.provide(toDocumentView(document), params.position, toCancellationSignal(token));
+  });
 
-// A component's own edits decide what its external template is missing, so that
-// template's report has to be pulled again even though the client saw no change to it.
-documents.onDidChangeContent(({ document }) => {
-  try {
-    diagnostics.invalidate(fileUriToPath(document.uri));
-  } catch {
-    // Not a file on disk; nothing was cached for it.
-  }
-  requestDiagnosticRefresh();
-});
-
-connection.onRequest(ReindexRequest, async (scope) => {
-  const result = await operations.reindex(scope);
-  // The index the client's open documents were analyzed against is gone either way.
-  diagnostics.invalidateAll();
-  requestDiagnosticRefresh();
-  return result;
-});
-
-connection.onRequest(ClearCacheRequest, async (scope) => {
-  const result = await operations.clearCache(scope);
-  diagnostics.invalidateAll();
-  requestDiagnosticRefresh();
-  return result;
-});
-
-connection.onRequest(PerformanceMetricsRequest, () => operations.metrics());
-
-connection.onRequest(DiagnosticsReportRequest, (scope, token) => {
-  const progress = scope.workDoneToken ? connection.window.attachWorkDoneProgress(scope.workDoneToken) : undefined;
-  progress?.begin("Angular Auto Import: Generating Diagnostics Report", 0, undefined, true);
-
-  return reporter
-    .run(
-      operations.resolveScope(scope),
-      progress && {
-        report: (message, percentage) => progress.report(percentage, message),
-      },
+  connection.onCodeAction((params, token) => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) {
+      return [];
+    }
+    return handlers.codeActions.provide(
+      toDocumentView(document),
+      params.range,
+      params.context.only,
       toCancellationSignal(token)
-    )
-    .finally(() => progress?.done());
-});
+    );
+  });
 
-connection.onNotification(SPIKE_CRASH_NOTIFICATION, () => {
-  process.exit(86);
-});
+  connection.onCodeActionResolve((action) => handlers.codeActions.resolve(action));
 
-openDocuments.listen();
-documents.listen(connection);
-connection.listen();
+  connection.onExecuteCommand(async (params) => {
+    if (params.command !== APPLY_IMPORT_COMMAND) {
+      return undefined;
+    }
+    await handlers.importCommand.execute(params.arguments);
+    return undefined;
+  });
+
+  if (options.exitOnSpikeCrash !== false) {
+    connection.onNotification(SPIKE_CRASH_NOTIFICATION, () => {
+      process.exit(86);
+    });
+  }
+}
+
+/**
+ * Registers the extension's own requests, which are not language features.
+ * @internal
+ */
+function registerOperations(context: ServerContext): void {
+  const { connection, handlers } = context;
+
+  connection.onRequest(ReindexRequest, async (scope) => {
+    const result = await handlers.operations.reindex(scope);
+    // The index the client's open documents were analyzed against is gone either way.
+    handlers.diagnostics.invalidateAll();
+    context.requestDiagnosticRefresh();
+    return result;
+  });
+
+  connection.onRequest(ClearCacheRequest, async (scope) => {
+    const result = await handlers.operations.clearCache(scope);
+    handlers.diagnostics.invalidateAll();
+    context.requestDiagnosticRefresh();
+    return result;
+  });
+
+  connection.onRequest(PerformanceMetricsRequest, () => handlers.operations.metrics());
+
+  connection.onRequest(DiagnosticsReportRequest, (scope, token) => {
+    const progress = scope.workDoneToken ? connection.window.attachWorkDoneProgress(scope.workDoneToken) : undefined;
+    progress?.begin("Angular Auto Import: Generating Diagnostics Report", 0, undefined, true);
+
+    return handlers.reporter
+      .run(
+        handlers.operations.resolveScope(scope),
+        progress && { report: (message, percentage) => progress.report(percentage, message) },
+        toCancellationSignal(token)
+      )
+      .finally(() => progress?.done());
+  });
+}
+
+/**
+ * Reads the authoritative settings from a client that answers configuration requests.
+ * @internal
+ */
+async function pullConfiguration(context: ServerContext): Promise<void> {
+  const environment = context.state.environment;
+  if (!environment) {
+    return;
+  }
+
+  const [settings] = await context.connection.workspace.getConfiguration([{ section: CONFIGURATION_SECTION }]);
+  environment.config = resolveExtensionConfig(settings);
+  context.logging.configure(environment.config.logging);
+}
+
+/**
+ * Development-only: proves the heavy dependencies really load in this process before the
+ * spike claims the bundling works.
+ * @internal
+ */
+async function verifyRuntimeDependencies(context: ServerContext): Promise<void> {
+  const [, tsMorph] = await Promise.all([context.loadCompiler(), import("ts-morph")]);
+  if (typeof tsMorph.Project !== "function") {
+    throw new Error("ts-morph did not expose the expected runtime API");
+  }
+  context.state.runtimeDependenciesLoaded = true;
+}
+
+/**
+ * Loads the Angular compiler the analysis needs, and re-pulls once it arrives.
+ *
+ * Diagnostics requested before this resolves report nothing, so the client has to be
+ * told to ask again rather than being left with the empty answer.
+ * @internal
+ */
+async function loadCompiler(context: ServerContext): Promise<void> {
+  if (context.state.compiler) {
+    return;
+  }
+  context.state.compiler = await loadAngularCompiler(context.logging.logger);
+  context.requestDiagnosticRefresh();
+}
+
+/**
+ * Asks the client to re-pull diagnostics for everything it has open.
+ *
+ * Coalesced onto a later tick: a burst of keystrokes, a finished index, and a batch of
+ * watched-file changes all mean the same single thing to the client.
+ * @internal
+ */
+function requestDiagnosticRefresh(context: ServerContext): void {
+  const { state } = context;
+  if (!state.environment?.client.diagnosticRefresh || state.refreshTimer) {
+    return;
+  }
+
+  state.refreshTimer = setTimeout(() => {
+    state.refreshTimer = undefined;
+    try {
+      void context.connection.languages.diagnostics.refresh().catch((error) => {
+        context.logging.logger.debug(`Diagnostic refresh failed: ${String(error)}`);
+      });
+    } catch (error) {
+      // A connection disposed while this was on the clock throws rather than rejecting.
+      context.logging.logger.debug(`Diagnostic refresh skipped: ${String(error)}`);
+    }
+  }, DIAGNOSTIC_REFRESH_DELAY_MS);
+  state.refreshTimer.unref?.();
+}
+
+/**
+ * Runs an action for a document that is a file on disk, and skips the ones that are not.
+ * @internal
+ */
+function withFilePath(uri: string, action: (filePath: string) => void): void {
+  try {
+    action(fileUriToPath(uri));
+  } catch {
+    // Not a file on disk; nothing was cached for it.
+  }
+}

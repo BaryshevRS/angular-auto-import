@@ -55,7 +55,7 @@ async function main() {
 			plugins: [esbuildProblemMatcherPlugin],
 		}),
 		esbuild.context({
-			entryPoints: ["src/lsp/server.ts"],
+			entryPoints: ["src/lsp/server-main.ts"],
 			bundle: true,
 			format: "cjs",
 			minify: production,
