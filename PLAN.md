@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 (LSP language features) is next
+- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete — the server owns the handshake, lazy discovery, one runtime per root, indexing, watched files, its own cache, log forwarding, and cancellation; Phase 3 in progress — completion and its cross-file import execution are served by the server
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -116,7 +116,7 @@ Push diagnostics remain an implementation fallback if pull diagnostics expose a 
 - Quick fixes and fix-all will return `CodeAction.edit` with a cross-file `WorkspaceEdit` where possible.
 - Implement fix-all as `source.fixAll.angular-auto-import`, while retaining the existing command-palette command as a client-facing wrapper.
 - Do not automatically save an edited document. Do not write directly to a file that is open in the client.
-- Prefer minimal text edits. A full-document replacement may be retained temporarily for parity, but it must be replaced before the migration is considered complete if it causes conflicts with dirty documents.
+- Prefer minimal text edits. A full-document replacement may be retained temporarily for parity, but it must be replaced before the migration is considered complete if it causes conflicts with dirty documents. It is also what currently forces every accepted completion through a server command rather than `additionalTextEdits`, because a whole-file edit overlaps the completion's own range.
 
 ### Definitions
 
@@ -205,7 +205,7 @@ Exit criteria:
   - [ ] Reject a plan whose version no longer matches the document before applying it (Phase 2 staleness work).
 - [x] Keep the current VS Code providers working through adapters — every extraction above kept completion, diagnostics, quick fixes, and imports behaviour-identical, verified by the unit suites and the v22 e2e matrix at each step.
 - [x] Convert suitable tests to plain Node tests; retain Electron tests only where the VS Code host is relevant.
-  - [x] Split the unit suites into `src/test/node` (plain Mocha, 107 tests) and `src/test/suite` (VS Code host, 177 tests); `pnpm run test:unit` runs both, `pnpm run test:node` only the fast ones.
+  - [x] Split the unit suites into `src/test/node` (plain Mocha) and `src/test/suite` (VS Code host); `pnpm run test:unit` runs both, `pnpm run test:node` only the fast ones. The split has kept moving toward Node as extraction proceeded: 271 Node tests against 148 host tests as of the Phase 3 completion work.
   - [x] Enforce the boundary with a lint rule: `src/core` and `src/test/node` may not import `vscode`.
 
 Exit criteria:
@@ -261,7 +261,13 @@ Exit criteria:
 
 ### Phase 3 — LSP language features (4–6 days)
 
-- [ ] Implement completion and completion-import execution for inline and external templates.
+- [x] Implement completion and completion-import execution for inline and external templates.
+  - [x] Route a document to the project that answers for it, and to the TypeScript file its template's imports belong in (`lsp/project-router`); an external template and an inline one differ only in that answer.
+  - [x] Give the server path-keyed access to the synchronized documents and their unsaved state (`lsp/open-documents`), which is what decides whether a cached answer about a file may still be used.
+  - [x] Serve `textDocument/completion` from the shared core ranking (`lsp/completion`), gated by the same settings, template detection, and standalone check as the direct provider. The handler is synchronous, so a result can never describe an index the project no longer has.
+  - [x] Execute the import through a server command (`lsp/import-command`) that plans against the file as the user currently sees it and returns a versioned `workspace/applyEdit`; nothing is written to disk and nothing is saved.
+  - [x] Share the element-to-specifier rule between both hosts (`core/import-resolution`) instead of keeping a second copy in `utils/import`.
+  - [ ] Attach the import as `additionalTextEdits` for an inline template. Blocked on the planner still returning a full-document replacement, which would overlap the completion's own edit; unblocked by the minimal-edit work below.
 - [ ] Implement definition responses with multiple `LocationLink` results.
 - [ ] Implement pull diagnostics, inter-file invalidation, and diagnostic refresh.
 - [ ] Implement `quickfix-only` candidate storage independent of visible diagnostics.

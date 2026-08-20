@@ -216,7 +216,11 @@
     {
       "includes": [
         "src/core/**/*.ts",
-        "src/test/node/**/*.ts"
+        "src/lsp/**/*.ts",
+        "src/adapters/lsp/**/*.ts",
+        "src/adapters/node/**/*.ts",
+        "src/test/node/**/*.ts",
+        "!src/lsp/client.ts"
       ],
       "linter": {
         "rules": {

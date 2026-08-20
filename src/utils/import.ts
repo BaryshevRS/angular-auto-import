@@ -11,10 +11,10 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { toVsCodeRange } from "../adapters/vscode/language-types";
 import { type ImportPlan, planImports } from "../core/import-planner";
+import { resolveElementImportPath } from "../core/import-resolution";
 import { logger } from "../logger";
 import * as TsConfigHelper from "../services/tsconfig";
 import type { AngularElementData, ProcessedTsConfig } from "../types";
-import { switchFileType } from "./path";
 
 /**
  * Gets the active VSCode document for a given file path.
@@ -119,17 +119,12 @@ export async function importElementsToFile(
  * @returns The resolved import path string.
  * @internal
  */
-async function resolveImportPathForElement(
+function resolveImportPathForElement(
   element: AngularElementData,
   componentFilePathAbs: string,
   projectRootPath: string
 ): Promise<string> {
-  if (element.isExternal) {
-    return element.path;
-  }
-  // For project elements, resolve the path using tsconfig aliases or relative paths.
-  const absoluteTargetModulePath = path.join(projectRootPath, element.path);
-  const absoluteTargetModulePathNoExt = switchFileType(absoluteTargetModulePath, "");
-
-  return TsConfigHelper.resolveImportPath(absoluteTargetModulePathNoExt, componentFilePathAbs, projectRootPath);
+  return resolveElementImportPath(element, componentFilePathAbs, projectRootPath, (targetModulePathNoExt, fromFile) =>
+    TsConfigHelper.resolveImportPath(targetModulePathNoExt, fromFile, projectRootPath)
+  );
 }

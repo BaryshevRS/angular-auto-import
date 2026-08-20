@@ -11,6 +11,7 @@ import type { InitializeParams, InitializeResult, ServerCapabilities } from "vsc
 import { TextDocumentSyncKind } from "vscode-languageserver/node";
 import { fileUriToPath } from "../core/document";
 import { type ExtensionConfig, resolveExtensionConfig } from "../core/settings";
+import { APPLY_IMPORT_COMMAND } from "./import-command";
 
 /** Completion trigger characters, kept identical to the direct provider's. */
 export const COMPLETION_TRIGGER_CHARACTERS = ["<", "|", " ", "[", "*"];
@@ -103,6 +104,9 @@ export function buildServerCapabilities(environment: ServerEnvironment): ServerC
     textDocumentSync: TextDocumentSyncKind.Incremental,
     completionProvider: {
       triggerCharacters: COMPLETION_TRIGGER_CHARACTERS,
+    },
+    executeCommandProvider: {
+      commands: [APPLY_IMPORT_COMMAND],
     },
   };
 
