@@ -154,3 +154,6 @@ memory-bank
 .pmd-cache
 CLAUDE.md
  
+
+# Packaged extension archives, produced by vsce:package
+*.vsix

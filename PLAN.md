@@ -2,7 +2,7 @@
 
 ## Status
 
-- Plan status: in progress — Phase 0 lifecycle/restart spike implemented; Phase 0 measurements outstanding; Phase 1 complete; Phase 2 complete; Phase 3 complete except for the inline-template `additionalTextEdits` optimization, which the full-document import edit blocks; Phase 4 complete — every contributed command runs against the server, with the webviews, notifications, and progress UI still in the client. Phase 5 (parity, rollout, and cleanup) is next, and the LSP path is still behind the `AAI_LSP_SPIKE` flag
+- Plan status: in progress — Phases 1 through 4 complete; Phase 3 lacks only the inline-template `additionalTextEdits` optimization, which the full-document import edit blocks. Phase 5's engineering is done: the server is held to the same recorded corpus as the direct implementation and agrees with it, the protocol is exercised over a real connection, and the packaged artifact is verified. What remains in Phase 5 is a release decision and its precondition: the **Phase 0 baseline measurements were never taken**, so the performance gates cannot be evaluated, and until they are the LSP path stays behind the `AAI_LSP_SPIKE` development flag
 - Scope: preserve the current Angular Auto Import behavior while moving language analysis out of the VS Code Extension Host
 - Delivery model: incremental extraction followed by a guarded LSP rollout; no big-bang rewrite
 - Estimated effort: 19–30 engineering days, or roughly 4–6 calendar weeks for one developer familiar with the codebase
@@ -324,17 +324,21 @@ Exit criteria:
 
 ### Phase 5 — Parity, rollout, and cleanup (4–6 days)
 
-- [ ] Run unit, extension-host, and E2E suites for both direct and LSP modes during the transition.
-- [ ] Preserve the Angular 19/21/22 E2E matrix and add protocol-specific regressions for dirty files, external HTML, nested roots, server restart, Windows URIs, and dependency changes.
-- [ ] Add direct handler tests that do not require a JSON-RPC connection.
-- [ ] Add a small client/server integration harness for initialization, document sync, diagnostics refresh, workspace edits, and custom requests.
-- [ ] Compare completion/diagnostic snapshots between implementations.
-- [ ] Package and inspect the VSIX to ensure both bundles and runtime dependencies are present.
-- [ ] Enable LSP for internal/beta builds while keeping a temporary fallback setting.
-- [ ] Make LSP the default after parity and performance gates pass.
+- [x] Run unit, extension-host, and E2E suites for both direct and LSP modes during the transition. Every change since Phase 3 has been landed against all three.
+- [x] Preserve the Angular 19/21/22 E2E matrix and add protocol-specific regressions for dirty files, external HTML, nested roots, server restart, Windows URIs, and dependency changes.
+  - [x] Dirty files and external HTML are covered by `lsp-protocol`; nested and sibling roots, URI round trips, and files created or deleted on disk by `lsp-regressions`; server restart by the existing Extension Host lifecycle suite, which is the only place a real process can be killed.
+  - [ ] Run the regression suites on Windows. The URI test asserts a round trip rather than a fixed string, so it is meaningful there, but it has only ever been executed on macOS.
+- [x] Add direct handler tests that do not require a JSON-RPC connection. Every handler has its own suite calling it directly (`lsp-completion`, `lsp-diagnostics`, `lsp-code-actions`, `lsp-definition`, `lsp-import-command`, `lsp-operations`, `lsp-report`, `lsp-cancellation`).
+- [x] Add a small client/server integration harness for initialization, document sync, diagnostics refresh, workspace edits, and custom requests (`src/test/node/harness/lsp-harness`). It runs the real `createServer` over an in-memory duplex pair, which required splitting the server into `createServer(connection)` and a thin `server-main` entry point.
+- [x] Compare completion/diagnostic snapshots between implementations.
+  - [x] Done as a corpus replay rather than a snapshot diff: since Phase 3 both hosts call the same core analysis, so comparing them directly would compare a function to itself. `lsp-parity` replays the recorded `src/e2e/cases` descriptors — the same corpus the direct implementation is held to — against the server, and all 17 v22 cases agree on diagnostics, ranges, and quick-fix titles.
+  - [x] Two real divergences surfaced and were fixed: a quick fix titled itself with the element's indexed path rather than the specifier the import would be written with, and the server reported duplicates the Extension Host had been dropping at publish time.
+- [x] Package and inspect the VSIX to ensure both bundles and runtime dependencies are present (`pnpm run vsce:inspect`, `scripts/inspect-vsix.mjs`). It checks the artifact rather than the source tree, because that is where bundling fails silently.
+- [ ] Enable LSP for internal/beta builds while keeping a temporary fallback setting. Currently the only switch is the `AAI_LSP_SPIKE` environment variable, which is a development flag, not something a beta user can set.
+- [ ] Make LSP the default after parity and performance gates pass. **Blocked on the Phase 0 measurements**, which were never taken; without a baseline the performance gates below cannot be evaluated.
 - [ ] Remove direct provider registration and the fallback after at least one stable release without a migration blocker.
 - [ ] Remove obsolete workspace-state cache keys only after fallback removal.
-- [ ] Update architecture, troubleshooting, logging, and development documentation.
+- [x] Update architecture, troubleshooting, logging, and development documentation (`docs/architecture.md`, `CLAUDE.md`).
 
 Exit criteria:
 
