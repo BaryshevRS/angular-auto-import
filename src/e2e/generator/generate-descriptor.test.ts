@@ -48,6 +48,14 @@ const CASES: CaseConfig[] = [
     templatePath: "apps/angular-demo/src/app/ngx-translate/ngx-translate-missing.component.ts",
   },
   {
+    // Regression for https://github.com/BaryshevRS/angular-auto-import/issues/34 and the
+    // two cases found while fixing it: a bar means a pipe only outside string literals,
+    // regular expressions, the text of a template literal, and the `||` operator.
+    name: "pipe-lookalikes",
+    componentPath: "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.ts",
+    templatePath: "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.html",
+  },
+  {
     name: "control-flow",
     componentPath: "apps/angular-demo/src/app/control-flow/control-flow.component.ts",
     templatePath: "apps/angular-demo/src/app/control-flow/control-flow.component.html",
@@ -149,11 +157,16 @@ async function buildDescriptor(caseConfig: CaseConfig, templateUri: vscode.Uri, 
   const quickfixDescriptors: QuickfixDescriptor[] = [];
   for (const [code, actions] of quickfixMap) {
     for (const action of actions) {
-      // Extract className and path from command arguments
+      // An action carries its edit directly now, so there are no command arguments to
+      // read the class name from — recorded descriptors from before that change still
+      // have one. The title states it either way: "⟐ Import X from 'path'".
       const element = action.command?.arguments?.[0] as
         | { name?: string; isExternal?: boolean; path?: string }
         | undefined;
-      const className = element?.name ?? "";
+      const className = element?.name ?? action.title.match(/Import\s+(\S+)\s+from\s+'/)?.[1] ?? "";
+      if (!className) {
+        throw new Error(`Could not determine the imported class name from the action title: ${action.title}`);
+      }
 
       // For external elements, use the element path directly as moduleSpecifier
       // For local elements, extract from action title: "⟐ Import X from 'path'"

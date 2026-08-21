@@ -219,6 +219,72 @@ describe("Template scan", () => {
     assert.strictEqual(template.slice(0, pipes[0].range.start.character).endsWith("(v | "), true);
   });
 
+  it("finds a pipe inside a template literal's interpolation", () => {
+    // A backtick literal is text, except in its `${…}` holes, which are expressions.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the template under test holds a JS template literal.
+    const template = "{{ `x ${value | access}` }}";
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 1, "the hole is an expression and holds a real pipe");
+    assert.strictEqual(textOf(template, pipes[0]), "access");
+  });
+
+  it("reads a bar in a template literal's text as text", () => {
+    const template = "{{ `a|access` }}";
+
+    const elements = scan(template);
+
+    assert.deepStrictEqual(
+      elements.filter((element) => element.type === "pipe"),
+      []
+    );
+  });
+
+  it("descends into a template literal nested inside another one", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the holes belong to the template being scanned.
+    const template = "{{ `outer ${ `inner ${v | access}` }` }}";
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 1);
+    assert.strictEqual(textOf(template, pipes[0]), "access");
+  });
+
+  it("reads a bar inside a regular expression literal as part of the pattern", () => {
+    const template = "{{ /x|access/.test(v) + (v | access) }}";
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 1, "alternation inside a regular expression is not a pipe");
+    assert.strictEqual(
+      template.slice(0, pipes[0].range.start.character).endsWith("(v | "),
+      true,
+      "and the range is on the real pipe, not inside the pattern"
+    );
+  });
+
+  it("does not end a regular expression at a slash inside a character class", () => {
+    const template = "{{ /[/x]|access/.test(v) + (v | access) }}";
+
+    const elements = scan(template);
+
+    assert.strictEqual(elements.filter((element) => element.type === "pipe").length, 1);
+  });
+
+  it("treats a slash after a value as division rather than a pattern", () => {
+    const template = "{{ a / b | access }}";
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 1, "the division must not swallow the rest as a pattern");
+    assert.strictEqual(textOf(template, pipes[0]), "access");
+  });
+
   it("places a pipe correctly when the expression is indented", () => {
     // The parser measures a pipe against the slice it was handed, which for an indented
     // interpolation does not start where the node does.

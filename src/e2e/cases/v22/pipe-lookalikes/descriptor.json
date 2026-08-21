@@ -1,0 +1,44 @@
+{
+  "case": "pipe-lookalikes",
+  "componentPath": "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.ts",
+  "templatePath": "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.html",
+  "diagnostics": [
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 3,
+      "startCharacter": 13,
+      "endLine": 3,
+      "endCharacter": 18
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 4,
+      "startCharacter": 22,
+      "endLine": 4,
+      "endCharacter": 27
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 19,
+      "startCharacter": 32,
+      "endLine": 19,
+      "endCharacter": 37
+    }
+  ],
+  "quickfixes": [
+    {
+      "diagnosticCode": "missing-pipe-import:bytes",
+      "title": "⟐ Import UiDemoBytesPipe from '@angular-demo/ui-demo-one'",
+      "expectedImport": {
+        "className": "UiDemoBytesPipe",
+        "moduleSpecifier": "@angular-demo/ui-demo-one"
+      }
+    }
+  ]
+}
