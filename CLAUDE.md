@@ -5,7 +5,6 @@
 - `docs/architecture.md` describes the layers, the client/server boundary, and where
   caches, logs, and settings live at runtime. Read it before changing anything under
   `src/core` or `src/lsp`.
-- `PLAN.md` tracks the migration to a language server, phase by phase.
 - `src/core`, `src/lsp` (except its `client*.ts` modules), and the `node`/`lsp` adapters
   must not import `vscode`. A lint rule in `biome.json` enforces it, and
   `pnpm run vsce:inspect` checks the packaged artifact.

@@ -1,7 +1,7 @@
 # TOFIX
 
 Pre-existing behavior quirks found while extracting editor-agnostic core modules
-during the LSP migration (see PLAN.md). All of them were **preserved as-is**, because
+during the LSP migration. All of them were **preserved as-is**, because
 each fix changes user-visible behavior and does not belong in a port. Tests pin the
 current behavior, so fixing an item means updating its test too.
 

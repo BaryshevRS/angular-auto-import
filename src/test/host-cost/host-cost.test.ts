@@ -3,8 +3,8 @@
  *
  * No benchmark outside the editor can take this measurement, so it is taken inside one.
  * It is what justified moving the analysis into a language server: the recorded
- * comparison against the previous in-process implementation is in `PLAN.md`, and this
- * suite is what keeps the number honest as the server changes.
+ * comparison against the previous in-process implementation is in `docs/architecture.md`,
+ * and this suite is what keeps the number honest as the server changes.
  *
  * The assertions only check that the scenario really happened, because a benchmark that
  * silently measured nothing is worse than no benchmark. Set `AAI_HOST_COST_OUTPUT` to

@@ -1,16 +1,17 @@
 # Architecture
 
-Angular Auto Import is being moved out of the VS Code Extension Host and into a language
-server. Both implementations are present today: the direct providers are what ships, and
-the server runs behind a flag. `PLAN.md` tracks the migration; this document describes
-what exists now and where each concern lives.
+Angular Auto Import runs its language analysis in a language server rather than in the
+VS Code Extension Host. The migration is finished: the direct providers, their commands,
+and the flag that used to choose between the two are gone, and `src/extension.ts` does
+nothing but start and stop the client. This document describes what exists now and where
+each concern lives; what the move cost and saved is at the [end](#what-the-move-bought).
 
 ## The three layers
 
 ```text
-src/extension.ts, src/providers, src/commands      VS Code Extension Host
-src/lsp                                            language server (and its client half)
-src/core                                           editor-agnostic analysis
+src/extension.ts, src/commands      VS Code Extension Host (client half)
+src/lsp                             language server (and its client half)
+src/core                            editor-agnostic analysis
 ```
 
 **`src/core` may not import `vscode`.** Neither may `src/lsp` (apart from its two
@@ -22,10 +23,10 @@ Anything the analysis needs from its host arrives as a port it is given, never a
 module it reaches for: `FileSystem`, `CacheStore`, `FileWatcherFactory`, `ProgressHost`,
 `CoreLogger`, `CancellationSignal`. Each has an adapter under `src/adapters/<host>`.
 
-## What the two hosts share
+## What lives in the analysis core
 
-Since the analysis moved into `src/core`, both hosts run the same code for every
-decision a user can see:
+`src/core` holds every decision a user can see, so that the server and the client's own
+code paths cannot disagree about them:
 
 | Question | Module |
 | --- | --- |
@@ -37,9 +38,9 @@ decision a user can see:
 | Which specifier is the import written with? | `core/import-resolution` |
 | Which project owns this file? | `core/project-registry`, `core/project-discovery` |
 
-The hosts differ only in how a request reaches that code and how the answer is rendered.
-That is the point of the split, and it is what makes the parity suite meaningful: it
-compares wiring, not arithmetic.
+What differs between hosts is only how a request reaches that code and how the answer is
+rendered. That is the point of the split, and it is what makes the parity suite
+meaningful: it compares wiring, not arithmetic.
 
 ## The client/server boundary
 
@@ -134,3 +135,30 @@ the artifact, not on the source tree.
   makes it standalone is trusted before the file on disk is.
 - **Nothing works and the output channel is silent.** The server may have failed to
   start. `Show Logs` opens the channel; reloading the window restarts it.
+
+## What the move bought
+
+Measured with `pnpm run host-cost`, which runs one scenario against `src/e2e/projects/v22`
+— 94 project source files resolving to 1256 indexed elements, most of them from
+dependencies — and reports what the editor's own process burned. One machine, macOS,
+Node 25. Both columns ended with the same 47 diagnostics, so they describe the same work.
+
+| Scenario | Direct providers | Language server | |
+| --- | --- | --- | --- |
+| Cold activate and index | 9211 ms CPU | 399 ms CPU | **−96%** |
+| Explicit reindex | 5178 ms CPU | 47 ms CPU | **−99%** |
+
+Wall-clock barely moves — cold index +1%, reindex −10% — which is the point. The work
+still takes as long; it stops taking the editor's process to do it. Completion is
+unchanged apart from the protocol round trip, roughly 0.2 ms, a large relative number on
+a sub-millisecond request and an irrelevant absolute one.
+
+Server memory looks alarming and is not. RSS over repeated full reindexes climbs and
+stays high, because V8 does not return freed pages to the operating system and a reindex
+allocates a great deal of short-lived garbage. Measured in-process where a collection can
+be forced, what settles is flat across reindexes.
+
+The left-hand column cannot be re-measured: the implementation it describes no longer
+exists. It is recorded here because it is the whole justification for the split, and
+because the numbers are one sample each — see `FIXNEXT.md`. The right-hand column is
+still checked by `src/test/host-cost`, which keeps it honest as the server changes.
