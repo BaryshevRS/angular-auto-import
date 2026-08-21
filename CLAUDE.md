@@ -2,7 +2,7 @@
 
 ### Architecture
 
-- `docs/architecture.md` describes the layers, the client/server boundary, and where
+- `ARCHITECTURE.md` describes the layers, the client/server boundary, and where
   caches, logs, and settings live at runtime. Read it before changing anything under
   `src/core` or `src/lsp`.
 - `src/core`, `src/lsp` (except its `client*.ts` modules), and the `node`/`lsp` adapters

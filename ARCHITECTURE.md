@@ -87,16 +87,21 @@ document.
 
 ## Where things live at runtime
 
-| Thing | Extension Host | Language server |
+| Thing | Where it lives | How the server reaches it |
 | --- | --- | --- |
-| Index cache | `workspaceState` | one JSON file per project root under the client's `storageUri` |
-| Logs | output channel, optional log files | forwarded to the client's channel, filtered by the same `logging` settings |
-| Settings | `workspace.getConfiguration` | sent at `initialize`, then pulled on change |
-| File watching | `workspace.createFileSystemWatcher` | registered via `client/registerCapability`, delivered as `didChangeWatchedFiles` |
+| Index cache | one JSON file per project root under the client's `storageUri` | written directly; the client only supplies the directory |
+| Logs | the client's output channel | `window/logMessage`, filtered by the same `logging` settings |
+| Settings | the client's `workspace.getConfiguration` | sent at `initialize`, then pulled on change |
+| File watching | the editor's watchers | registered via `client/registerCapability`, delivered as `didChangeWatchedFiles` |
 
-The server cache is schema-versioned and keyed by project root and project fingerprint.
-Anything that does not match starts empty and reindexes; the old workspace-state cache is
-left alone until the direct implementation is removed.
+The server cache is keyed by project root and only reused when both its schema version
+and its fingerprint — the installed Angular version among them — still match. Anything
+that does not match starts empty and reindexes.
+
+The previous implementation cached the index in VS Code's `workspaceState` instead.
+Nothing reads those entries now, so `src/legacy-cache.ts` deletes them once, in the
+background, on activation. It is temporary by construction and should go after one
+stable release.
 
 ## Testing
 
@@ -106,8 +111,14 @@ left alone until the direct implementation is removed.
 | `src/test/node/lsp-protocol` | in-memory client + server | that the wire actually works |
 | `src/test/node/lsp-parity` | in-memory client + server | the recorded E2E corpus, replayed against the server |
 | `src/test/node/lsp-regressions` | in-memory client + server | nested roots, URI round trips, changes on disk |
-| `src/test/suite` | VS Code host | the direct providers and activation |
+| `src/test/suite` | VS Code host | activation, the contributed commands, and host-side utilities |
+| `src/test/lsp` | VS Code host | the server's lifecycle, including killing it and recovering |
+| `src/test/host-cost` | VS Code host | what a full index costs the editor's own process |
 | `src/e2e` | VS Code host | the Angular 19/21/22 fixture matrix |
+
+`.github/workflows/ci.yml` runs the first four on Linux and Windows. The rest need an
+editor and a display and run locally — `pnpm run test:unit`, then
+`pnpm run test:e2e:v22:parallel`.
 
 `src/test/node/harness/lsp-harness.ts` runs the real `createServer` over a duplex pair,
 so both sides speak JSON-RPC exactly as they would across a process boundary. Note that

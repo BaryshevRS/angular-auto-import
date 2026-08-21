@@ -122,35 +122,11 @@ which applies edits and saves; that may be the same load problem or its own.
 
 ---
 
-## 5. `pnpm run docs:build` deletes hand-written documentation
-
-**Severity: real, and it fired during this work.**
-
-```json
-"docs:build": "rm -rf docs && typedoc"
-```
-
-`docs/` holds both typedoc's output and documentation nobody generated:
-`docs/architecture.md`, which `CLAUDE.md` tells every contributor to read before touching
-`src/core` or `src/lsp`, and `docs/factory/**`, the recorded goals and evidence of past
-work. `rm -rf docs` takes all of it, and typedoc puts back only the half it produced.
-
-This is not hypothetical. All 47 tracked files under `docs/` disappeared from the working
-tree mid-session and were restored with `git checkout -- docs/`. Nothing was lost because
-everything was committed, which is the only reason this is an annoyance rather than a
-loss.
-
-**Suggested fix:** generate into `docs/api/` and delete only that, or drop the `rm -rf`
-and let typedoc overwrite what it owns. Either way the hand-written files stop sharing a
-directory with a directory that gets removed.
-
----
-
-## 6. The Extension Host cost measurement is a single sample
+## 5. The Extension Host cost measurement is a single sample
 
 **Severity: none functionally. It weakens a claim the project makes.**
 
-`docs/architecture.md` reports −96% Extension Host CPU on a cold index, from one run of
+`ARCHITECTURE.md` reports −96% Extension Host CPU on a cold index, from one run of
 `pnpm run host-cost` per implementation, on one machine. The order of magnitude is not in
 doubt — 9211 ms against 399 ms is not measurement noise — but the precise percentages are
 not defensible as written.
@@ -162,7 +138,7 @@ there will ever be.
 
 ---
 
-## 7. The Extension Host and E2E suites still run only on one machine
+## 6. The Extension Host and E2E suites still run only on one machine
 
 **Severity: low, and much narrower than it was.**
 

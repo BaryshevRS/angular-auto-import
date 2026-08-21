@@ -20,6 +20,10 @@ TESTING.md
 pnpm-lock.yaml
 img/demo.gif
 docs
+notes
+ARCHITECTURE.md
+FIXNEXT.md
+TOFIX.md
 biome.json
 knip.json
 typedoc.json
