@@ -58,7 +58,7 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
 describe("ProjectRegistry lazy lifecycle", function () {
   this.timeout(10000);
 
-  const workspaceRoot = path.join(path.sep, "workspace");
+  const workspaceRoot = path.resolve(path.sep, "workspace");
   const nestedRoot = path.join(workspaceRoot, "apps", "storefront");
   const nestedDocumentPath = path.join(nestedRoot, "src", "app.component.ts");
 
@@ -161,7 +161,7 @@ describe("ProjectRegistry lazy lifecycle", function () {
       document(nestedDocumentPath, "typescript", "untitled"),
       document(path.join(nestedRoot, "src", "styles.css"), "css"),
       document(path.join(workspaceRoot, "node_modules", "library", "index.ts")),
-      document(path.join(path.sep, "other-workspace", "app", "src", "main.ts")),
+      document(path.resolve(path.sep, "other-workspace", "app", "src", "main.ts")),
     ];
     let discoveryCount = 0;
     let initializationCount = 0;

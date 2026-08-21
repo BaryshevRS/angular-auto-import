@@ -62,7 +62,7 @@ describe("AngularElementIndex selectors", () => {
 
   it("removes only the element contributed by a given file and name", () => {
     const index = new AngularElementIndex();
-    const cardPath = path.join(path.sep, "project", "src", "card.component.ts");
+    const cardPath = path.resolve(path.sep, "project", "src", "card.component.ts");
     index.selectors.insert("app-card", element("CardComponent", "app-card", cardPath));
     index.selectors.insert("app-card", element("LegacyCardComponent", "app-card", cardPath));
 

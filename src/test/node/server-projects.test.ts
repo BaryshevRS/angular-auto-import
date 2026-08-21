@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { AngularProjectDiscovery, type ManifestReader } from "../../core/project-discovery";
 import { type ServerDocument, type ServerDocumentSource, ServerProjects } from "../../lsp/server-projects";
 
-const workspaceRoot = path.join(path.sep, "workspace");
+const workspaceRoot = path.resolve(path.sep, "workspace");
 const appRoot = path.join(workspaceRoot, "apps", "shop");
 const featureRoot = path.join(appRoot, "packages", "checkout");
 
@@ -158,7 +158,7 @@ describe("LSP server projects", () => {
   });
 
   it("picks up a project in a workspace folder added after initialize", async () => {
-    const addedRoot = path.join(path.sep, "elsewhere", "admin");
+    const addedRoot = path.resolve(path.sep, "elsewhere", "admin");
     const documents = createDocuments([document(path.join(addedRoot, "src", "admin.component.ts"))]);
     const projects = createProjects({ angularRoots: [addedRoot] });
     await projects.start(documents.source);
@@ -182,7 +182,7 @@ describe("LSP server projects", () => {
     });
     await projects.start(documents.source);
 
-    await projects.setWorkspaceRoots([path.join(path.sep, "other-workspace")]);
+    await projects.setWorkspaceRoots([path.resolve(path.sep, "other-workspace")]);
     assert.deepStrictEqual(disposed, [appRoot]);
     assert.deepStrictEqual(projects.knownRoots(), []);
 
@@ -199,7 +199,7 @@ describe("LSP server projects", () => {
     });
     await projects.start(createDocuments([document(path.join(appRoot, "src", "app.component.ts"))]).source);
 
-    await projects.setWorkspaceRoots([workspaceRoot, path.join(path.sep, "extra")]);
+    await projects.setWorkspaceRoots([workspaceRoot, path.resolve(path.sep, "extra")]);
 
     assert.deepStrictEqual(disposed, []);
     assert.deepStrictEqual(projects.knownRoots(), [appRoot]);

@@ -7,7 +7,7 @@ import { CACHE_SCHEMA_VERSION, FileCacheStore } from "../../lsp/file-cache-store
 describe("LSP file cache store", function () {
   this.timeout(10000);
 
-  const rootPath = path.join(path.sep, "workspace", "apps", "shop");
+  const rootPath = path.resolve(path.sep, "workspace", "apps", "shop");
   let storage: string;
 
   beforeEach(async () => {
@@ -94,7 +94,7 @@ describe("LSP file cache store", function () {
   });
 
   it("keeps two project roots in separate files", async () => {
-    const otherRoot = path.join(path.sep, "workspace", "apps", "admin");
+    const otherRoot = path.resolve(path.sep, "workspace", "apps", "admin");
     const shop = openStore();
     const admin = openStore({ rootPath: otherRoot });
     await shop.open();

@@ -286,38 +286,38 @@ describe("Angular dependency root discovery", function () {
 
 describe("boundary-safe project-root containment", () => {
   it("contains the exact root path", () => {
-    const root = path.join(path.sep, "workspace", "app");
+    const root = path.resolve(path.sep, "workspace", "app");
     assert.strictEqual(isPathInside(root, root), true);
   });
 
   it("contains descendants and tolerates trailing separators", () => {
-    const root = path.join(path.sep, "workspace", "app");
+    const root = path.resolve(path.sep, "workspace", "app");
     const filePath = path.join(root, "src", "app.component.ts");
     assert.strictEqual(isPathInside(`${root}${path.sep}`, filePath), true);
   });
 
   it("normalizes dot segments before comparing paths", () => {
-    const root = path.join(path.sep, "workspace", "app");
+    const root = path.resolve(path.sep, "workspace", "app");
     const filePath = path.join(root, "src", "..", "src", "app.component.ts");
     assert.strictEqual(isPathInside(root, filePath), true);
   });
 
   it("does not confuse a sibling with a shared string prefix for a child", () => {
-    const root = path.join(path.sep, "workspace", "app");
-    const siblingFile = path.join(path.sep, "workspace", "app-old", "src", "app.component.ts");
+    const root = path.resolve(path.sep, "workspace", "app");
+    const siblingFile = path.resolve(path.sep, "workspace", "app-old", "src", "app.component.ts");
     assert.strictEqual(isPathInside(root, siblingFile), false);
   });
 
   it("rejects parent and unrelated paths", () => {
-    const root = path.join(path.sep, "workspace", "app");
+    const root = path.resolve(path.sep, "workspace", "app");
     assert.strictEqual(isPathInside(root, path.dirname(root)), false);
-    assert.strictEqual(isPathInside(root, path.join(path.sep, "other", "file.ts")), false);
+    assert.strictEqual(isPathInside(root, path.resolve(path.sep, "other", "file.ts")), false);
   });
 });
 
 describe("document context project-root selection", () => {
   it("selects the nested dependency root even when the workspace root is already known", () => {
-    const workspaceRoot = path.join(path.sep, "workspace");
+    const workspaceRoot = path.resolve(path.sep, "workspace");
     const nestedRoot = path.join(workspaceRoot, "apps", "storefront");
     const documentPath = path.join(nestedRoot, "src", "app.component.ts");
 
@@ -329,7 +329,7 @@ describe("document context project-root selection", () => {
   });
 
   it("is independent of known-root insertion order", () => {
-    const workspaceRoot = path.join(path.sep, "workspace");
+    const workspaceRoot = path.resolve(path.sep, "workspace");
     const appRoot = path.join(workspaceRoot, "apps", "storefront");
     const featureRoot = path.join(appRoot, "packages", "checkout");
     const documentPath = path.join(featureRoot, "src", "checkout.component.html");
@@ -345,7 +345,7 @@ describe("document context project-root selection", () => {
   });
 
   it("selects the matching sibling root so dependency indexes never mix", () => {
-    const workspaceRoot = path.join(path.sep, "workspace");
+    const workspaceRoot = path.resolve(path.sep, "workspace");
     const angular19Root = path.join(workspaceRoot, "apps", "angular-19");
     const angular22Root = path.join(workspaceRoot, "apps", "angular-22");
     const roots = new Set([workspaceRoot, angular19Root, angular22Root]);
@@ -361,7 +361,7 @@ describe("document context project-root selection", () => {
   });
 
   it("does not select app for a document in app-old", () => {
-    const workspaceRoot = path.join(path.sep, "workspace");
+    const workspaceRoot = path.resolve(path.sep, "workspace");
     const appRoot = path.join(workspaceRoot, "app");
     const appOldRoot = path.join(workspaceRoot, "app-old");
     const documentPath = path.join(appOldRoot, "src", "main.ts");
@@ -370,12 +370,12 @@ describe("document context project-root selection", () => {
   });
 
   it("selects a root when the document path is exactly that root", () => {
-    const root = path.join(path.sep, "workspace", "app");
+    const root = path.resolve(path.sep, "workspace", "app");
     assert.strictEqual(findDeepestContainingProjectRoot(root, [root]), root);
   });
 
   it("normalizes known roots before choosing the deepest context", () => {
-    const workspaceRoot = path.join(path.sep, "workspace");
+    const workspaceRoot = path.resolve(path.sep, "workspace");
     const appRoot = path.join(workspaceRoot, "apps", "storefront");
     const documentPath = path.join(appRoot, "src", "pages", "..", "app.component.ts");
     const unnormalizedAppRoot = `${workspaceRoot}${path.sep}apps${path.sep}..${path.sep}apps${path.sep}storefront${path.sep}`;
@@ -387,10 +387,10 @@ describe("document context project-root selection", () => {
   });
 
   it("returns undefined for empty roots or a document outside all known roots", () => {
-    const documentPath = path.join(path.sep, "workspace", "app", "src", "main.ts");
+    const documentPath = path.resolve(path.sep, "workspace", "app", "src", "main.ts");
     assert.strictEqual(findDeepestContainingProjectRoot(documentPath, []), undefined);
     assert.strictEqual(
-      findDeepestContainingProjectRoot(documentPath, [path.join(path.sep, "other-workspace")]),
+      findDeepestContainingProjectRoot(documentPath, [path.resolve(path.sep, "other-workspace")]),
       undefined
     );
   });

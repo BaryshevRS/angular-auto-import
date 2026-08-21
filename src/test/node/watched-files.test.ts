@@ -5,7 +5,7 @@ import { FileChangeType } from "vscode-languageserver/node";
 import type { FileChange } from "../../core/file-watching";
 import { WatchedFiles } from "../../lsp/watched-files";
 
-const projectRoot = path.join(path.sep, "workspace", "apps", "shop");
+const projectRoot = path.resolve(path.sep, "workspace", "apps", "shop");
 const sourceWatch = { root: projectRoot, recursive: true, extensions: [".ts"] };
 const manifestWatch = {
   root: projectRoot,
@@ -74,8 +74,8 @@ describe("LSP watched files", () => {
     watched.watch(sourceWatch, ({ filePath }) => reported.push(filePath));
 
     watched.dispatch([
-      change(path.join(path.sep, "workspace", "apps", "admin", "src", "app.component.ts")),
-      change(path.join(path.sep, "workspace", "apps", "shop-old", "src", "app.component.ts")),
+      change(path.resolve(path.sep, "workspace", "apps", "admin", "src", "app.component.ts")),
+      change(path.resolve(path.sep, "workspace", "apps", "shop-old", "src", "app.component.ts")),
       { uri: "untitled:Untitled-1", type: FileChangeType.Changed },
     ]);
 
