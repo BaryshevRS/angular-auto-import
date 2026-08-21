@@ -162,16 +162,26 @@ there will ever be.
 
 ---
 
-## 7. The suites have never run on Windows
+## 7. The Extension Host and E2E suites still run only on one machine
 
-**Severity: unknown, which is the point.**
+**Severity: low, and narrower than it was.**
 
-Everything known to break on Windows has been fixed rather than deferred — boundary-unsafe
-path comparison, and a cache key that mixed ts-morph's forward slashes with the platform's
-separator. Both have tests that fail without their fix on any platform.
+`.github/workflows/ci.yml` now runs the Node suites, formatting, and the type check on
+`ubuntu-latest` and `windows-latest` for every push to `main` and every pull request.
+That closes what mattered: everything known to break on Windows — boundary-unsafe path
+comparison, a cache key mixing ts-morph's forward slashes with the platform separator —
+is covered by Node suites that need no editor, and the URI regression asserts a round
+trip rather than a fixed string, so it is meaningful there.
 
-What has not happened is a run on Windows. The URI regression asserts a round trip rather
-than a fixed string, so it is meaningful there; it has simply never executed there.
+Setting it up turned up one real portability defect on the way: `copy-test-fixtures` and
+`copy-e2e-cases` shelled out to `cp -r`, which is not a command Windows has. They use
+`fs.cpSync` now.
 
-**Suggested fix:** a CI job on `windows-latest` running `pnpm run test:node`. The Node
-suites need no editor and are the ones that would catch a path defect.
+What still runs nowhere but one laptop: the Extension Host suite and the E2E matrix. Both
+download VS Code and need a display, and the E2E fixtures install their own dependencies,
+which this repository does not track — so a CI job for them means committing to
+provisioning three Angular workspaces, or building them in the job.
+
+**Suggested fix:** add an `xvfb-run` job for `pnpm run test:unit` first, which needs only
+the editor. Leave E2E manual until its fixtures have a story that does not involve a
+fresh `pnpm install` of three Angular projects per run.
