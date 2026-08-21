@@ -1,0 +1,13 @@
+# Line endings are LF in the repository and in the working tree, on every platform.
+#
+# Biome formats to LF (see `formatter.lineEnding` in biome.json), so a CRLF checkout
+# makes `pnpm run check` fail on every file at once — which is exactly what the first
+# Windows CI run did. Declaring it here fixes it for contributors too, not just for CI.
+#
+# Nothing is re-normalized by this: every text file in the index is already LF.
+* text=auto eol=lf
+
+# Binary, so git neither converts nor tries to diff them as text.
+*.png binary
+*.gif binary
+*.ico binary
