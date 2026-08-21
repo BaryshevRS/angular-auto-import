@@ -1,4 +1,6 @@
 import * as assert from "node:assert";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { InitializeParams } from "vscode-languageserver/node";
 import { DEFAULT_EXTENSION_CONFIG } from "../../core/settings";
 import { FIX_ALL_KIND } from "../../lsp/code-actions";
@@ -32,18 +34,34 @@ const fullClient: Partial<InitializeParams> = {
   },
 };
 
+/**
+ * A path that is absolute on this platform, drive letter and all.
+ *
+ * `/workspace/app` is not an absolute path on Windows, and a `file:///workspace/app`
+ * URI is not a file URL there at all — the server drops what it cannot convert, so a
+ * POSIX fixture makes every root vanish rather than disagree.
+ */
+function root(...segments: string[]): string {
+  return path.resolve(path.sep, "workspace", ...segments);
+}
+
+/** The same path as the URI a client would send for it. */
+function rootUri(...segments: string[]): string {
+  return pathToFileURL(root(...segments)).toString();
+}
+
 describe("LSP server environment", () => {
   it("reads workspace roots as filesystem paths", () => {
     const environment = resolveServerEnvironment(
       initializeParams({
         workspaceFolders: [
-          { uri: "file:///workspace/app", name: "app" },
-          { uri: "file:///workspace/lib", name: "lib" },
+          { uri: rootUri("app"), name: "app" },
+          { uri: rootUri("lib"), name: "lib" },
         ],
       })
     );
 
-    assert.deepStrictEqual(environment.workspaceRoots, ["/workspace/app", "/workspace/lib"]);
+    assert.deepStrictEqual(environment.workspaceRoots, [root("app"), root("lib")]);
   });
 
   it("skips workspace folders that are not on disk", () => {
@@ -51,35 +69,33 @@ describe("LSP server environment", () => {
       initializeParams({
         workspaceFolders: [
           { uri: "untitled:Untitled-1", name: "scratch" },
-          { uri: "file:///workspace/app", name: "app" },
+          { uri: rootUri("app"), name: "app" },
         ],
       })
     );
 
-    assert.deepStrictEqual(environment.workspaceRoots, ["/workspace/app"]);
+    assert.deepStrictEqual(environment.workspaceRoots, [root("app")]);
   });
 
   it("falls back to the deprecated single-root fields", () => {
-    assert.deepStrictEqual(
-      resolveServerEnvironment(initializeParams({ rootUri: "file:///workspace/only" })).workspaceRoots,
-      ["/workspace/only"]
-    );
-    assert.deepStrictEqual(
-      resolveServerEnvironment(initializeParams({ rootPath: "/workspace/legacy" })).workspaceRoots,
-      ["/workspace/legacy"]
-    );
+    assert.deepStrictEqual(resolveServerEnvironment(initializeParams({ rootUri: rootUri("only") })).workspaceRoots, [
+      root("only"),
+    ]);
+    assert.deepStrictEqual(resolveServerEnvironment(initializeParams({ rootPath: root("legacy") })).workspaceRoots, [
+      root("legacy"),
+    ]);
     assert.deepStrictEqual(resolveServerEnvironment(initializeParams()).workspaceRoots, []);
   });
 
   it("prefers workspace folders over the deprecated fields", () => {
     const environment = resolveServerEnvironment(
       initializeParams({
-        rootUri: "file:///workspace/legacy",
-        workspaceFolders: [{ uri: "file:///workspace/app", name: "app" }],
+        rootUri: rootUri("legacy"),
+        workspaceFolders: [{ uri: rootUri("app"), name: "app" }],
       })
     );
 
-    assert.deepStrictEqual(environment.workspaceRoots, ["/workspace/app"]);
+    assert.deepStrictEqual(environment.workspaceRoots, [root("app")]);
   });
 
   it("resolves settings sent at initialize, falling back to defaults", () => {
@@ -174,27 +190,27 @@ describe("LSP server environment", () => {
   });
 
   it("adds and removes workspace roots without disturbing the rest", () => {
-    const roots = ["/workspace/app", "/workspace/lib"];
+    const roots = [root("app"), root("lib")];
 
     const afterAdd = applyWorkspaceFolderChange(roots, {
-      added: [{ uri: "file:///workspace/extra" }],
+      added: [{ uri: rootUri("extra") }],
       removed: [],
     });
-    assert.deepStrictEqual(afterAdd, ["/workspace/app", "/workspace/lib", "/workspace/extra"]);
+    assert.deepStrictEqual(afterAdd, [root("app"), root("lib"), root("extra")]);
 
     const afterRemove = applyWorkspaceFolderChange(afterAdd, {
       added: [],
-      removed: [{ uri: "file:///workspace/lib" }],
+      removed: [{ uri: rootUri("lib") }],
     });
-    assert.deepStrictEqual(afterRemove, ["/workspace/app", "/workspace/extra"]);
+    assert.deepStrictEqual(afterRemove, [root("app"), root("extra")]);
   });
 
   it("ignores a root that is already tracked", () => {
-    const roots = applyWorkspaceFolderChange(["/workspace/app"], {
-      added: [{ uri: "file:///workspace/app" }],
+    const roots = applyWorkspaceFolderChange([root("app")], {
+      added: [{ uri: rootUri("app") }],
       removed: [],
     });
 
-    assert.deepStrictEqual(roots, ["/workspace/app"]);
+    assert.deepStrictEqual(roots, [root("app")]);
   });
 });
