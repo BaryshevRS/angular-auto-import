@@ -514,17 +514,16 @@ function processBoundTextNode(node: TmplAstBoundText, context: ScanContext): voi
 /**
  * Records the pipes used in one expression, at the position they occupy in the template.
  *
- * Two sources, because each answers half the question. The parser knows *what* is a
- * pipe: `a || b` is a binary operator and contributes none, and a `|` inside a string
- * literal is part of the string — neither is visible to a pattern over the source text.
- * The source text knows *where*, because a pipe's `nameSpan` is measured against the
- * slice the parser was handed, which is not the template and does not always begin
- * where the node does.
+ * Each half of the answer comes from what can supply it. The parser knows *what* is a
+ * pipe, so `a || b` contributes none. The template text knows *where*, because the
+ * parser's own spans are measured against the source it was handed after whitespace
+ * normalization, which is not the template and cannot be found in it.
  *
- * So the scan over the text still decides the ranges, exactly as it always has, and the
- * parser decides which of its matches survive. The `||` guard in the pattern is not
- * redundant with that: one expression can hold both a real `| name` and a `|| name` for
- * the same name, and the guard is what keeps the range on the real one.
+ * The scan over the text is therefore what produces ranges, and it skips two things a
+ * bare pattern would not: the second bar of `||`, and anything inside a string literal.
+ * The parser's answer then filters what is left. All three are needed — one expression
+ * can hold `'x|name'` and `(v | name)` at once, where the names are equal and only the
+ * quoting tells them apart.
  * @internal
  */
 function pushPipes(
@@ -539,30 +538,82 @@ function pushPipes(
     return;
   }
 
-  const pipeRegex = /(?<!\|)\|(?!\|)\s*([a-zA-Z][a-zA-Z0-9_-]*)/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = pipeRegex.exec(expressionText))) {
-    const pipeName = match[1];
-    if (!parsedPipeNames.has(pipeName)) {
+  for (const candidate of findPipeCandidates(expressionText)) {
+    if (!parsedPipeNames.has(candidate.name)) {
       continue;
     }
 
-    const pipeOffsetInExpression = match.index + match[0].indexOf(pipeName);
-    const start = baseOffset + valueOffset + pipeOffsetInExpression;
-
+    const start = baseOffset + valueOffset + candidate.offset;
     context.elements.push({
       type: "pipe",
-      name: pipeName,
+      name: candidate.name,
       range: {
         start: context.document.positionAt(start),
-        end: context.document.positionAt(start + pipeName.length),
+        end: context.document.positionAt(start + candidate.name.length),
       },
       tagName: "pipe",
       isAttribute: false,
       attributes: [],
     });
   }
+}
+
+/**
+ * Finds every `| name` in an expression that could be a pipe, with the name's offset.
+ *
+ * Skips the contents of string literals and both bars of a logical OR, which is what a
+ * single regular expression could not do.
+ * @internal
+ */
+function* findPipeCandidates(text: string): Generator<{ name: string; offset: number }> {
+  const namePattern = /^\s*([a-zA-Z][a-zA-Z0-9_-]*)/;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (isQuote(character)) {
+      index = endOfStringLiteral(text, index);
+      continue;
+    }
+    if (character !== "|") {
+      continue;
+    }
+    if (text[index + 1] === "|") {
+      // A logical OR: step over both bars so the second cannot start a match either.
+      index += 1;
+      continue;
+    }
+
+    const match = namePattern.exec(text.slice(index + 1));
+    if (match) {
+      yield { name: match[1], offset: index + 1 + match[0].indexOf(match[1]) };
+    }
+  }
+}
+
+/** @internal */
+function isQuote(character: string): boolean {
+  return character === "'" || character === '"' || character === "`";
+}
+
+/**
+ * The index of a string literal's closing quote, or the end of the text when it has
+ * none — an unterminated string is what a template being typed usually holds.
+ * @param text The expression text.
+ * @param openIndex Index of the opening quote.
+ * @internal
+ */
+function endOfStringLiteral(text: string, openIndex: number): number {
+  const quote = text[openIndex];
+
+  for (let index = openIndex + 1; index < text.length; index += 1) {
+    if (text[index] === "\\") {
+      index += 1;
+    } else if (text[index] === quote) {
+      return index;
+    }
+  }
+  return text.length;
 }
 
 /**

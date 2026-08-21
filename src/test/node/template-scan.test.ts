@@ -179,8 +179,6 @@ describe("Template scan", () => {
   });
 
   it("keeps the range on the real pipe when the same name also follows a logical OR", () => {
-    // The parser only says which names are pipes, not where they are, so an expression
-    // holding both spellings of one name is what decides whether the range is right.
     const template = '<div [title]="(a || access) ? x : (y | access)"></div>';
 
     const elements = scan(template);
@@ -193,6 +191,44 @@ describe("Template scan", () => {
       true,
       "and it is the one after the single bar, not the one after ||"
     );
+  });
+
+  it("keeps the range on the real pipe when the same name also appears inside a string", () => {
+    // Names alone cannot separate these two: both spell `access`, and only their
+    // positions differ. The range has to come from the parsed node, not from a search.
+    const template = "{{ 'x|access' + (value | access) }}";
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 1, "the one in the string is not a pipe");
+    assert.strictEqual(
+      template.slice(0, pipes[0].range.start.character).endsWith("(value | "),
+      true,
+      "and the range is on the real one, not on the text inside the quotes"
+    );
+  });
+
+  it("keeps track of an escaped quote while skipping a string", () => {
+    const template = `<div [title]="'it\\'s a|access' + (v | access)"></div>`;
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 1, "the escaped quote does not end the string early");
+    assert.strictEqual(template.slice(0, pipes[0].range.start.character).endsWith("(v | "), true);
+  });
+
+  it("places a pipe correctly when the expression is indented", () => {
+    // The parser measures a pipe against the slice it was handed, which for an indented
+    // interpolation does not start where the node does.
+    const template = "<p>x</p>\n  {{ '123' | bytes }}\n";
+
+    const elements = scan(template);
+
+    const [pipe] = elements.filter((element) => element.type === "pipe");
+    assert.ok(pipe, "expected the pipe to be reported");
+    assert.strictEqual(textOf(template, pipe), "bytes");
   });
 
   it("finds a pipe applied to the argument of another pipe", () => {
