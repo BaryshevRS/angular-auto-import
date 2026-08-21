@@ -86,60 +86,39 @@ stable release. Cheap to keep, cheaper to remember.
 
 ---
 
-## 4. The v22 e2e suite fails intermittently under parallel load
+## 4. The v22 e2e suite has been flaky under parallel load
 
-**Severity: unknown, and it sits on the last gate before shipping.**
+**Severity: was real. Three of its four causes are fixed; the fourth is unexplained.**
 
-Five runs of `pnpm run test:e2e:v22:parallel` on the same `dist/` bundle: two failed,
-three passed with the full 45. The two failures had different shapes, which is what
-makes this worth writing down rather than re-running.
+Five runs of `pnpm run test:e2e:v22:parallel` on one bundle: two failed, three passed
+with the full 45. What was found and what was done:
 
-**First shape — the index was not there yet.** Three tests in each of the three shards,
-nine in total, across three independent VS Code processes:
+**A quiet window that opened before there was anything to be quiet about.** Every failing
+diagnostics assertion read zero. `waitForDiagnosticsToStabilize` started its stable timer
+immediately and resolved on timeout with whatever it had, so a server that had not
+finished indexing looked settled after `stableMs` and the caller asserted against an
+empty array. It now takes the count the caller is waiting for, refuses to call anything
+short of it settled, and throws on timeout saying what it saw. **Fixed.**
 
-```
-AssertionError: Expected 47 diagnostics, got 0
-AssertionError: Expected 106 diagnostics, got 0
-```
+**A run that left the repository changed.** The quickfix cases strip a fixture's imports
+and restore them in an `after` hook a timed-out test never reaches, so
+`nz-playground.component.ts` was left missing 101 import lines and the next run would
+have started from it. `scripts/e2e-parallel.mjs` now restores what the run modified —
+and only that, leaving alone whatever was already dirty when it started. **Fixed.**
 
-Every one of those assertions reads what a `before` hook collected from
-`waitForDiagnosticsToStabilize`. A server that had not finished indexing when the hook
-gave up produces exactly this, in every shard at once, under load. Nothing points at the
-extension: the same fixture indexes identically in-process, 94 source files and 1256
-elements.
+**A shard that ran against nothing and called it success.** With no descriptors the suite
+registered one passing placeholder, so the shard reported green. It now fails. **Fixed.**
 
-**Second shape — two different races in one run.** The material shard exceeded mocha's
-168s timeout on "quickfixes apply correct imports", which applies edits and saves. The
-ng-zorro shard launched a second Extension Host that reported
+**A second Extension Host, unexplained.** In one run the ng-zorro shard started a second
+host after its first had already run the cases, and that host reported no descriptors at
+a path with no version segment — meaning it came up without the workspace folder. The
+guard above means such a host now fails loudly instead of reporting success, but why it
+starts at all is unknown.
 
-```
-No descriptor.json files found in out/e2e/cases. Run the generator first.
-```
-
-and passed one placeholder test, after its first host had already run the real cases.
-The descriptors were present before and after the run, so `out/` was momentarily not
-what the shard expected — `compile-tests` begins with `rm -rf out`, and
-`copy-e2e-cases` fills `out/e2e/cases` after it.
-
-**And a failed run does not clean up after itself.** The quickfix cases strip a
-fixture's imports, apply the fixes, and restore the file in an `after` hook. A test that
-times out never reaches it, so
-`src/e2e/projects/v22/apps/ng-zorro-demo/src/app/playground/nz-playground.component.ts`
-was left in the repository with 101 of its import lines gone. The next run therefore
-starts from a state nobody chose, which is one way a single flake turns into a streak.
-
-**Suggested fix, in the order they are worth doing:**
-
-1. Make the wait observable rather than timed. The server already answers
-   `PerformanceMetricsRequest` with a per-project element count, which the node
-   regression suite uses to wait for the index. Have the e2e `before` hook wait on that
-   before it waits for diagnostics, so a timeout means a hang rather than a slow machine.
-2. Find out why a shard starts a second Extension Host at all, and whether anything can
-   rebuild `out/` while shards are running.
-3. Restore the fixtures from git after the suite, whatever its outcome, so one failure
-   cannot change what the next run measures.
-4. Scale the parallelism to the machine, or let a shard report its own load, so three
-   VS Code instances on a laptop are not the default.
+**Still worth doing:** find out what restarts a host mid-run, and scale the shard count
+to the machine rather than always running three VS Code instances at once. The material
+shard also once exceeded mocha's 168s timeout on "quickfixes apply correct imports",
+which applies edits and saves; that may be the same load problem or its own.
 
 ---
 

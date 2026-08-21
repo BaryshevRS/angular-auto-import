@@ -11,8 +11,12 @@
  *
  * Usage: node scripts/e2e-parallel.mjs <version>   (e.g. v22)
  * Compile the tests first (the npm script does `compile-tests && copy-e2e-cases`).
+ *
+ * The quickfix cases strip a fixture's imports and restore them in an `after` hook a
+ * timed-out test never reaches, so this restores what the run changed — and only that,
+ * leaving alone anything that was already modified when the run started.
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -95,7 +99,52 @@ function runShard(app, index) {
   });
 }
 
+/** Fixture files already modified before the run, which are the developer's business. */
+function dirtyFixtures() {
+  try {
+    const output = execFileSync("git", ["status", "--porcelain", "--", fixturesDir], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    return new Set(
+      output
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.slice(3).trim())
+    );
+  } catch {
+    // No git, no restore. The suite is still the point.
+    return undefined;
+  }
+}
+
+/** Restores fixture files this run modified, and reports which. */
+function restoreFixtures(alreadyDirty) {
+  if (!alreadyDirty) {
+    return;
+  }
+  const changed = [...(dirtyFixtures() ?? [])].filter((file) => !alreadyDirty.has(file));
+  if (changed.length === 0) {
+    return;
+  }
+  try {
+    execFileSync("git", ["checkout", "--", ...changed], { cwd: repoRoot });
+    console.log(`\nRestored ${changed.length} fixture file(s) the run left modified:`);
+    for (const file of changed) {
+      console.log(`  ${file}`);
+    }
+  } catch (error) {
+    console.warn(`\nCould not restore fixtures: ${error.message}`);
+    console.warn("Check `git status` before the next run — it would start from this state.");
+  }
+}
+
+const fixturesDir = path.join("src", "e2e", "projects", version);
+const alreadyDirty = dirtyFixtures();
+
 const results = await Promise.all(apps.map((app, index) => runShard(app, index)));
+
+restoreFixtures(alreadyDirty);
 
 console.log("\n=== Parallel e2e results ===");
 let failed = false;

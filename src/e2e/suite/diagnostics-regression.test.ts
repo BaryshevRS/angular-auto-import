@@ -105,8 +105,13 @@ describe("E2E Diagnostics Regression", function () {
   const cases = discoverCases(casesDir);
 
   if (cases.length === 0) {
-    it("no test cases found", () => {
-      console.warn(`No descriptor.json files found in ${casesDir}. Run the generator first.`);
+    // Passing here is how a shard that ran against nothing reported success: one green
+    // placeholder, no cases, and a summary that looked like a clean run.
+    it("has cases to run", () => {
+      assert.fail(
+        `No descriptor.json files found in ${casesDir}. ` +
+          "Either the generator has not run, or this host started without the workspace folder."
+      );
     });
     return;
   }
@@ -138,8 +143,15 @@ describe("E2E Diagnostics Regression", function () {
         const doc = await vscode.workspace.openTextDocument(ctx.templateUri);
         await vscode.window.showTextDocument(doc);
 
-        // Wait for diagnostics to stabilize
-        await waitForDiagnosticsToStabilize(ctx.templateUri, DIAGNOSTIC_SOURCE);
+        // The descriptor says how many diagnostics this case has, so the wait can tell
+        // "the index is not finished" from "this document is clean" and fail saying which.
+        await waitForDiagnosticsToStabilize(
+          ctx.templateUri,
+          DIAGNOSTIC_SOURCE,
+          60000,
+          3000,
+          descriptor.diagnostics.length
+        );
       });
 
       after(async function () {
