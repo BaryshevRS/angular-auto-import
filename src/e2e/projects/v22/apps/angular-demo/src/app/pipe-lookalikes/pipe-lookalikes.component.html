@@ -18,3 +18,12 @@
 
 <!-- Both spellings in one expression: only the second is a pipe. -->
 <p [title]="'a|bytes' + (size | bytes)">quoted and real</p>
+
+<!-- A brace inside a string does not close the ${} hole around it. -->
+<p>{{ `x ${"}" + (size | bytes)}` }}</p>
+
+<!-- A slash after a pattern is division, not the start of another pattern. -->
+<p>{{ /x/ / size | bytes }}</p>
+
+<!-- A slash after an object literal is division too. -->
+<p>{{ {a: 1} / size | bytes }}</p>

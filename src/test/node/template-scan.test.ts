@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: the Angular templates under test contain JavaScript template literals.
 import * as assert from "node:assert";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {
@@ -18,6 +19,12 @@ type ParseTemplate = (
 
 let parseTemplate: ParseTemplate;
 let constructors: TemplateAstConstructors;
+let recursiveAstVisitor: RecursiveAstVisitorClass;
+
+/** The compiler's expression walker, used here as the oracle the scan is checked against. */
+type RecursiveAstVisitorClass = new () => {
+  visitPipe(pipe: { name: string }, context: unknown): void;
+};
 
 /** Indexes the given selectors as components, mirroring what the real indexer returns. */
 function lookupOf(...selectors: string[]): TemplateElementLookup {
@@ -72,6 +79,7 @@ describe("Template scan", () => {
       tmplAstBoundText: angular.TmplAstBoundText,
       recursiveAstVisitor: angular.RecursiveAstVisitor,
     } as TemplateAstConstructors;
+    recursiveAstVisitor = angular.RecursiveAstVisitor as RecursiveAstVisitorClass;
   });
 
   it("records an indexed component tag with the range of its opening tag", () => {
@@ -221,7 +229,6 @@ describe("Template scan", () => {
 
   it("finds a pipe inside a template literal's interpolation", () => {
     // A backtick literal is text, except in its `${…}` holes, which are expressions.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the template under test holds a JS template literal.
     const template = "{{ `x ${value | access}` }}";
 
     const elements = scan(template);
@@ -243,7 +250,6 @@ describe("Template scan", () => {
   });
 
   it("descends into a template literal nested inside another one", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the holes belong to the template being scanned.
     const template = "{{ `outer ${ `inner ${v | access}` }` }}";
 
     const elements = scan(template);
@@ -383,5 +389,74 @@ describe("Template scan", () => {
       card.attributes.map((attribute) => attribute.name),
       ["title", "subtitle"]
     );
+  });
+
+  describe("agreeing with the parser about what a bar means", () => {
+    /**
+     * A bar is a pipe operator only outside literals, and only when it is not `||`.
+     * Each of these is checked against the parser's own answer rather than against a
+     * hand-written expectation, so a new lexical corner cannot be got wrong quietly —
+     * which is how the last three were found, one report at a time.
+     */
+    const expressions = [
+      "v | access",
+      "'x|access'",
+      "`x|access`",
+      "/x|access/.test(v)",
+      "a || access",
+      "'x|access' + (v | access)",
+      "`x ${v | access}`",
+      '`x ${"}" + (v | access)}`',
+      "`x ${ {a:1} }` + (v | access)",
+      "/x/ / y | access",
+      "{a: 1} / y | access",
+      "a / b | access",
+      "(a || access) ? x : (y | access)",
+      "v | access : 'a|b'",
+      "`${ `${ v | access }` }`",
+      "[1,2] / 3 | access",
+      "f() / 2 | access",
+      "'it\\'s a|access' + (v | access)",
+      "/[/x]|access/.test(v) + (v | access)",
+      "v | access | access",
+      "obj.x | access",
+      "(v) | access",
+      "`a` + /b/ + (v | access)",
+      "x ? /a|b/ : (v | access)",
+      "'' | access",
+    ];
+
+    /** The pipes the compiler itself found in an interpolation. */
+    function parserPipes(template: string): string[] {
+      const parsed = parseTemplate(template, "app.component.html", {
+        alwaysAttemptHtmlToR3AstConversion: true,
+        collectCommentNodes: true,
+      });
+      const found: string[] = [];
+      const visitor = new recursiveAstVisitor();
+      const walkChildren = visitor.visitPipe.bind(visitor);
+      visitor.visitPipe = (pipe, visitContext) => {
+        found.push(pipe.name);
+        walkChildren(pipe, visitContext);
+      };
+
+      for (const node of parsed.nodes as Array<{ value?: { visit?: (v: unknown, c: unknown) => void } }>) {
+        node.value?.visit?.(visitor, null);
+      }
+      return found.sort();
+    }
+
+    for (const expression of expressions) {
+      it(`reports the same pipes as the parser for ${expression}`, () => {
+        const template = `{{ ${expression} }}`;
+
+        const scanned = scan(template)
+          .filter((element) => element.type === "pipe")
+          .map((element) => element.name)
+          .sort();
+
+        assert.deepStrictEqual(scanned, parserPipes(template));
+      });
+    }
   });
 });

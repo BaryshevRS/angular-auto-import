@@ -29,6 +29,33 @@
       "startCharacter": 32,
       "endLine": 19,
       "endCharacter": 37
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 22,
+      "startCharacter": 25,
+      "endLine": 22,
+      "endCharacter": 30
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 25,
+      "startCharacter": 19,
+      "endLine": 25,
+      "endCharacter": 24
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 28,
+      "startCharacter": 22,
+      "endLine": 28,
+      "endCharacter": 27
     }
   ],
   "quickfixes": [

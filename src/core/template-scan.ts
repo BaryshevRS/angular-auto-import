@@ -564,44 +564,98 @@ type PipeCandidate = { name: string; offset: number };
 const PIPE_NAME_PATTERN = /^\s*([a-zA-Z][a-zA-Z0-9_-]*)/;
 
 /**
+ * Characters that can end a value, and so make a following `/` a division.
+ *
+ * `}` is here for an object literal: `{a: 1} / y` divides. Everything else — an
+ * operator, an opening bracket, the start of the expression — leaves a `/` to open a
+ * regular expression instead.
+ */
+const ENDS_VALUE = /[\w$)\]}]/;
+
+/**
  * Finds every `| name` in an expression that could be a pipe, with the name's offset.
  *
- * This is a small lexer rather than a pattern, because a bar means different things in
- * different places: in `a || b` it is an operator, in `'a|b'` and `/a|b/` it is text,
- * and inside a template literal it is text everywhere except the `${…}` holes, which
- * are expressions again and can hold real pipes.
+ * A bar means different things in different places, and only a scan that knows the
+ * lexical structure can tell them apart: `a || b` is an operator, `'a|b'` and `/a|b/`
+ * are text, and a template literal is text everywhere except its `${…}` holes, which
+ * are expressions again and can hold real pipes at any depth.
+ *
+ * What this deliberately does *not* do is decide which candidates are pipes. That is
+ * the parser's answer, and this only has to avoid hiding a real one from it or offering
+ * it something that is not there.
  * @internal
  */
 function* findPipeCandidates(text: string): Generator<PipeCandidate> {
-  yield* scanExpression(text, 0, text.length);
+  yield* scanRegion(text, 0, text.length, false);
 }
 
 /**
- * Scans one expression range, descending into template-literal holes.
+ * Scans one expression region, descending into the holes of template literals.
+ * @param stopAtCloseBrace Whether a `}` at depth zero ends the region, which is what
+ * terminates a `${…}` hole.
+ * @returns Where the scan stopped: that `}`, or `end`.
  * @internal
  */
-function* scanExpression(text: string, start: number, end: number): Generator<PipeCandidate> {
-  // The last character that could end a value, which is what tells `/` as division from
-  // `/` opening a regular expression.
-  let previous = "";
+function* scanRegion(
+  text: string,
+  start: number,
+  end: number,
+  stopAtCloseBrace: boolean
+): Generator<PipeCandidate, number> {
+  // Whether the previous token can end a value. A `/` after one divides; a `/` anywhere
+  // else opens a pattern. Tracking the token rather than the character is what keeps a
+  // regular expression from making the next `/` look like the start of another.
+  let afterValue = false;
+  let braceDepth = 0;
 
   for (let index = start; index < end; index += 1) {
     const character = text[index];
 
-    if (character === "'" || character === '"') {
-      index = endOfStringLiteral(text, index);
-    } else if (character === "`") {
-      index = yield* scanTemplateLiteral(text, index, end);
-    } else if (character === "/" && !endsValue(previous)) {
-      index = endOfRegexLiteral(text, index);
+    const literalEnd = yield* skipLiteral(text, index, end, afterValue);
+    if (literalEnd >= 0) {
+      index = literalEnd;
+      afterValue = true;
+    } else if (character === "}" && stopAtCloseBrace && braceDepth === 0) {
+      return index;
     } else if (character === "|") {
       index = yield* scanBar(text, index, end);
-    }
-
-    if (!/\s/.test(character)) {
-      previous = character;
+      afterValue = false;
+    } else if (!/\s/.test(character)) {
+      braceDepth += braceDelta(character);
+      afterValue = ENDS_VALUE.test(character);
     }
   }
+  return end;
+}
+
+/**
+ * Consumes whichever literal starts at `index`, yielding what its holes contain.
+ * @param afterValue Whether the previous token can end a value, which is what makes a
+ * `/` a division rather than the start of a pattern.
+ * @returns The literal's last index, or `-1` when none starts here.
+ * @internal
+ */
+function* skipLiteral(text: string, index: number, end: number, afterValue: boolean): Generator<PipeCandidate, number> {
+  const character = text[index];
+
+  if (character === "'" || character === '"') {
+    return endOfStringLiteral(text, index);
+  }
+  if (character === "`") {
+    return yield* scanTemplateLiteral(text, index, end);
+  }
+  if (character === "/" && !afterValue) {
+    return endOfRegexLiteral(text, index);
+  }
+  return -1;
+}
+
+/** @internal */
+function braceDelta(character: string): number {
+  if (character === "{") {
+    return 1;
+  }
+  return character === "}" ? -1 : 0;
 }
 
 /**
@@ -625,44 +679,25 @@ function* scanBar(text: string, index: number, end: number): Generator<PipeCandi
 /**
  * Scans a template literal, yielding the candidates found in its `${…}` holes.
  *
- * The literal's own text is skipped, the holes are expressions and are scanned as such.
- * @returns The index of the closing backtick, or the end of the text when there is none.
+ * The literal's own text is skipped; each hole is an expression and is scanned as one,
+ * which is also what finds the brace that closes it — a `}` inside a string in there
+ * closes nothing.
+ * @returns The index of the closing backtick, or the last index when there is none.
  * @internal
  */
 function* scanTemplateLiteral(text: string, open: number, end: number): Generator<PipeCandidate, number> {
   for (let index = open + 1; index < end; index += 1) {
-    if (text[index] === "\\") {
+    const character = text[index];
+
+    if (character === "\\") {
       index += 1;
-    } else if (text[index] === "`") {
+    } else if (character === "`") {
       return index;
-    } else if (text[index] === "$" && text[index + 1] === "{") {
-      const hole = endOfHole(text, index + 1, end);
-      yield* scanExpression(text, index + 2, hole);
-      index = hole;
+    } else if (character === "$" && text[index + 1] === "{") {
+      index = yield* scanRegion(text, index + 2, end, true);
     }
   }
   return end - 1;
-}
-
-/**
- * The index of the `}` closing a `${…}` hole, counting nested braces.
- * @param openBrace Index of the hole's `{`.
- * @internal
- */
-function endOfHole(text: string, openBrace: number, end: number): number {
-  let depth = 0;
-
-  for (let index = openBrace; index < end; index += 1) {
-    if (text[index] === "{") {
-      depth += 1;
-    } else if (text[index] === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return index;
-      }
-    }
-  }
-  return end;
 }
 
 /**
@@ -688,17 +723,6 @@ function endOfRegexLiteral(text: string, openIndex: number): number {
     }
   }
   return text.length;
-}
-
-/**
- * Whether a character can end a value, and so makes a following `/` a division.
- *
- * Anything else — an operator, an opening bracket, the start of the expression — means
- * the `/` opens a regular expression instead.
- * @internal
- */
-function endsValue(character: string): boolean {
-  return character !== "" && /[\w$)\]'"`]/.test(character);
 }
 
 /**
