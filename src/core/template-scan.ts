@@ -62,7 +62,30 @@ export interface TemplateAstConstructors {
   tmplAstReference: TemplateAstClass<TmplAstReference>;
   tmplAstBoundAttribute: TemplateAstClass<TmplAstBoundAttribute>;
   tmplAstBoundText: TemplateAstClass<TmplAstBoundText>;
+  /**
+   * The compiler's expression-AST walker, subclassed to find pipe nodes.
+   *
+   * Pipes used to be read with a regular expression over the expression's source text,
+   * which cannot tell a pipe from the second `|` of a logical OR, or from a `|` inside
+   * a string literal. The parser already knows the difference.
+   */
+  recursiveAstVisitor: ExpressionVisitorClass;
 }
+
+/** The shape of `RecursiveAstVisitor` this uses: a class whose `visitPipe` is overridden. */
+type ExpressionVisitorClass = new () => {
+  visitPipe(pipe: BindingPipeNode, context: unknown): void;
+};
+
+/** The one `BindingPipe` field this reads: which pipe the parser saw. */
+type BindingPipeNode = {
+  name: string;
+};
+
+/** An expression node the compiler can walk. */
+type VisitableExpression = {
+  visit(visitor: { visitPipe(pipe: BindingPipeNode, context: unknown): void }, context?: unknown): void;
+};
 
 /** An AST node class, used only as the right-hand side of `instanceof`. */
 type TemplateAstClass<T> = abstract new (...args: never[]) => T;
@@ -93,7 +116,7 @@ type ScanContext = {
   constructors: TemplateAstConstructors;
   onError: (message: string, error: Error) => void;
   visit: (nodes: TemplateAstNode[]) => void;
-  extractPipesFromExpression: (expression: unknown, nodeOffset?: number) => void;
+  extractPipesFromExpression: (expression: unknown) => void;
 };
 
 /**
@@ -116,8 +139,8 @@ export function scanTemplate(request: TemplateScanRequest): ScannedTemplateEleme
         processTemplateNode(node, context);
       }
     },
-    extractPipesFromExpression: (expression, nodeOffset = 0) => {
-      extractPipesFromExpression(context, expression, nodeOffset);
+    extractPipesFromExpression: (expression) => {
+      extractPipesFromExpression(context, expression);
     },
   };
 
@@ -129,7 +152,7 @@ export function scanTemplate(request: TemplateScanRequest): ScannedTemplateEleme
  * Collects pipes used inside an expression node, relative to the node's own offset.
  * @internal
  */
-function extractPipesFromExpression(context: ScanContext, expression: unknown, nodeOffset: number): void {
+function extractPipesFromExpression(context: ScanContext, expression: unknown): void {
   if (!expression || typeof expression !== "object" || !("sourceSpan" in expression) || !expression.sourceSpan) {
     return;
   }
@@ -137,7 +160,7 @@ function extractPipesFromExpression(context: ScanContext, expression: unknown, n
   try {
     const expr = expression as { sourceSpan: { start: number; end: number } };
     const expressionText = context.text.slice(expr.sourceSpan.start, expr.sourceSpan.end);
-    pushPipes(context, expressionText, context.offset + nodeOffset, expr.sourceSpan.start);
+    pushPipes(context, expressionText, context.offset, expr.sourceSpan.start, expression);
   } catch (e) {
     context.onError("Error extracting pipes from expression:", e as Error);
   }
@@ -467,7 +490,7 @@ function processSingleAttribute(
     const valueSpan = attr.valueSpan || attr.sourceSpan;
     if (valueSpan) {
       const expressionText = context.text.slice(valueSpan.start.offset, valueSpan.end.offset);
-      pushPipes(context, expressionText, context.offset, valueSpan.start.offset);
+      pushPipes(context, expressionText, context.offset, valueSpan.start.offset, attr.value);
     }
   }
 }
@@ -483,20 +506,48 @@ function processBoundTextNode(node: TmplAstBoundText, context: ScanContext): voi
     context.text.slice(node.sourceSpan.start.offset, node.sourceSpan.end.offset),
     context.offset,
     // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    node.sourceSpan.start.offset
+    node.sourceSpan.start.offset,
+    node.value
   );
 }
 
 /**
- * Finds `| pipeName` usages in an expression and records each one.
+ * Records the pipes used in one expression, at the position they occupy in the template.
+ *
+ * Two sources, because each answers half the question. The parser knows *what* is a
+ * pipe: `a || b` is a binary operator and contributes none, and a `|` inside a string
+ * literal is part of the string — neither is visible to a pattern over the source text.
+ * The source text knows *where*, because a pipe's `nameSpan` is measured against the
+ * slice the parser was handed, which is not the template and does not always begin
+ * where the node does.
+ *
+ * So the scan over the text still decides the ranges, exactly as it always has, and the
+ * parser decides which of its matches survive. The `||` guard in the pattern is not
+ * redundant with that: one expression can hold both a real `| name` and a `|| name` for
+ * the same name, and the guard is what keeps the range on the real one.
  * @internal
  */
-function pushPipes(context: ScanContext, expressionText: string, baseOffset: number, valueOffset: number): void {
-  const pipeRegex = /\|\s*([a-zA-Z][a-zA-Z0-9_-]*)/g;
+function pushPipes(
+  context: ScanContext,
+  expressionText: string,
+  baseOffset: number,
+  valueOffset: number,
+  expression: unknown
+): void {
+  const parsedPipeNames = collectPipeNames(context, expression);
+  if (parsedPipeNames.size === 0) {
+    return;
+  }
+
+  const pipeRegex = /(?<!\|)\|(?!\|)\s*([a-zA-Z][a-zA-Z0-9_-]*)/g;
   let match: RegExpExecArray | null;
 
   while ((match = pipeRegex.exec(expressionText))) {
     const pipeName = match[1];
+    if (!parsedPipeNames.has(pipeName)) {
+      continue;
+    }
+
     const pipeOffsetInExpression = match.index + match[0].indexOf(pipeName);
     const start = baseOffset + valueOffset + pipeOffsetInExpression;
 
@@ -512,6 +563,44 @@ function pushPipes(context: ScanContext, expressionText: string, baseOffset: num
       attributes: [],
     });
   }
+}
+
+/**
+ * The names of the pipes the parser found in an expression.
+ *
+ * An expression it cannot walk yields nothing, which reports no pipes rather than
+ * reporting wrong ones.
+ * @internal
+ */
+function collectPipeNames(context: ScanContext, expression: unknown): Set<string> {
+  const names = new Set<string>();
+  if (!isVisitableExpression(expression)) {
+    return names;
+  }
+
+  const visitor = new context.constructors.recursiveAstVisitor();
+  const walkChildren = visitor.visitPipe.bind(visitor);
+  visitor.visitPipe = (pipe, visitContext) => {
+    names.add(pipe.name);
+    // Keep descending: a pipe's own argument may hold another one.
+    walkChildren(pipe, visitContext);
+  };
+
+  try {
+    expression.visit(visitor, null);
+  } catch (e) {
+    context.onError("Error walking a template expression for pipes:", e as Error);
+  }
+  return names;
+}
+
+/** @internal */
+function isVisitableExpression(expression: unknown): expression is VisitableExpression {
+  return (
+    typeof expression === "object" &&
+    expression !== null &&
+    typeof (expression as VisitableExpression).visit === "function"
+  );
 }
 
 /**

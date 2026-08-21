@@ -37,6 +37,14 @@ function itemsOf(report: { kind: string; items?: unknown[] }): Array<{ code?: un
   return (report.items ?? []) as Array<{ code?: unknown; severity?: number }>;
 }
 
+const ACCESS_PIPE = [
+  'import { Pipe, PipeTransform } from "@angular/core";',
+  "",
+  '@Pipe({ name: "access", standalone: true })',
+  "export class AccessPipe implements PipeTransform { transform(value: unknown) { return value; } }",
+  "",
+].join("\n");
+
 const CARD_COMPONENT = [
   'import { Component } from "@angular/core";',
   "",
@@ -96,6 +104,7 @@ describe("LSP diagnostics", function () {
     await fs.mkdir(path.join(root, "src"), { recursive: true });
     await fs.writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { baseUrl: "." } }), "utf8");
     await fs.writeFile(path.join(root, "src", "shop-card.component.ts"), CARD_COMPONENT, "utf8");
+    await fs.writeFile(path.join(root, "src", "access.pipe.ts"), ACCESS_PIPE, "utf8");
     hostPath = path.join(root, "src", "host.component.ts");
     templatePath = path.join(root, "src", "host.component.html");
     await fs.writeFile(hostPath, hostComponent(), "utf8");
@@ -116,6 +125,32 @@ describe("LSP diagnostics", function () {
 
     assert.strictEqual(items.length, 1);
     assert.strictEqual(items[0].code, "missing-component-import:shop-card");
+  });
+
+  it("reports a pipe the template uses but the component does not import", () => {
+    const document = documentAt(templatePath, "<div>{{ value | access }}</div>", "html");
+
+    const items = itemsOf(handlerFor().provide(document));
+
+    assert.deepStrictEqual(
+      items.map((item) => String(item.code)),
+      ["missing-pipe-import:access"]
+    );
+  });
+
+  it("reports no pipe for a logical OR followed by a name a pipe happens to share", () => {
+    // Two things had to coincide for this to be visible: an expression containing `||`,
+    // and an identifier after it naming a pipe the project really declares. Reading the
+    // parsed expression instead of its source text is what tells the two apart.
+    const document = documentAt(templatePath, "@if (access().canEdit || access().canShare) {\n<div></div>\n}", "html");
+
+    assert.deepStrictEqual(itemsOf(handlerFor().provide(document)), []);
+  });
+
+  it("reports no pipe for a bar inside a string literal", () => {
+    const document = documentAt(templatePath, "<div [title]=\"'a|access'\"></div>", "html");
+
+    assert.deepStrictEqual(itemsOf(handlerFor().provide(document)), []);
   });
 
   it("reports nothing once the component imports the element", async () => {

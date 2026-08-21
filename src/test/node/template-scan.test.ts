@@ -70,6 +70,7 @@ describe("Template scan", () => {
       tmplAstReference: angular.TmplAstReference,
       tmplAstBoundAttribute: angular.TmplAstBoundAttribute,
       tmplAstBoundText: angular.TmplAstBoundText,
+      recursiveAstVisitor: angular.RecursiveAstVisitor,
     } as TemplateAstConstructors;
   });
 
@@ -136,6 +137,77 @@ describe("Template scan", () => {
       assert.strictEqual(pipe.tagName, "pipe");
       assert.strictEqual(textOf(template, pipe), pipeName);
     }
+  });
+
+  it("does not mistake the second bar of a logical OR for a pipe", () => {
+    // Both halves have to coincide for this to have been visible: an expression with
+    // `||`, and an identifier after it that names a pipe the project really declares.
+    const template = "@if (access().canEdit || access().canShare) {\n  <div></div>\n}";
+
+    const elements = scan(template);
+
+    assert.deepStrictEqual(
+      elements.filter((element) => element.type === "pipe"),
+      [],
+      "`||` is an operator; nothing after it is a pipe"
+    );
+  });
+
+  it("does not read a bar inside a string literal as a pipe", () => {
+    const template = ["<div [title]=\"'a|access'\"></div>", "{{ 'x|access' }}"].join("\n");
+
+    const elements = scan(template);
+
+    assert.deepStrictEqual(
+      elements.filter((element) => element.type === "pipe"),
+      [],
+      "A bar inside a string is part of the string"
+    );
+  });
+
+  it("still finds a real pipe beside an expression that only looks like one", () => {
+    const template = '<div [title]="(a || b) | titlecase"></div>';
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.deepStrictEqual(
+      pipes.map((pipe) => pipe.name),
+      ["titlecase"]
+    );
+    assert.strictEqual(textOf(template, pipes[0]), "titlecase", "and its range still covers the name alone");
+  });
+
+  it("keeps the range on the real pipe when the same name also follows a logical OR", () => {
+    // The parser only says which names are pipes, not where they are, so an expression
+    // holding both spellings of one name is what decides whether the range is right.
+    const template = '<div [title]="(a || access) ? x : (y | access)"></div>';
+
+    const elements = scan(template);
+
+    const pipes = elements.filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 1, "only one of the two is a pipe");
+    assert.strictEqual(textOf(template, pipes[0]), "access");
+    assert.strictEqual(
+      template.slice(0, pipes[0].range.start.character).endsWith("(y | "),
+      true,
+      "and it is the one after the single bar, not the one after ||"
+    );
+  });
+
+  it("finds a pipe applied to the argument of another pipe", () => {
+    const template = "{{ value | slice: (other | number) }}";
+
+    const elements = scan(template);
+
+    assert.deepStrictEqual(
+      elements
+        .filter((element) => element.type === "pipe")
+        .map((pipe) => pipe.name)
+        .sort(),
+      ["number", "slice"],
+      "the walk has to descend into a pipe's own arguments"
+    );
   });
 
   it("walks into control flow blocks and their alternative branches", () => {

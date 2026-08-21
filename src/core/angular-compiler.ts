@@ -52,6 +52,11 @@ export function adoptAngularCompiler(compiler: CompilerModule): AngularCompilerA
   if (typeof compiler?.parseTemplate !== "function") {
     throw new Error("The Angular compiler did not expose parseTemplate");
   }
+  if (typeof compiler?.RecursiveAstVisitor !== "function") {
+    // Pipes are read off the expression AST; without the visitor they would silently
+    // stop being reported, which reads like a template that uses none.
+    throw new Error("The Angular compiler did not expose RecursiveAstVisitor");
+  }
 
   return {
     parseTemplate: (text, name) => compiler.parseTemplate(text, name, PARSE_OPTIONS),
@@ -62,6 +67,7 @@ export function adoptAngularCompiler(compiler: CompilerModule): AngularCompilerA
       tmplAstReference: compiler.TmplAstReference,
       tmplAstBoundAttribute: compiler.TmplAstBoundAttribute,
       tmplAstBoundText: compiler.TmplAstBoundText,
+      recursiveAstVisitor: compiler.RecursiveAstVisitor,
     },
     selectors: { cssSelector: compiler.CssSelector, selectorMatcher: compiler.SelectorMatcher },
   };
