@@ -164,24 +164,34 @@ there will ever be.
 
 ## 7. The Extension Host and E2E suites still run only on one machine
 
-**Severity: low, and narrower than it was.**
+**Severity: low, and much narrower than it was.**
 
-`.github/workflows/ci.yml` now runs the Node suites, formatting, and the type check on
+`.github/workflows/ci.yml` runs formatting, types, and the Node suites on
 `ubuntu-latest` and `windows-latest` for every push to `main` and every pull request.
-That closes what mattered: everything known to break on Windows — boundary-unsafe path
-comparison, a cache key mixing ts-morph's forward slashes with the platform separator —
-is covered by Node suites that need no editor, and the URI regression asserts a round
-trip rather than a fixed string, so it is meaningful there.
+Windows now passes.
 
-Setting it up turned up one real portability defect on the way: `copy-test-fixtures` and
-`copy-e2e-cases` shelled out to `cp -r`, which is not a command Windows has. They use
-`fs.cpSync` now.
+It did not at first, and what it found is the point of having it:
 
-What still runs nowhere but one laptop: the Extension Host suite and the E2E matrix. Both
-download VS Code and need a display, and the E2E fixtures install their own dependencies,
-which this repository does not track — so a CI job for them means committing to
-provisioning three Angular workspaces, or building them in the job.
+- **Line endings.** Git checks out CRLF on Windows and biome formats to LF, so the first
+  run reported all 151 files as misformatted before a test ran. `.gitattributes` now
+  makes the repository decide.
+- **`cp -r` in two npm scripts**, which Windows does not have. They use `fs.cpSync`.
+- **29 Node tests written in POSIX.** `path.join(path.sep, "workspace", "app")` is
+  `\workspace\app` on Windows, which is relative to the current drive, so the code
+  under test resolved `D:\workspace\app` and the assertion still held the drive-less
+  string. And `file:///workspace/app` is not a file URL there at all — the server drops
+  a folder whose URI it cannot convert, so five assertions compared an empty array
+  against the roots that should have been in it, rather than disagreeing about a path.
+
+No defect in the extension itself: everything known to break on Windows had already been
+fixed, and those fixes hold. What had never been checked was whether the suites could
+run there to say so.
+
+What still runs nowhere but one laptop: the Extension Host suite and the E2E matrix.
+Both download VS Code and need a display, and the E2E fixtures install their own
+dependencies, which this repository does not track — so a job for them means committing
+to provisioning three Angular workspaces per run.
 
 **Suggested fix:** add an `xvfb-run` job for `pnpm run test:unit` first, which needs only
 the editor. Leave E2E manual until its fixtures have a story that does not involve a
-fresh `pnpm install` of three Angular projects per run.
+fresh `pnpm install` of three Angular projects.
