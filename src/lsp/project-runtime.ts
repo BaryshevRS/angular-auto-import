@@ -77,7 +77,7 @@ export class ProjectRuntime {
     this.rootPath = rootPath;
     this.logger = options.logger ?? withInstrumentation(silentLogger);
     this.storagePath = options.storagePath;
-    this.fileSystem = options.fileSystem ?? createNodeFileSystem();
+    this.fileSystem = options.fileSystem ?? createNodeFileSystem({ logger: this.logger });
     this.boundaries = options.boundaries;
     this.reindexIntervalMinutes = options.reindexIntervalMinutes ?? 0;
     this.tsConfigResolver = new TsConfigResolver({ logger: this.logger });

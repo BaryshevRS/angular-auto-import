@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createNodeFileSystem } from "../../adapters/node/file-system";
+import { silentLogger } from "../../core/logging";
 
 const fileSystem = createNodeFileSystem();
 
@@ -89,5 +90,28 @@ describe("Node file system", function () {
 
     assert.strictEqual(await fileSystem.readFile(filePath), "// комментарий\n");
     await assert.rejects(fileSystem.readFile(path.join(sandbox, "missing.ts")));
+  });
+
+  it("does not follow a symbolic link, and reports each one it skipped", async () => {
+    await writeFile(path.join(sandbox, "real", "src", "linked.component.ts"));
+    await writeFile(path.join(sandbox, "app", "src", "own.component.ts"));
+    await fs.symlink(path.join(sandbox, "real", "src"), path.join(sandbox, "app", "linked"), "dir");
+
+    const skipped: string[] = [];
+    const logged = createNodeFileSystem({
+      logger: { ...silentLogger, info: (message: string) => skipped.push(message) },
+    });
+
+    const found = await logged.findFiles({ root: path.join(sandbox, "app"), extensions: [".ts"] });
+
+    // Deliberate, not an oversight: the note at the top of the adapter says why, and a
+    // link to an ancestor would otherwise be walked until the kernel refuses.
+    assert.deepStrictEqual(
+      found.map((filePath) => path.basename(filePath)),
+      ["own.component.ts"],
+      "A symlinked directory contributes nothing"
+    );
+    assert.strictEqual(skipped.length, 1, "Skipping a link silently is what leaves a user with no trail");
+    assert.match(skipped[0], /symbolic links are not followed$/);
   });
 });
