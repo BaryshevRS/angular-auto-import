@@ -30,7 +30,7 @@ import type { FileSystem } from "../core/file-system";
 import type { FileChange, FileWatcherFactory } from "../core/file-watching";
 import type { CoreLogger, InstrumentedLogger, PerformanceMetrics } from "../core/logging";
 import type { ProgressHost, ProgressReporter } from "../core/progress";
-import { isProjectSourceFile, projectSourceQuery } from "../core/source-files";
+import { isOwnProjectSourceFile, type ProjectBoundaries, projectSourceQuery } from "../core/source-files";
 import { AngularElementData, type ComponentInfo, type FileElementsInfo } from "../types";
 import { isStandalone, parseAngularSelector } from "../utils/angular";
 import { debounce } from "../utils/debounce";
@@ -163,6 +163,12 @@ export interface AngularIndexerOptions {
   progressHost: ProgressHost;
   /** How this indexer learns that a watched file changed. */
   fileWatchers: FileWatcherFactory;
+  /**
+   * Recognizes the packages nested inside this project, which its index must not
+   * reach into. Without one the scan indexes everything below the root, which is what
+   * it did before nested packages were told apart.
+   */
+  boundaries?: ProjectBoundaries;
 }
 
 /**
@@ -226,6 +232,7 @@ export class AngularIndexer {
   private readonly cacheStore: CacheStore;
   private readonly logger: InstrumentedLogger;
   private readonly fileWatchers: FileWatcherFactory;
+  private readonly boundaries: ProjectBoundaries | undefined;
 
   /**
    * Every port is injected: the indexer runs under the Extension Host and under the
@@ -239,6 +246,7 @@ export class AngularIndexer {
     this.cacheStore = options.cacheStore;
     this.logger = options.logger;
     this.fileWatchers = options.fileWatchers;
+    this.boundaries = options.boundaries;
     this.project = new Project({
       useInMemoryFileSystem: false, // Keep this as false for real file system interaction
       skipAddingFilesFromTsConfig: true,
@@ -305,7 +313,7 @@ export class AngularIndexer {
    * @internal
    */
   private async handleSourceChange({ filePath, kind }: FileChange): Promise<void> {
-    if (!this.isIndexableProjectFile(filePath)) {
+    if (!(await this.isIndexableProjectFile(filePath))) {
       return;
     }
 
@@ -698,7 +706,7 @@ export class AngularIndexer {
    */
   private async updateFileIndex(filePath: string): Promise<void> {
     try {
-      if (!this.validateFileForIndexing(filePath)) {
+      if (!(await this.validateFileForIndexing(filePath))) {
         return;
       }
 
@@ -737,11 +745,11 @@ export class AngularIndexer {
    * @returns `true` when the file should be indexed as a project source.
    * @internal
    */
-  private isIndexableProjectFile(filePath: string): boolean {
-    return isProjectSourceFile(this.projectRootPath, filePath);
+  private isIndexableProjectFile(filePath: string): Promise<boolean> {
+    return isOwnProjectSourceFile(this.projectRootPath, filePath, this.boundaries);
   }
 
-  private validateFileForIndexing(filePath: string): boolean {
+  private async validateFileForIndexing(filePath: string): Promise<boolean> {
     if (!fs.existsSync(filePath)) {
       this.logger.warn(`File not found, cannot update index: ${filePath} for project ${this.projectRootPath}`);
       return false;
@@ -756,7 +764,7 @@ export class AngularIndexer {
       );
       return false;
     }
-    if (!this.isIndexableProjectFile(filePath)) {
+    if (!(await this.isIndexableProjectFile(filePath))) {
       this.logger.debug(`AngularIndexer.updateFileIndex: Skipping non-source file ${filePath}.`);
       return false;
     }
@@ -974,7 +982,7 @@ export class AngularIndexer {
       this.index.clear();
 
       progress?.report({ message: "Discovering project files..." });
-      const projectTsFiles = await this.fileSystem.findFiles(projectSourceQuery(this.projectRootPath));
+      const projectTsFiles = await this.fileSystem.findFiles(projectSourceQuery(this.projectRootPath, this.boundaries));
       this.logger.info(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Found ${projectTsFiles.length} project files.`
       );

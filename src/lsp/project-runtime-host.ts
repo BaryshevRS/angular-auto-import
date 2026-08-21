@@ -5,6 +5,7 @@
 
 import type { FileWatcherFactory } from "../core/file-watching";
 import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../core/logging";
+import type { ProjectBoundaries } from "../core/source-files";
 import { ProjectRuntime } from "./project-runtime";
 
 export interface ProjectRuntimeHostOptions {
@@ -15,6 +16,8 @@ export interface ProjectRuntimeHostOptions {
   fileWatchers?: FileWatcherFactory;
   /** Minutes between automatic reindexes, passed on to every runtime. */
   reindexIntervalMinutes?: number;
+  /** Recognizes nested packages, so every runtime's scan stops at the next project. */
+  boundaries?: ProjectBoundaries;
   /** Called whenever any runtime's index changes, with that root's new generation. */
   onDidChangeIndex?(rootPath: string, generation: number): void;
   /** Overrides how a runtime is built, for tests and for future runtime variants. */
@@ -43,6 +46,7 @@ export class ProjectRuntimeHost {
           logger,
           storagePath: options.storagePath,
           fileWatchers: options.fileWatchers,
+          boundaries: options.boundaries,
           reindexIntervalMinutes: options.reindexIntervalMinutes,
           onDidChangeIndex: options.onDidChangeIndex,
         }));

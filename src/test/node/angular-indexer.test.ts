@@ -304,25 +304,25 @@ describe("AngularIndexer", function () {
       assert.ok(indexer.fileWatcher, "Should have file watcher");
     });
 
-    it("only accepts project sources from the watcher, which has no exclude pattern of its own", () => {
-      const guard = (indexer as unknown as { isIndexableProjectFile(filePath: string): boolean })
+    it("only accepts project sources from the watcher, which has no exclude pattern of its own", async () => {
+      const guard = (indexer as unknown as { isIndexableProjectFile(filePath: string): Promise<boolean> })
         .isIndexableProjectFile;
       const isIndexable = (...segments: string[]) => guard.call(indexer, path.join(testProjectPath, ...segments));
 
-      assert.strictEqual(isIndexable("src", "app", "app.component.ts"), true, "Project sources must be indexed");
-      assert.strictEqual(isIndexable("src", "app", "nested", "feature.directive.ts"), true, "Nesting is fine");
+      assert.strictEqual(await isIndexable("src", "app", "app.component.ts"), true, "Project sources must be indexed");
+      assert.strictEqual(await isIndexable("src", "app", "nested", "feature.directive.ts"), true, "Nesting is fine");
 
-      assert.strictEqual(isIndexable("node_modules", "some-lib", "index.ts"), false, "Dependencies are excluded");
-      assert.strictEqual(isIndexable("dist", "main.ts"), false, "Build output is excluded");
-      assert.strictEqual(isIndexable("out", "main.ts"), false, "Build output is excluded");
-      assert.strictEqual(isIndexable("bazel-out", "main.ts"), false, "Build output is excluded");
-      assert.strictEqual(isIndexable("e2e", "app.e2e.ts"), false, "E2E projects are excluded");
-      assert.strictEqual(isIndexable(".angular", "cache", "x.ts"), false, "Dot directories are excluded");
-      assert.strictEqual(isIndexable("src", "app", "app.component.spec.ts"), false, "Specs are excluded");
-      assert.strictEqual(isIndexable("src", "app", "app.component.test.ts"), false, "Tests are excluded");
+      assert.strictEqual(await isIndexable("node_modules", "some-lib", "index.ts"), false, "Dependencies are excluded");
+      assert.strictEqual(await isIndexable("dist", "main.ts"), false, "Build output is excluded");
+      assert.strictEqual(await isIndexable("out", "main.ts"), false, "Build output is excluded");
+      assert.strictEqual(await isIndexable("bazel-out", "main.ts"), false, "Build output is excluded");
+      assert.strictEqual(await isIndexable("e2e", "app.e2e.ts"), false, "E2E projects are excluded");
+      assert.strictEqual(await isIndexable(".angular", "cache", "x.ts"), false, "Dot directories are excluded");
+      assert.strictEqual(await isIndexable("src", "app", "app.component.spec.ts"), false, "Specs are excluded");
+      assert.strictEqual(await isIndexable("src", "app", "app.component.test.ts"), false, "Tests are excluded");
 
       assert.strictEqual(
-        guard.call(indexer, path.join(path.dirname(testProjectPath), "other", "main.ts")),
+        await guard.call(indexer, path.join(path.dirname(testProjectPath), "other", "main.ts")),
         false,
         "Files outside the project root are excluded"
       );

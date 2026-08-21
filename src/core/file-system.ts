@@ -10,6 +10,15 @@ export interface FileSearchQuery {
   excludeHiddenDirectories?: boolean;
   /** File-name endings to skip, such as `.spec.ts`. */
   excludedSuffixes?: readonly string[];
+  /**
+   * Asked before a directory below {@link FileSearchQuery.root} is entered. A directory
+   * this rejects contributes nothing, and neither does anything below it.
+   *
+   * The name-based exclusions above cannot express "a directory that is itself another
+   * project", which depends on what the directory contains rather than what it is
+   * called. The root itself is never asked: a project always sits inside its own root.
+   */
+  enterDirectory?(directoryPath: string): Promise<boolean> | boolean;
 }
 
 /**

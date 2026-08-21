@@ -118,6 +118,77 @@ describe("LSP protocol regressions", function () {
       );
     });
 
+    it("keeps a nested project's elements out of the index of the project containing it", async () => {
+      const outer = path.join(sandbox, "workspace");
+      const inner = path.join(outer, "packages", "ui");
+      await writeProject(outer);
+      await writeProject(inner);
+      await fs.writeFile(
+        path.join(outer, "src", "outer.component.ts"),
+        component("OuterComponent", "app-outer"),
+        "utf8"
+      );
+      await fs.writeFile(
+        path.join(inner, "src", "inner.component.ts"),
+        component("InnerComponent", "app-inner"),
+        "utf8"
+      );
+
+      const templatePath = path.join(outer, "src", "host.component.html");
+      await fs.writeFile(path.join(outer, "src", "host.component.ts"), host("host.component.html"), "utf8");
+      await fs.writeFile(templatePath, "", "utf8");
+
+      harness = await startHarness({ workspaceRoots: [outer] });
+      // Only the outer project exists here: the nested one is discovered from a document
+      // inside it, and none has opened. Its directory must stop the outer scan anyway,
+      // or the fix would only hold for whichever project happened to be found first.
+      await harness.waitForProjects();
+      await harness.open(templatePath, "<app-inner></app-inner><app-outer></app-outer>", "html");
+
+      assert.deepStrictEqual(
+        await diagnosticCodes(harness, templatePath),
+        ["missing-component-import:app-outer"],
+        "A project must not offer an element belonging to a package nested inside it"
+      );
+    });
+
+    it("keeps a nested project's elements out when a watcher reports them", async () => {
+      const outer = path.join(sandbox, "workspace");
+      const inner = path.join(outer, "packages", "ui");
+      await writeProject(outer);
+      await writeProject(inner);
+      await fs.writeFile(
+        path.join(outer, "src", "outer.component.ts"),
+        component("OuterComponent", "app-outer"),
+        "utf8"
+      );
+
+      const templatePath = path.join(outer, "src", "host.component.html");
+      await fs.writeFile(path.join(outer, "src", "host.component.ts"), host("host.component.html"), "utf8");
+      await fs.writeFile(templatePath, "", "utf8");
+
+      harness = await startHarness({ workspaceRoots: [outer] });
+      await harness.waitForProjects();
+      await harness.open(templatePath, "<app-inner></app-inner>", "html");
+      const before = await indexSize(harness);
+
+      // The outer project's watcher covers its whole root, so a file written inside the
+      // nested package reaches it. The scan boundary has to hold here too, or the index
+      // is polluted again one edit at a time.
+      const innerPath = path.join(inner, "src", "inner.component.ts");
+      await fs.writeFile(innerPath, component("InnerComponent", "app-inner"), "utf8");
+      await harness.client.sendNotification(DidChangeWatchedFilesNotification.type, {
+        changes: [{ uri: harness.uri(innerPath), type: FileChangeType.Created }],
+      });
+
+      await assertStaysTrue(async () => (await indexSize(harness as Harness)) === before);
+      assert.deepStrictEqual(
+        await diagnosticCodes(harness, templatePath),
+        [],
+        "A watched file inside a nested package must not enter the containing project's index"
+      );
+    });
+
     it("keeps sibling projects' indexes apart", async () => {
       const shop = path.join(sandbox, "apps", "shop");
       const admin = path.join(sandbox, "apps", "admin");
@@ -245,6 +316,18 @@ describe("LSP protocol regressions", function () {
 async function indexSize(harness: Harness): Promise<number> {
   const metrics = await harness.client.sendRequest(PerformanceMetricsRequest);
   return metrics.projects[0]?.elementCount ?? 0;
+}
+
+/**
+ * Holds a condition that must stay true, for long enough that work the server started
+ * would have landed. Asserting an absence needs the wait a `waitFor` does not give.
+ */
+async function assertStaysTrue(condition: () => Promise<boolean>, forMs = 1500): Promise<void> {
+  const deadline = Date.now() + forMs;
+  while (Date.now() < deadline) {
+    assert.ok(await condition(), "A condition that had to hold stopped holding");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 /** Waits for work the server started from a watched change to settle. */

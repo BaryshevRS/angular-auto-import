@@ -27,6 +27,7 @@ import { toDocumentView } from "../adapters/lsp/document";
 import { type AngularCompilerApi, loadAngularCompiler } from "../core/angular-compiler";
 import { fileUriToPath } from "../core/document";
 import { installSharedLogger } from "../core/logging";
+import { AngularProjectDiscovery } from "../core/project-discovery";
 import { DEFAULT_EXTENSION_CONFIG, resolveExtensionConfig } from "../core/settings";
 import { clearTemplateCache } from "../utils/template-detection";
 import { CodeActionHandler } from "./code-actions";
@@ -332,10 +333,17 @@ async function startProjects(context: ServerContext, environment: ServerEnvironm
   });
   state.watchedFiles = watchedFiles;
 
+  // One discovery for both: what it calls a project root is what a project's scan
+  // stops at, so a nested package cannot be a root for routing and a subdirectory for
+  // indexing at the same time. Sharing it also shares the manifest cache, which
+  // `invalidateManifest` then clears for both at once.
+  const discovery = new AngularProjectDiscovery({ logger });
+
   const runtimeHost = new ProjectRuntimeHost({
     logger,
     storagePath: environment.storagePath,
     fileWatchers: watchedFiles,
+    boundaries: discovery,
     reindexIntervalMinutes: environment.config.indexRefreshInterval,
     onDidChangeIndex: () => {
       // An element that just appeared or disappeared can change any open document's
@@ -350,6 +358,7 @@ async function startProjects(context: ServerContext, environment: ServerEnvironm
   const projects = new ServerProjects({
     workspaceRoots: environment.workspaceRoots,
     logger,
+    discovery,
     initializeRoot: (rootPath) => runtimeHost.create(rootPath),
     disposeRoot: (rootPath) => runtimeHost.dispose(rootPath),
   });

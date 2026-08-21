@@ -4,7 +4,7 @@
  * A runtime owns everything that belongs to a single project: its TypeScript
  * configuration, its index, its persistent cache, and the watching that keeps the
  * index current. Keeping the ownership explicit is what keeps nested and sibling
- * projects from sharing an index. {@link ProjectRuntimeHost} owns their lifecycle.
+ * projects from sharing an index, and the scan stops where the next project begins. {@link ProjectRuntimeHost} owns their lifecycle.
  * @module
  */
 
@@ -15,7 +15,7 @@ import type { FileSystem } from "../core/file-system";
 import type { FileWatcherFactory } from "../core/file-watching";
 import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../core/logging";
 import { type ProgressHost, silentProgressHost } from "../core/progress";
-import { projectSourceQuery, projectTemplateQuery } from "../core/source-files";
+import { type ProjectBoundaries, projectSourceQuery, projectTemplateQuery } from "../core/source-files";
 import { TsConfigResolver } from "../core/tsconfig";
 import { AngularIndexer } from "../services/indexer";
 import type { ProcessedTsConfig } from "../types/tsconfig";
@@ -32,6 +32,12 @@ export interface ProjectRuntimeOptions {
   fileSystem?: FileSystem;
   /** How this runtime learns that a watched file changed. */
   fileWatchers?: FileWatcherFactory;
+  /**
+   * Recognizes the packages nested inside this root. Shared with discovery so a
+   * directory is a boundary for this project's index exactly when it is a root of its
+   * own — including one no document has opened yet.
+   */
+  boundaries?: ProjectBoundaries;
   /** Where indexing reports progress; silent unless the caller surfaces it. */
   progressHost?: ProgressHost;
   /** Directory the client set aside for caches; without one the index lives for this session. */
@@ -55,6 +61,7 @@ export class ProjectRuntime {
   private readonly logger: InstrumentedLogger;
   private readonly storagePath: string | undefined;
   private readonly fileSystem: FileSystem;
+  private readonly boundaries: ProjectBoundaries | undefined;
   private readonly cacheStore: CacheStore;
   private readonly persistentCache: FileCacheStore | undefined;
   private readonly reindexIntervalMinutes: number;
@@ -71,6 +78,7 @@ export class ProjectRuntime {
     this.logger = options.logger ?? withInstrumentation(silentLogger);
     this.storagePath = options.storagePath;
     this.fileSystem = options.fileSystem ?? createNodeFileSystem();
+    this.boundaries = options.boundaries;
     this.reindexIntervalMinutes = options.reindexIntervalMinutes ?? 0;
     this.tsConfigResolver = new TsConfigResolver({ logger: this.logger });
     this.persistentCache = this.storagePath ? this.createPersistentCache() : undefined;
@@ -81,6 +89,7 @@ export class ProjectRuntime {
       fileSystem: this.fileSystem,
       progressHost: options.progressHost ?? silentProgressHost,
       fileWatchers: options.fileWatchers ?? inertFileWatchers,
+      boundaries: this.boundaries,
     });
     this.indexSubscription = this.indexer.onDidChangeIndex(() => {
       this.generation += 1;
@@ -121,7 +130,7 @@ export class ProjectRuntime {
    * Excluded directories are never entered, so `node_modules` costs nothing here.
    */
   listSourceFiles(): Promise<string[]> {
-    return this.fileSystem.findFiles(projectSourceQuery(this.rootPath));
+    return this.fileSystem.findFiles(projectSourceQuery(this.rootPath, this.boundaries));
   }
 
   /**
@@ -129,7 +138,7 @@ export class ProjectRuntime {
    * whole-project report has any reason to look at a template nobody has opened.
    */
   listTemplateFiles(): Promise<string[]> {
-    return this.fileSystem.findFiles(projectTemplateQuery(this.rootPath));
+    return this.fileSystem.findFiles(projectTemplateQuery(this.rootPath, this.boundaries));
   }
 
   /**

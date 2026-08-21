@@ -40,7 +40,7 @@ async function collectFiles(directory: string, query: FileSearchQuery): Promise<
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       if (!isExcludedDirectory(entry.name, query)) {
-        subdirectories.push(collectFiles(entryPath, query));
+        subdirectories.push(collectSubdirectory(entryPath, query));
       }
     } else if (entry.isFile() && isRequestedFile(entry.name, query)) {
       files.push(entryPath);
@@ -49,6 +49,20 @@ async function collectFiles(directory: string, query: FileSearchQuery): Promise<
 
   const nested = await Promise.all(subdirectories);
   return files.concat(...nested);
+}
+
+/**
+ * Enters one subdirectory, unless the query rejects it.
+ *
+ * Kept separate from {@link collectFiles} so the question is asked inside the promise
+ * this directory already contributes, and siblings are still walked in parallel.
+ * @internal
+ */
+async function collectSubdirectory(directory: string, query: FileSearchQuery): Promise<string[]> {
+  if (query.enterDirectory && !(await query.enterDirectory(directory))) {
+    return [];
+  }
+  return collectFiles(directory, query);
 }
 
 /** @internal */
