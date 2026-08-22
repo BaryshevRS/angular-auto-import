@@ -15,7 +15,7 @@ import { Component } from '@angular/core';
   imports: [],
 })
 export class PipeLookalikesComponent {
-  readonly size = 1024;
+  readonly size: number | null = 1024;
   readonly label = 'a';
   readonly isLarge = false;
 

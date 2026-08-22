@@ -1,6 +1,7 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: the Angular templates under test contain JavaScript template literals.
 import * as assert from "node:assert";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { PARSE_OPTIONS } from "../../core/angular-compiler";
 import {
   type ScannedTemplateElement,
   scanTemplate,
@@ -10,12 +11,8 @@ import {
 import type { TemplateAstNode } from "../../types";
 import { AngularElementData } from "../../types";
 
-/** The template parser, as the provider calls it. */
-type ParseTemplate = (
-  text: string,
-  url: string,
-  options: { alwaysAttemptHtmlToR3AstConversion: boolean; collectCommentNodes: boolean }
-) => { nodes: TemplateAstNode[] };
+/** The template parser, as the server calls it. */
+type ParseTemplate = (text: string, url: string, options: typeof PARSE_OPTIONS) => { nodes: TemplateAstNode[] };
 
 let parseTemplate: ParseTemplate;
 let constructors: TemplateAstConstructors;
@@ -49,10 +46,7 @@ function lookupOf(...selectors: string[]): TemplateElementLookup {
 
 function scan(template: string, lookup: TemplateElementLookup = lookupOf()): ScannedTemplateElement[] {
   const document = TextDocument.create("file:///project/src/app.component.html", "html", 1, template);
-  const parsed = parseTemplate(template, "app.component.html", {
-    alwaysAttemptHtmlToR3AstConversion: true,
-    collectCommentNodes: true,
-  });
+  const parsed = parseTemplate(template, "app.component.html", PARSE_OPTIONS);
 
   return scanTemplate({ nodes: parsed.nodes, document, offset: 0, text: template, lookup, constructors });
 }
@@ -361,10 +355,7 @@ describe("Template scan", () => {
     const componentFile = `@Component({ template: \`${template}\` })\nclass C {}`;
     const offset = componentFile.indexOf(template);
     const document = TextDocument.create("file:///project/src/app.component.ts", "typescript", 1, componentFile);
-    const parsed = parseTemplate(template, "app.component.ts", {
-      alwaysAttemptHtmlToR3AstConversion: true,
-      collectCommentNodes: true,
-    });
+    const parsed = parseTemplate(template, "app.component.ts", PARSE_OPTIONS);
 
     const elements = scanTemplate({
       nodes: parsed.nodes,
@@ -424,14 +415,20 @@ describe("Template scan", () => {
       "`a` + /b/ + (v | access)",
       "x ? /a|b/ : (v | access)",
       "'' | access",
+      "x! / y | access",
+      "!x / y | access",
+      "1. / y | access",
+      "1.5e-3 / y | access",
+      ".5 / y | access",
+      "a?.b / y | access",
+      "typeof x / y | access",
+      "(a as string) | access",
+      "x?.[0] / y | access",
     ];
 
     /** The pipes the compiler itself found in an interpolation. */
     function parserPipes(template: string): string[] {
-      const parsed = parseTemplate(template, "app.component.html", {
-        alwaysAttemptHtmlToR3AstConversion: true,
-        collectCommentNodes: true,
-      });
+      const parsed = parseTemplate(template, "app.component.html", PARSE_OPTIONS);
       const found: string[] = [];
       const visitor = new recursiveAstVisitor();
       const walkChildren = visitor.visitPipe.bind(visitor);

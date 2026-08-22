@@ -27,3 +27,9 @@
 
 <!-- A slash after an object literal is division too. -->
 <p>{{ {a: 1} / size | bytes }}</p>
+
+<!-- A non-null assertion ends a value, so the slash after it divides. -->
+<p>{{ size! / 2 | bytes }}</p>
+
+<!-- So does the trailing dot of a number. -->
+<p>{{ 1. / size | bytes }}</p>

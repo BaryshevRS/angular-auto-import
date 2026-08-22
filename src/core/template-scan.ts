@@ -77,9 +77,15 @@ type ExpressionVisitorClass = new () => {
   visitPipe(pipe: BindingPipeNode, context: unknown): void;
 };
 
-/** The one `BindingPipe` field this reads: which pipe the parser saw. */
+/**
+ * The `BindingPipe` fields this reads.
+ *
+ * `nameSpan` is an offset into the template as written, which holds because the parser
+ * is asked to preserve whitespace — see `PARSE_OPTIONS` in `core/angular-compiler`.
+ */
 type BindingPipeNode = {
   name: string;
+  nameSpan: { start: number };
 };
 
 /** An expression node the compiler can walk. */
@@ -157,13 +163,7 @@ function extractPipesFromExpression(context: ScanContext, expression: unknown): 
     return;
   }
 
-  try {
-    const expr = expression as { sourceSpan: { start: number; end: number } };
-    const expressionText = context.text.slice(expr.sourceSpan.start, expr.sourceSpan.end);
-    pushPipes(context, expressionText, context.offset, expr.sourceSpan.start, expression);
-  } catch (e) {
-    context.onError("Error extracting pipes from expression:", e as Error);
-  }
+  pushPipes(context, expression);
 }
 
 /**
@@ -486,12 +486,7 @@ function processSingleAttribute(
 
   // Check for pipes in bound attribute values (like *ngIf="expression | pipe")
   if (attr instanceof context.constructors.tmplAstBoundAttribute && attr.value) {
-    // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    const valueSpan = attr.valueSpan || attr.sourceSpan;
-    if (valueSpan) {
-      const expressionText = context.text.slice(valueSpan.start.offset, valueSpan.end.offset);
-      pushPipes(context, expressionText, context.offset, valueSpan.start.offset, attr.value);
-    }
+    pushPipes(context, attr.value);
   }
 }
 
@@ -500,268 +495,30 @@ function processSingleAttribute(
  * @internal
  */
 function processBoundTextNode(node: TmplAstBoundText, context: ScanContext): void {
-  pushPipes(
-    context,
-    // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    context.text.slice(node.sourceSpan.start.offset, node.sourceSpan.end.offset),
-    context.offset,
-    // @ts-expect-error: Complex Angular template AST node types from ts-morph
-    node.sourceSpan.start.offset,
-    node.value
-  );
+  pushPipes(context, node.value);
 }
 
 /**
- * Records the pipes used in one expression, at the position they occupy in the template.
+ * Records every pipe the parser found in one expression, at its position in the
+ * template.
  *
- * Each half of the answer comes from what can supply it. The parser knows *what* is a
- * pipe, so `a || b` contributes none. The template text knows *where*, because the
- * parser's own spans are measured against the source it was handed after whitespace
- * normalization, which is not the template and cannot be found in it.
- *
- * The scan over the text is therefore what produces ranges, and it skips two things a
- * bare pattern would not: the second bar of `||`, and anything inside a string literal.
- * The parser's answer then filters what is left. All three are needed — one expression
- * can hold `'x|name'` and `(v | name)` at once, where the names are equal and only the
- * quoting tells them apart.
+ * Both halves come from the parser, which is the only thing that knows them. A bar is
+ * a pipe operator only outside string, template and regular-expression literals, and
+ * only when it is not `||` — and inside a template literal it is an operator again in
+ * the `${…}` holes. Reading that from the text means reimplementing the expression
+ * grammar; the parser has already done it.
  * @internal
  */
-function pushPipes(
-  context: ScanContext,
-  expressionText: string,
-  baseOffset: number,
-  valueOffset: number,
-  expression: unknown
-): void {
-  const parsedPipeNames = collectPipeNames(context, expression);
-  if (parsedPipeNames.size === 0) {
+function pushPipes(context: ScanContext, expression: unknown): void {
+  if (!isVisitableExpression(expression)) {
     return;
   }
 
-  for (const candidate of findPipeCandidates(expressionText)) {
-    if (!parsedPipeNames.has(candidate.name)) {
-      continue;
-    }
-
-    const start = baseOffset + valueOffset + candidate.offset;
-    context.elements.push({
-      type: "pipe",
-      name: candidate.name,
-      range: {
-        start: context.document.positionAt(start),
-        end: context.document.positionAt(start + candidate.name.length),
-      },
-      tagName: "pipe",
-      isAttribute: false,
-      attributes: [],
-    });
-  }
-}
-
-/** A `| name` the scan found outside any literal, with the name's offset in the text. */
-type PipeCandidate = { name: string; offset: number };
-
-const PIPE_NAME_PATTERN = /^\s*([a-zA-Z][a-zA-Z0-9_-]*)/;
-
-/**
- * Characters that can end a value, and so make a following `/` a division.
- *
- * `}` is here for an object literal: `{a: 1} / y` divides. Everything else — an
- * operator, an opening bracket, the start of the expression — leaves a `/` to open a
- * regular expression instead.
- */
-const ENDS_VALUE = /[\w$)\]}]/;
-
-/**
- * Finds every `| name` in an expression that could be a pipe, with the name's offset.
- *
- * A bar means different things in different places, and only a scan that knows the
- * lexical structure can tell them apart: `a || b` is an operator, `'a|b'` and `/a|b/`
- * are text, and a template literal is text everywhere except its `${…}` holes, which
- * are expressions again and can hold real pipes at any depth.
- *
- * What this deliberately does *not* do is decide which candidates are pipes. That is
- * the parser's answer, and this only has to avoid hiding a real one from it or offering
- * it something that is not there.
- * @internal
- */
-function* findPipeCandidates(text: string): Generator<PipeCandidate> {
-  yield* scanRegion(text, 0, text.length, false);
-}
-
-/**
- * Scans one expression region, descending into the holes of template literals.
- * @param stopAtCloseBrace Whether a `}` at depth zero ends the region, which is what
- * terminates a `${…}` hole.
- * @returns Where the scan stopped: that `}`, or `end`.
- * @internal
- */
-function* scanRegion(
-  text: string,
-  start: number,
-  end: number,
-  stopAtCloseBrace: boolean
-): Generator<PipeCandidate, number> {
-  // Whether the previous token can end a value. A `/` after one divides; a `/` anywhere
-  // else opens a pattern. Tracking the token rather than the character is what keeps a
-  // regular expression from making the next `/` look like the start of another.
-  let afterValue = false;
-  let braceDepth = 0;
-
-  for (let index = start; index < end; index += 1) {
-    const character = text[index];
-
-    const literalEnd = yield* skipLiteral(text, index, end, afterValue);
-    if (literalEnd >= 0) {
-      index = literalEnd;
-      afterValue = true;
-    } else if (character === "}" && stopAtCloseBrace && braceDepth === 0) {
-      return index;
-    } else if (character === "|") {
-      index = yield* scanBar(text, index, end);
-      afterValue = false;
-    } else if (!/\s/.test(character)) {
-      braceDepth += braceDelta(character);
-      afterValue = ENDS_VALUE.test(character);
-    }
-  }
-  return end;
-}
-
-/**
- * Consumes whichever literal starts at `index`, yielding what its holes contain.
- * @param afterValue Whether the previous token can end a value, which is what makes a
- * `/` a division rather than the start of a pattern.
- * @returns The literal's last index, or `-1` when none starts here.
- * @internal
- */
-function* skipLiteral(text: string, index: number, end: number, afterValue: boolean): Generator<PipeCandidate, number> {
-  const character = text[index];
-
-  if (character === "'" || character === '"') {
-    return endOfStringLiteral(text, index);
-  }
-  if (character === "`") {
-    return yield* scanTemplateLiteral(text, index, end);
-  }
-  if (character === "/" && !afterValue) {
-    return endOfRegexLiteral(text, index);
-  }
-  return -1;
-}
-
-/** @internal */
-function braceDelta(character: string): number {
-  if (character === "{") {
-    return 1;
-  }
-  return character === "}" ? -1 : 0;
-}
-
-/**
- * Handles one bar: a logical OR is stepped over, anything else offers a candidate.
- * @returns The index to continue from.
- * @internal
- */
-function* scanBar(text: string, index: number, end: number): Generator<PipeCandidate, number> {
-  if (text[index + 1] === "|") {
-    // Step over both bars so the second cannot start a match either.
-    return index + 1;
-  }
-
-  const match = PIPE_NAME_PATTERN.exec(text.slice(index + 1, end));
-  if (match) {
-    yield { name: match[1], offset: index + 1 + match[0].indexOf(match[1]) };
-  }
-  return index;
-}
-
-/**
- * Scans a template literal, yielding the candidates found in its `${…}` holes.
- *
- * The literal's own text is skipped; each hole is an expression and is scanned as one,
- * which is also what finds the brace that closes it — a `}` inside a string in there
- * closes nothing.
- * @returns The index of the closing backtick, or the last index when there is none.
- * @internal
- */
-function* scanTemplateLiteral(text: string, open: number, end: number): Generator<PipeCandidate, number> {
-  for (let index = open + 1; index < end; index += 1) {
-    const character = text[index];
-
-    if (character === "\\") {
-      index += 1;
-    } else if (character === "`") {
-      return index;
-    } else if (character === "$" && text[index + 1] === "{") {
-      index = yield* scanRegion(text, index + 2, end, true);
-    }
-  }
-  return end - 1;
-}
-
-/**
- * The index of a regular expression literal's closing slash, or the end of the text.
- *
- * A character class may contain an unescaped `/`, which does not close the literal.
- * @param openIndex Index of the opening slash.
- * @internal
- */
-function endOfRegexLiteral(text: string, openIndex: number): number {
-  let inClass = false;
-
-  for (let index = openIndex + 1; index < text.length; index += 1) {
-    const character = text[index];
-    if (character === "\\") {
-      index += 1;
-    } else if (character === "[") {
-      inClass = true;
-    } else if (character === "]") {
-      inClass = false;
-    } else if (character === "/" && !inClass) {
-      return index;
-    }
-  }
-  return text.length;
-}
-
-/**
- * The index of a string literal's closing quote, or the end of the text when it has
- * none — an unterminated string is what a template being typed usually holds.
- * @param text The expression text.
- * @param openIndex Index of the opening quote.
- * @internal
- */
-function endOfStringLiteral(text: string, openIndex: number): number {
-  const quote = text[openIndex];
-
-  for (let index = openIndex + 1; index < text.length; index += 1) {
-    if (text[index] === "\\") {
-      index += 1;
-    } else if (text[index] === quote) {
-      return index;
-    }
-  }
-  return text.length;
-}
-
-/**
- * The names of the pipes the parser found in an expression.
- *
- * An expression it cannot walk yields nothing, which reports no pipes rather than
- * reporting wrong ones.
- * @internal
- */
-function collectPipeNames(context: ScanContext, expression: unknown): Set<string> {
-  const names = new Set<string>();
-  if (!isVisitableExpression(expression)) {
-    return names;
-  }
-
+  const pipes: BindingPipeNode[] = [];
   const visitor = new context.constructors.recursiveAstVisitor();
   const walkChildren = visitor.visitPipe.bind(visitor);
   visitor.visitPipe = (pipe, visitContext) => {
-    names.add(pipe.name);
+    pipes.push(pipe);
     // Keep descending: a pipe's own argument may hold another one.
     walkChildren(pipe, visitContext);
   };
@@ -770,8 +527,23 @@ function collectPipeNames(context: ScanContext, expression: unknown): Set<string
     expression.visit(visitor, null);
   } catch (e) {
     context.onError("Error walking a template expression for pipes:", e as Error);
+    return;
   }
-  return names;
+
+  for (const pipe of pipes) {
+    const start = context.offset + pipe.nameSpan.start;
+    context.elements.push({
+      type: "pipe",
+      name: pipe.name,
+      range: {
+        start: context.document.positionAt(start),
+        end: context.document.positionAt(start + pipe.name.length),
+      },
+      tagName: "pipe",
+      isAttribute: false,
+      attributes: [],
+    });
+  }
 }
 
 /** @internal */

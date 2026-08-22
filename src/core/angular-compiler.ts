@@ -36,8 +36,23 @@ export interface AngularCompilerApi {
   selectors: AngularSelectorApi;
 }
 
-/** How the compiler is parsed to keep a partial AST for a template with errors. */
-const PARSE_OPTIONS = { alwaysAttemptHtmlToR3AstConversion: true, collectCommentNodes: true };
+/**
+ * How the template is parsed.
+ *
+ * `alwaysAttemptHtmlToR3AstConversion` keeps a partial AST for a template with errors,
+ * which is every template while it is being typed.
+ *
+ * `preserveWhitespaces` is what makes the parser's expression spans usable. Without it
+ * the whitespace is normalized before expressions are parsed, so every span an
+ * expression node reports is measured against text that no longer matches the document
+ * — off by however much was removed ahead of it. With it, a span is an offset into the
+ * template as written, which is what a diagnostic needs.
+ */
+export const PARSE_OPTIONS = {
+  alwaysAttemptHtmlToR3AstConversion: true,
+  collectCommentNodes: true,
+  preserveWhitespaces: true,
+};
 
 // biome-ignore lint/suspicious/noExplicitAny: the dynamically imported compiler has no published type surface.
 type CompilerModule = any;

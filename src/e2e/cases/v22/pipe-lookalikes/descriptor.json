@@ -56,6 +56,24 @@
       "startCharacter": 22,
       "endLine": 28,
       "endCharacter": 27
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 31,
+      "startCharacter": 18,
+      "endLine": 31,
+      "endCharacter": 23
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 34,
+      "startCharacter": 18,
+      "endLine": 34,
+      "endCharacter": 23
     }
   ],
   "quickfixes": [
