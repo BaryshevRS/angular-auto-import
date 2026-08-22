@@ -9,6 +9,25 @@
   must not import `vscode`. A lint rule in `biome.json` enforces it, and
   `pnpm run vsce:inspect` checks the packaged artifact.
 
+### The Angular compiler decides, not a heuristic
+
+- **Anything about Angular syntax is the compiler's answer, not ours.** What a template
+  node is, what an expression means, where a construct sits in the source — ask
+  `@angular/compiler`. It is already a dependency and it is already parsing the file.
+- **Heuristics over template or expression text are not allowed.** No regular
+  expressions over an expression, no counting brackets, no classifying by the previous
+  character. If a problem looks like it needs one, stop and raise it — a heuristic goes
+  in only after an explicit decision, and with the reason written down beside it.
+  The reason for the rule: a bar in a template is a pipe operator only outside string,
+  template and regular-expression literals, only when it is not `||`, and again inside
+  the `${…}` holes of a template literal — and getting that from the text means
+  reimplementing the expression grammar, one reported bug at a time.
+- **Parse through `PARSE_OPTIONS` in `core/angular-compiler`**, never with options
+  written out again. `preserveWhitespaces: true` is what makes the compiler's spans
+  offsets into the file as written; without it whitespace is normalized before
+  expressions are parsed and every position it reports is wrong by however much was
+  removed ahead of it.
+
 ### Key Build Scripts
 - `compile`: Type check + lint + esbuild (development)
 - `package`: Type check + lint + esbuild (production, minified)
