@@ -151,6 +151,12 @@ export function scanTemplate(request: TemplateScanRequest): ScannedTemplateEleme
   };
 
   context.visit(request.nodes);
+
+  // The walk reaches things in the order the code happens to visit them: a chain of
+  // pipes outwards, a `@defer` block's parts by name rather than by where they were
+  // written. Callers are promised document order, so it is established here once
+  // rather than depended on in every branch above.
+  elements.sort(byDocumentPosition);
   return elements;
 }
 
@@ -301,6 +307,8 @@ function processBranchOrCase(item: { expression?: unknown; children?: TemplateAs
  * @internal
  */
 function processControlFlowSpecialBlocks(controlFlowNode: ControlFlowNode, context: ScanContext): void {
+  visitDeferTriggers(controlFlowNode as unknown as Record<string, unknown>, context);
+
   // Handle @for empty block
   const emptyBlock = controlFlowNode.empty as { children?: TemplateAstNode[] };
   if (emptyBlock?.children && Array.isArray(emptyBlock.children)) {
@@ -314,8 +322,6 @@ function processControlFlowSpecialBlocks(controlFlowNode: ControlFlowNode, conte
       context.visit(block.children);
     }
   }
-
-  visitDeferTriggers(controlFlowNode as unknown as Record<string, unknown>, context);
 }
 
 /**
@@ -604,4 +610,15 @@ function hasChildren(node: unknown): boolean {
  */
 function isKnownHtmlTag(tag: string): boolean {
   return knownTags.has(tag.toLowerCase());
+}
+
+/**
+ * Orders two candidates by where they start in the document.
+ * @internal
+ */
+function byDocumentPosition(left: ScannedTemplateElement, right: ScannedTemplateElement): number {
+  if (left.range.start.line !== right.range.start.line) {
+    return left.range.start.line - right.range.start.line;
+  }
+  return left.range.start.character - right.range.start.character;
 }

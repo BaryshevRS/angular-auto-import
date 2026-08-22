@@ -95,19 +95,24 @@ function collectTemplates(root: string): string[] {
   return found;
 }
 
-/** Where the compiler's own walk reports a pipe, as `name@offset`. */
+/**
+ * Where the compiler's own walk reports a pipe, as `name@offset`, in document order.
+ *
+ * The walk reaches a chain outwards — `v | first | second` gives `second` first — so the
+ * sites are ordered by offset here, which is what document order means.
+ */
 function compilerPipeSites(nodes: TemplateAstNode[]): string[] {
-  const found: string[] = [];
+  const found: Array<{ name: string; start: number }> = [];
   const Base = combinedAstVisitor;
   const collector = new (class extends Base {
     override visitPipe(pipe: { name: string; nameSpan: { start: number } }): void {
-      found.push(`${pipe.name}@${pipe.nameSpan.start}`);
+      found.push({ name: pipe.name, start: pipe.nameSpan.start });
       super.visitPipe(pipe);
     }
   })();
 
   tmplAstVisitAll(collector, nodes);
-  return found.sort();
+  return found.sort((left, right) => left.start - right.start).map((pipe) => `${pipe.name}@${pipe.start}`);
 }
 
 /** The repository root, so the fixtures are read from the source tree. */
@@ -362,6 +367,19 @@ describe("Template scan", () => {
     assert.strictEqual(textOf(template, pipe), "bytes");
   });
 
+  it("returns a chain of pipes in document order", () => {
+    // A chain parses outwards, so the walk reaches the last one first. The contract of
+    // `scanTemplate` is document order, and nothing here sorts to hide the difference.
+    const template = "{{ v | first | second | third }}";
+
+    const elements = scan(template);
+
+    assert.deepStrictEqual(
+      elements.filter((element) => element.type === "pipe").map((element) => element.name),
+      ["first", "second", "third"]
+    );
+  });
+
   it("finds a pipe applied to the argument of another pipe", () => {
     const template = "{{ value | slice: (other | number) }}";
 
@@ -512,7 +530,8 @@ describe("Template scan", () => {
       // The list above names corners that were once got wrong; this needs no one to name
       // them. `CombinedRecursiveAstVisitor` is the compiler's own walk over a template
       // and the expressions in it, so the comparison is against Angular rather than
-      // against a second implementation of this file.
+      // against a second implementation of this file. The scan's side is not sorted
+      // afterwards, so this pins the document order it promises as well as its contents.
       const root = path.join(findRepositoryRoot(__dirname), "src", "e2e", "projects", "v22");
       const templates = collectTemplates(root);
       assert.ok(templates.length > 20, `expected a corpus to compare against, found ${templates.length}`);
@@ -534,8 +553,7 @@ describe("Template scan", () => {
           constructors,
         })
           .filter((element) => element.type === "pipe")
-          .map((element) => `${element.name}@${document.offsetAt(element.range.start)}`)
-          .sort();
+          .map((element) => `${element.name}@${document.offsetAt(element.range.start)}`);
 
         const expected = compilerPipeSites(parsed.nodes);
         pipes += expected.length;
