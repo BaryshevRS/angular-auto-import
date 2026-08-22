@@ -314,6 +314,29 @@ function processControlFlowSpecialBlocks(controlFlowNode: ControlFlowNode, conte
       context.visit(block.children);
     }
   }
+
+  visitDeferTriggers(controlFlowNode as unknown as Record<string, unknown>, context);
+}
+
+/**
+ * Visits the expressions of a `@defer` block's triggers.
+ *
+ * `@defer (when items | ready)` holds an expression like any other, and it is the only
+ * one that lives beside a block rather than inside it.
+ * @internal
+ */
+function visitDeferTriggers(node: Record<string, unknown>, context: ScanContext): void {
+  for (const triggerSet of ["triggers", "prefetchTriggers", "hydrateTriggers"]) {
+    const triggers = node[triggerSet] as Record<string, { value?: unknown }> | undefined;
+    if (!triggers) {
+      continue;
+    }
+    for (const trigger of Object.values(triggers)) {
+      if (trigger?.value) {
+        context.extractPipesFromExpression(trigger.value);
+      }
+    }
+  }
 }
 
 /**

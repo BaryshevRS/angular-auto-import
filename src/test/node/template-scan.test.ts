@@ -1,5 +1,7 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: the Angular templates under test contain JavaScript template literals.
 import * as assert from "node:assert";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { PARSE_OPTIONS } from "../../core/angular-compiler";
 import {
@@ -17,6 +19,17 @@ type ParseTemplate = (text: string, url: string, options: typeof PARSE_OPTIONS) 
 let parseTemplate: ParseTemplate;
 let constructors: TemplateAstConstructors;
 let recursiveAstVisitor: RecursiveAstVisitorClass;
+let combinedAstVisitor: CombinedAstVisitorClass;
+let tmplAstVisitAll: (visitor: unknown, nodes: TemplateAstNode[]) => void;
+
+/**
+ * The compiler's own walk over a whole template — nodes and the expressions inside
+ * them. Using it rather than a walk written here is what makes the corpus check an
+ * independent answer instead of a second copy of the one being tested.
+ */
+type CombinedAstVisitorClass = new () => {
+  visitPipe(pipe: { name: string; nameSpan: { start: number } }): void;
+};
 
 /** The compiler's expression walker, used here as the oracle the scan is checked against. */
 type RecursiveAstVisitorClass = new () => {
@@ -60,6 +73,56 @@ function textOf(template: string, element: ScannedTemplateElement): string {
   return document.getText({ start: element.range.start, end: element.range.end });
 }
 
+/** Every `.html` template under a fixture project. */
+function collectTemplates(root: string): string[] {
+  const found: string[] = [];
+  const pending = [root];
+
+  while (pending.length > 0) {
+    const directory = pending.pop() as string;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) {
+        continue;
+      }
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+      } else if (entry.name.endsWith(".html")) {
+        found.push(entryPath);
+      }
+    }
+  }
+  return found;
+}
+
+/** Where the compiler's own walk reports a pipe, as `name@offset`. */
+function compilerPipeSites(nodes: TemplateAstNode[]): string[] {
+  const found: string[] = [];
+  const Base = combinedAstVisitor;
+  const collector = new (class extends Base {
+    override visitPipe(pipe: { name: string; nameSpan: { start: number } }): void {
+      found.push(`${pipe.name}@${pipe.nameSpan.start}`);
+      super.visitPipe(pipe);
+    }
+  })();
+
+  tmplAstVisitAll(collector, nodes);
+  return found.sort();
+}
+
+/** The repository root, so the fixtures are read from the source tree. */
+function findRepositoryRoot(from: string): string {
+  let directory = from;
+  while (!fs.existsSync(path.join(directory, "package.json"))) {
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      throw new Error(`No package.json above ${from}`);
+    }
+    directory = parent;
+  }
+  return directory;
+}
+
 describe("Template scan", () => {
   before(async () => {
     const angular = (await import("@angular/compiler")) as unknown as Record<string, unknown>;
@@ -74,6 +137,8 @@ describe("Template scan", () => {
       recursiveAstVisitor: angular.RecursiveAstVisitor,
     } as TemplateAstConstructors;
     recursiveAstVisitor = angular.RecursiveAstVisitor as RecursiveAstVisitorClass;
+    combinedAstVisitor = angular.CombinedRecursiveAstVisitor as CombinedAstVisitorClass;
+    tmplAstVisitAll = angular.tmplAstVisitAll as typeof tmplAstVisitAll;
   });
 
   it("records an indexed component tag with the range of its opening tag", () => {
@@ -442,6 +507,47 @@ describe("Template scan", () => {
       }
       return found.sort();
     }
+
+    it("reports the same pipes, at the same offsets, as the compiler does for every fixture template", () => {
+      // The list above names corners that were once got wrong; this needs no one to name
+      // them. `CombinedRecursiveAstVisitor` is the compiler's own walk over a template
+      // and the expressions in it, so the comparison is against Angular rather than
+      // against a second implementation of this file.
+      const root = path.join(findRepositoryRoot(__dirname), "src", "e2e", "projects", "v22");
+      const templates = collectTemplates(root);
+      assert.ok(templates.length > 20, `expected a corpus to compare against, found ${templates.length}`);
+
+      const disagreements: string[] = [];
+      let pipes = 0;
+
+      for (const templatePath of templates) {
+        const text = fs.readFileSync(templatePath, "utf8");
+        const document = TextDocument.create("file:///project/app.component.html", "html", 1, text);
+        const parsed = parseTemplate(text, "app.component.html", PARSE_OPTIONS);
+
+        const scanned = scanTemplate({
+          nodes: parsed.nodes,
+          document,
+          offset: 0,
+          text,
+          lookup: lookupOf(),
+          constructors,
+        })
+          .filter((element) => element.type === "pipe")
+          .map((element) => `${element.name}@${document.offsetAt(element.range.start)}`)
+          .sort();
+
+        const expected = compilerPipeSites(parsed.nodes);
+        pipes += expected.length;
+
+        if (JSON.stringify(scanned) !== JSON.stringify(expected)) {
+          disagreements.push(`${path.relative(root, templatePath)}\n  scan:     ${scanned}\n  compiler: ${expected}`);
+        }
+      }
+
+      assert.deepStrictEqual(disagreements, [], `The scan and the compiler disagree:\n${disagreements.join("\n")}`);
+      assert.ok(pipes > 20, `expected the corpus to exercise pipes, found ${pipes}`);
+    });
 
     for (const expression of expressions) {
       it(`reports the same pipes as the parser for ${expression}`, () => {
