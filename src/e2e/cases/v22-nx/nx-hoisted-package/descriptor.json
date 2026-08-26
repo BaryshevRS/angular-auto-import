@@ -1,0 +1,26 @@
+{
+  "case": "nx-hoisted-package",
+  "componentPath": "apps/shop/src/app/hoisted-host.component.ts",
+  "templatePath": "apps/shop/src/app/hoisted-host.component.html",
+  "diagnostics": [
+    {
+      "code": "missing-component-import:hoisted-card",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 0,
+      "startCharacter": 0,
+      "endLine": 0,
+      "endCharacter": 14
+    }
+  ],
+  "quickfixes": [
+    {
+      "diagnosticCode": "missing-component-import:hoisted-card",
+      "title": "⟐ Import HoistedCardComponent from '@fixture/hoisted-ui'",
+      "expectedImport": {
+        "className": "HoistedCardComponent",
+        "moduleSpecifier": "@fixture/hoisted-ui"
+      }
+    }
+  ]
+}

@@ -22,6 +22,9 @@
       "@alias/*": [
         "apps/angular-demo/src/app/tsconfig-aliases/alias/*"
       ],
+      "@angular-demo/app/nx-welcome": [
+        "apps/angular-demo/src/app/nx-welcome.component.ts"
+      ],
       "@angular-demo/feature-mercury": [
         "libs/mercury/feature-mercury/src/index.ts"
       ],
@@ -37,8 +40,20 @@
       "@angular-demo/ui-moon": [
         "libs/moon/src/index.ts"
       ],
+      "@dup/left": [
+        "apps/angular-demo/src/app/duplicate-modules/left/shared.module.ts"
+      ],
+      "@dup/right": [
+        "apps/angular-demo/src/app/duplicate-modules/right/shared.module.ts"
+      ],
       "@deep-alias": [
         "apps/angular-demo/src/app/tsconfig-aliases/deep-alias/deep-alias.component.ts"
+      ],
+      "@shared/*": [
+        "libs/shared-scope/*"
+      ],
+      "@wild/*": [
+        "apps/angular-demo/src/app/alias-scope/wild/*/index.ts"
       ]
     }
   },

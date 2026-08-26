@@ -4,7 +4,6 @@ import * as process from "node:process";
 import * as vscode from "vscode";
 import { ChannelTransport } from "./channel-transport";
 import { getLoggerConfig } from "./config";
-import { FileTransport } from "./file-transport";
 import type { LogEntry, LoggerConfig, LogLevel, LogPoint, PerformanceMetrics, Transport } from "./types";
 
 export class Logger {
@@ -84,9 +83,6 @@ export class Logger {
 
     if (this.context) {
       this.transports.push(new ChannelTransport(this.config));
-      if (this.config.fileLoggingEnabled) {
-        this.transports.push(new FileTransport(this.config, this.context));
-      }
     }
   }
 
@@ -230,6 +226,16 @@ export class Logger {
 
   public logException(error: Error, context?: Record<string, unknown>) {
     this.fatal("An unhandled exception occurred", error, context);
+  }
+
+  /**
+   * The extension's output channel, once logging has been initialized.
+   *
+   * The language client writes the server's forwarded logs here too, so everything the
+   * extension has to say arrives in one place.
+   */
+  public get channel(): vscode.LogOutputChannel | undefined {
+    return this.transports.find((t): t is ChannelTransport => t instanceof ChannelTransport)?.channel;
   }
 
   /** Shows the Output Channel panel and selects the Angular Auto Import channel. */

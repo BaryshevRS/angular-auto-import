@@ -5,7 +5,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "../logger";
+import { sharedLogger } from "../core/logging";
 
 /**
  * Information about an Angular dependency found in `node_modules`.
@@ -50,8 +50,32 @@ async function getRootPackageJson(projectRootPath: string): Promise<PackageJson 
     const content = await fs.readFile(packageJsonPath, "utf-8");
     return JSON.parse(content) as PackageJson;
   } catch (error) {
-    logger.error(`[PackageJson] Error reading or parsing root package.json at ${packageJsonPath}`, error as Error);
+    sharedLogger().error(
+      `[PackageJson] Error reading or parsing root package.json at ${packageJsonPath}`,
+      error as Error
+    );
     return null;
+  }
+}
+
+async function resolveDependencyPath(projectRootPath: string, dependencyName: string): Promise<string> {
+  let currentPath = projectRootPath;
+
+  while (true) {
+    try {
+      return await fs.realpath(path.join(currentPath, "node_modules", dependencyName));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") {
+        throw error;
+      }
+
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) {
+        throw error;
+      }
+      currentPath = parentPath;
+    }
   }
 }
 
@@ -82,8 +106,7 @@ export async function findAngularDependencies(projectRootPath: string): Promise<
     processedDeps.add(depName);
 
     try {
-      const depPath = path.join(projectRootPath, "node_modules", depName);
-      const realDepPath = await fs.realpath(depPath); // handle symlinks for pnpm
+      const realDepPath = await resolveDependencyPath(projectRootPath, depName);
       const depPackageJsonPath = path.join(realDepPath, "package.json");
       const depPackageJsonContent = await fs.readFile(depPackageJsonPath, "utf-8");
       const depPackageJson = JSON.parse(depPackageJsonContent) as PackageJson;
@@ -117,7 +140,7 @@ export async function getLibraryEntryPoints(library: AngularDependency): Promise
     const packageJson = await loadPackageJson(library.path);
     processPackageJsonEntryPoints(packageJson, library, entryPoints);
   } catch (error) {
-    logger.error(`[PackageJson] Error getting entry points for ${library.name}`, error as Error);
+    sharedLogger().error(`[PackageJson] Error getting entry points for ${library.name}`, error as Error);
   }
 
   return entryPoints;

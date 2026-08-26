@@ -1,0 +1,10 @@
+{
+  "name": "@nx-fixture/shop",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "22.0.2",
+    "@angular/common": "22.0.2",
+    "@fixture/hoisted-ui": "0.0.0"
+  }
+}

@@ -1,0 +1,6 @@
+This project is deliberately not installed.
+
+Discovery in .vscode-test.mjs otherwise skips a project with no node_modules, which is
+the right rule for a fixture nobody installed and the wrong one here: nothing in this
+project needs an installed dependency. What it tests is where a manifest sits and what
+a tsconfig maps in, and both are read from source.

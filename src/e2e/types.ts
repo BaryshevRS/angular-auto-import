@@ -27,8 +27,23 @@ export interface ExpectedImport {
 export interface QuickfixDescriptor {
   diagnosticCode: string;
   title: string;
-  command: string;
   expectedImport: ExpectedImport;
+  /**
+   * A module whose import makes {@link expectedImport} unnecessary.
+   *
+   * A fix applied earlier in the same run can import an NgModule that exports what a
+   * later fix would have imported — `TableModule` brings PrimeNG's `PrimeTemplate` with
+   * it — and the later diagnostic is then gone before its fix is ever offered. The
+   * contract is that the template ends up with an owner for every token, not that a
+   * particular symbol was named, so a case says here which module counts instead.
+   */
+  satisfiedBy?: ExpectedImport;
+  /**
+   * Which command the action ran, in descriptors recorded before code actions carried
+   * their edit directly. Nothing reads it; it survives so old descriptors still parse.
+   * @deprecated
+   */
+  command?: string;
 }
 
 /**
@@ -53,6 +68,8 @@ export interface CaseConfig {
   templatePath: string;
   modulePath?: string;
   preserveImports?: boolean;
+  /** Minimum diagnostics the generator must observe before recording the snapshot. */
+  expectedDiagnostics?: number;
 }
 
 /**

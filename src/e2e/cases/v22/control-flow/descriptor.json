@@ -425,13 +425,21 @@
       "startCharacter": 13,
       "endLine": 64,
       "endCharacter": 18
+    },
+    {
+      "code": "missing-pipe-import:percent",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 45,
+      "startCharacter": 25,
+      "endLine": 45,
+      "endCharacter": 32
     }
   ],
   "quickfixes": [
     {
       "diagnosticCode": "missing-directive-import:[ngIf]",
       "title": "⟐ Import NgIf from '@angular/common'",
-      "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "NgIf",
         "moduleSpecifier": "@angular/common"
@@ -440,7 +448,6 @@
     {
       "diagnosticCode": "missing-component-import:lib-ui-demo-one",
       "title": "⟐ Import UiDemoOneComponent from '@angular-demo/ui-demo-one'",
-      "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "UiDemoOneComponent",
         "moduleSpecifier": "@angular-demo/ui-demo-one"
@@ -449,7 +456,6 @@
     {
       "diagnosticCode": "missing-directive-import:[libDirectivePrefixLess]",
       "title": "⟐ Import DirectivePrefixLess from '@angular-demo/ui-moon'",
-      "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "DirectivePrefixLess",
         "moduleSpecifier": "@angular-demo/ui-moon"
@@ -458,7 +464,6 @@
     {
       "diagnosticCode": "missing-pipe-import:bytes",
       "title": "⟐ Import UiDemoBytesPipe from '@angular-demo/ui-demo-one'",
-      "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "UiDemoBytesPipe",
         "moduleSpecifier": "@angular-demo/ui-demo-one"
@@ -467,7 +472,6 @@
     {
       "diagnosticCode": "missing-pipe-import:percent",
       "title": "⟐ Import PercentPipe from '@angular/common'",
-      "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "PercentPipe",
         "moduleSpecifier": "@angular/common"
@@ -476,7 +480,6 @@
     {
       "diagnosticCode": "missing-pipe-import:keyvalue",
       "title": "⟐ Import KeyValuePipe from '@angular/common'",
-      "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "KeyValuePipe",
         "moduleSpecifier": "@angular/common"

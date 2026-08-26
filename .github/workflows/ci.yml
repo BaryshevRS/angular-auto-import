@@ -1,0 +1,52 @@
+# The suites that need no editor, on both platforms the extension runs on.
+#
+# Windows is the point of the matrix. Path handling is where an editor-agnostic core
+# goes wrong quietly — a boundary-unsafe prefix comparison, a cache key mixing
+# ts-morph's forward slashes with the platform separator — and the Node suites are the
+# ones that would catch it. They have never run there.
+#
+# The Extension Host and E2E suites are not here: they download VS Code, need a display,
+# and the E2E fixtures install their own dependencies, which this repository does not
+# track. Run those locally — `pnpm run test:unit`, then `pnpm run test:e2e:v22:parallel`.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-suites:
+    name: Node suites (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Both platforms report, so a Windows-only failure is never hidden by Linux.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `check`, not `check:fix`: CI reports formatting, it does not rewrite it.
+      - name: Formatting and lint
+        run: pnpm run check
+
+      - name: Types
+        run: pnpm run check-types
+
+      - name: Node test suites
+        run: pnpm run test:node

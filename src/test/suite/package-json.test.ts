@@ -220,6 +220,53 @@ describe("Package JSON Utilities", function () {
       }
     });
 
+    it("should resolve Angular dependencies from an ancestor node_modules when the application has no node_modules", async () => {
+      const tempWorkspacePath = await fs.mkdtemp(path.join(fixturesPath, "temp-hoisted-angular-"));
+      const applicationRoot = path.join(tempWorkspacePath, "apps", "fixture-app");
+      const dependencyName = "@angular/hoisted-only-fixture";
+      const hoistedDependencyPath = path.join(tempWorkspacePath, "node_modules", dependencyName);
+
+      try {
+        await fs.mkdir(applicationRoot, { recursive: true });
+        await fs.mkdir(hoistedDependencyPath, { recursive: true });
+        await fs.writeFile(
+          path.join(tempWorkspacePath, "package.json"),
+          JSON.stringify({
+            name: "tooling-only-workspace",
+            private: true,
+            devDependencies: { nx: "0.0.0" },
+          })
+        );
+        await fs.writeFile(
+          path.join(applicationRoot, "package.json"),
+          JSON.stringify({
+            name: "fixture-app",
+            private: true,
+            dependencies: {
+              "@angular/core": "0.0.0",
+              [dependencyName]: "0.0.0",
+            },
+          })
+        );
+        await fs.writeFile(
+          path.join(hoistedDependencyPath, "package.json"),
+          JSON.stringify({ name: dependencyName, version: "0.0.0" })
+        );
+
+        await assert.rejects(fs.access(path.join(applicationRoot, "node_modules")));
+        const result = await findAngularDependencies(applicationRoot);
+
+        assert.deepStrictEqual(result, [
+          {
+            name: dependencyName,
+            path: await fs.realpath(hoistedDependencyPath),
+          },
+        ]);
+      } finally {
+        await fs.rm(tempWorkspacePath, { recursive: true, force: true });
+      }
+    });
+
     it("should handle dependencies with missing package.json", async () => {
       // This test verifies that missing package.json in node_modules doesn't crash the function
       const result = await findAngularDependencies(simpleProjectPath);

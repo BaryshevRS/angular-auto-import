@@ -39,30 +39,43 @@ const esbuildProblemMatcherPlugin = {
 };
 
 async function main() {
-	const ctx = await esbuild.context({
-		entryPoints: ["src/extension.ts"],
-		bundle: true,
-		format: "cjs",
-		minify: production,
-		sourcemap: !production,
-		sourcesContent: false,
-		platform: "node",
-		target: "node22",
-		outfile: "dist/extension.js",
-		logLevel: "silent",
-		external: [
-			"vscode",
-			"*.node"
-		],
-		plugins: [esbuildProblemMatcherPlugin],
-	});
+	const contexts = await Promise.all([
+		esbuild.context({
+			entryPoints: ["src/extension.ts"],
+			bundle: true,
+			format: "cjs",
+			minify: production,
+			sourcemap: !production,
+			sourcesContent: false,
+			platform: "node",
+			target: "node22",
+			outfile: "dist/extension.js",
+			logLevel: "silent",
+			external: ["vscode", "*.node"],
+			plugins: [esbuildProblemMatcherPlugin],
+		}),
+		esbuild.context({
+			entryPoints: ["src/lsp/server-main.ts"],
+			bundle: true,
+			format: "cjs",
+			minify: production,
+			sourcemap: !production,
+			sourcesContent: false,
+			platform: "node",
+			target: "node22",
+			outfile: "dist/server.js",
+			logLevel: "silent",
+			external: ["*.node"],
+			plugins: [esbuildProblemMatcherPlugin],
+		}),
+	]);
 
 	if (watch) {
-		await ctx.watch();
+		await Promise.all(contexts.map((context) => context.watch()));
 		console.log("[watch] watching for changes...");
 	} else {
-		await ctx.rebuild();
-		await ctx.dispose();
+		await Promise.all(contexts.map((context) => context.rebuild()));
+		await Promise.all(contexts.map((context) => context.dispose()));
 	}
 }
 

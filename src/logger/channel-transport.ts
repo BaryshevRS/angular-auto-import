@@ -2,12 +2,24 @@ import * as vscode from "vscode";
 import type { LogEntry, LoggerConfig, Transport } from "./types";
 
 export class ChannelTransport implements Transport {
-  private readonly outputChannel: vscode.OutputChannel;
+  private readonly outputChannel: vscode.LogOutputChannel;
   private readonly config: LoggerConfig;
 
   constructor(config: LoggerConfig) {
     this.config = config;
-    this.outputChannel = vscode.window.createOutputChannel("Angular Auto Import");
+    // A log channel rather than a plain one, so the language client can share it: the
+    // client insists on a LogOutputChannel, and `appendLine` on one appends raw, leaving
+    // this transport's own formatting intact.
+    this.outputChannel = vscode.window.createOutputChannel("Angular Auto Import", { log: true });
+  }
+
+  /**
+   * The channel itself, so the language client can write the server's logs into the
+   * same place the client writes its own. Two channels for one extension would leave
+   * the user guessing which half of it they were reading.
+   */
+  public get channel(): vscode.LogOutputChannel {
+    return this.outputChannel;
   }
 
   public log(entry: LogEntry): void {

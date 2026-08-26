@@ -1,0 +1,8 @@
+{
+  "case": "tui-slot-imported",
+  "componentPath": "apps/taiga-demo/src/app/playground/tui-slot-imported.component.ts",
+  "templatePath": "apps/taiga-demo/src/app/playground/tui-slot-imported.component.html",
+  "preserveImports": true,
+  "diagnostics": [],
+  "quickfixes": []
+}

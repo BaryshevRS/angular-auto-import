@@ -1,6 +1,6 @@
 # E2E Snapshot-Based Regression Tests
 
-End-to-end tests that verify diagnostics (missing Angular imports) and quickfixes (auto-import suggestions) work correctly inside a real VS Code Extension Dev Host against multiple Angular version test projects (v18, v19, v20, v21).
+End-to-end tests that verify diagnostics (missing Angular imports) and quickfixes (auto-import suggestions) work correctly inside a real VS Code Extension Dev Host against multiple Angular version test projects and a dedicated Nx monorepo layout fixture.
 
 ## How It Works
 
@@ -24,7 +24,7 @@ src/e2e/
 
 ## Multi-Version Test Projects
 
-Tests run against Nx workspaces in `src/e2e/projects/v{18,19,20,21}`. Each workspace contains Angular demo apps with different UI library combinations:
+Tests run against Nx workspaces in `src/e2e/projects/v{18,19,20,21,22}`. Each workspace contains Angular demo apps with different UI library combinations:
 
 | Version | Angular | Nx     | Apps                                                              |
 |---------|---------|--------|-------------------------------------------------------------------|
@@ -32,10 +32,115 @@ Tests run against Nx workspaces in `src/e2e/projects/v{18,19,20,21}`. Each works
 | v19     | ~19.2   | 21.1.3 | angular-demo, angular-material, ng-zorro, primeng, taiga (v4)     |
 | v20     | ~20.0   | 21.1.3 | angular-demo, angular-material, ng-zorro, primeng                 |
 | v21     | ~21.0   | 22.6.0 | angular-demo, angular-material, ng-zorro, primeng, taiga (v5-rc)  |
+| v22     | ~22.0   | 22.0.3 | angular-demo, angular-material, ng-zorro, primeng                 |
 
-- **v19** is the reference project, checked into git. All other versions are generated from it.
-- **v18, v20, v21** are gitignored and generated on demand via the generator script.
+- **v19** is the reference project used by the generator.
+- **v18 and v20** are gitignored and generated on demand. The currently committed
+  version fixtures are v19, v21, and v22.
 - Test cases that reference apps missing in a given version are automatically skipped.
+
+### The layout project: `v22-nx`
+
+`v22-nx` is not another Angular version. It exists because of a shape none of the
+version projects can have, and it is the regression net for
+[issue #35](https://github.com/BaryshevRS/angular-auto-import/issues/35).
+
+#### What it is
+
+Every version project above has **one manifest**, at the workspace root, with `libs/`
+inside it. So the project root *is* the workspace root, the libraries are already under
+it, and the plain scan finds them. A path alias there only ever decides how the import
+gets *written*.
+
+`v22-nx` splits the manifests the way Nx and pnpm workspaces actually split them:
+
+| | version projects | `v22-nx` |
+|---|---|---|
+| `@angular/core` declared in | workspace root | `apps/shop/package.json` |
+| project root discovery finds | the workspace | the application |
+| workspace root is itself a project | yes | **no** — tooling only |
+| `libs/` relative to that root | inside | **outside** |
+| reachable by | the plain scan | `compilerOptions.paths` only |
+| `baseUrl` | set | **absent** |
+
+#### What it closes
+
+| Case | Fixture | Records |
+|---|---|---|
+| Library with no manifest of its own | `libs/ui-kit` | `@shop/ui-kit` |
+| Library that is a package of its own | `libs/data-access` | `@shop/data-access` |
+| Alias whose `*` sits mid-path | `libs/wild/beacon` | a **relative** path |
+| Declared dependency hoisted above the app | `node_modules/@fixture/hoisted-ui` | `@fixture/hoisted-ui` |
+
+The four are separate decisions, not four shots at the same one:
+
+- **No manifest.** The library is not a package at all, just a directory the
+  application's tsconfig maps in. Nothing but a `paths` entry can reach it.
+- **Its own manifest, declaring `@angular/core`.** The boundary rule — which stops a
+  project swallowing a package nested inside it — would call this someone else's code.
+  The alias outranks it: the tsconfig says outright that this compiles as part of the
+  application. Without a fixture, that decision is a comment nobody checks.
+- **Mid-path `*`.** Such an entry maps a name *into* the path rather than appending to
+  it, so no specifier can be rebuilt from a file under it. The alias is deliberately
+  skipped and the import falls back to a relative path. What must never happen is an
+  absolute path, which is not an import any TypeScript file can carry — and that is
+  exactly what used to come out.
+- **Hoisted dependency.** `apps/shop/package.json` declares `@fixture/hoisted-ui`, but
+  `apps/shop/node_modules` does not exist. The package is materialized only in the
+  workspace ancestor's `node_modules`, so dependency discovery must walk upward from
+  the application root. The snapshot asserts the resulting diagnostic, the quick-fix
+  module specifier, and the import actually applied to the component.
+
+The absent `baseUrl` is load-bearing rather than incidental. TypeScript resolves `paths`
+against the config file that **declared** them, which through `extends` is the base
+config several directories above the one being read — not against the reading config's
+own directory. Get that wrong and every alias points at a directory that does not
+exist, silently. `v22-nx` is the only project where that rule is exercised.
+
+#### Why it is not a fourth app inside `v22`
+
+Two of the reasons are hard blockers, not preferences:
+
+1. **The root manifest is mutually exclusive.** The core of #35 is that the workspace
+   root is *not* an Angular project, so there is nothing to fall back to. `v22`'s root
+   declares `@angular/core` and must — its three apps depend on it. A nested app inside
+   `v22` would reproduce "the app is the root, libs are outside" and miss "there is
+   nothing above it", which is the half that makes `projectPath`, trusted roots, and
+   the status bar's message necessary in the first place.
+2. **`baseUrl` cannot be removed from `v22`.** All of its `paths` substitutions are
+   non-relative, and `get-tsconfig` rejects the whole config without a `baseUrl`
+   (`Non-relative paths are not allowed when 'baseUrl' is not set`). Dropping it would
+   kill every existing alias case at once; keeping it means the rule above is never
+   tested.
+
+And one matter of cost: `scripts/e2e-parallel.mjs` shards by app, so a fourth app is a
+fourth VS Code instance on a run that already takes four minutes — for a scenario that
+needs no full workspace install.
+
+#### Running it
+
+It needs no package-manager install: the Angular compiler comes from the extension and
+most fixtures are read as sources. `.e2e-no-install` tells `.vscode-test.mjs` to run it
+as-is. For the hoisting regression, `.vscode-test.mjs` copies the committed tiny package
+from `.e2e-fixtures/hoisted-ui` into the workspace-level
+`node_modules/@fixture/hoisted-ui` before VS Code starts. Nothing is copied into
+`apps/shop/node_modules`; that absence is the condition under test. One app means there
+is nothing to shard, and the suite finishes in seconds:
+
+```bash
+pnpm run test:e2e:v22-nx
+```
+
+To run only the hoisted-dependency regression or regenerate only its descriptor:
+
+```bash
+AAI_E2E_CASE=nx-hoisted-package pnpm run test:e2e:v22-nx
+AAI_E2E_CASE=nx-hoisted-package pnpm run test:generate:v22-nx
+```
+
+It is not part of the default `e2e` label, which points at `v19`. The same scenario is
+also covered without an editor in `src/test/node/lsp-monorepo.test.ts`, while the
+ancestor resolver itself has a focused test in `src/test/suite/package-json.test.ts`.
 
 ### Generating Test Projects
 
@@ -65,6 +170,8 @@ pnpm run test:e2e:v18
 pnpm run test:e2e:v19
 pnpm run test:e2e:v20
 pnpm run test:e2e:v21
+pnpm run test:e2e:v22
+pnpm run test:e2e:v22-nx
 
 # Regenerate descriptor snapshots (run after template or extension logic changes)
 pnpm run test:generate
@@ -72,6 +179,8 @@ pnpm run test:generate
 # Regenerate for a specific version
 pnpm run test:generate:v19
 pnpm run test:generate:v21
+pnpm run test:generate:v22
+pnpm run test:generate:v22-nx
 
 # Run only unit tests
 pnpm run test:unit
@@ -99,6 +208,14 @@ pnpm exec vscode-test --label e2e --grep "Case: taiga"
 
 # 3b. Run one generator case
 pnpm exec vscode-test --label generate --grep "generate taiga"
+```
+
+Alternatively, `AAI_E2E_CASE` filters both the generator and regression runner without
+depending on Mocha title matching. This is the preferred form for the Nx layout cases:
+
+```bash
+AAI_E2E_CASE=nx-hoisted-package pnpm run test:e2e:v22-nx
+AAI_E2E_CASE=nx-hoisted-package pnpm run test:generate:v22-nx
 ```
 
 Examples:
@@ -235,15 +352,33 @@ Test labels are defined in `.vscode-test.mjs` and generated dynamically by scann
 | `e2e:v19`        | `out/e2e/suite/**/*.test.js`     | `./src/e2e/projects/v19`            | 120s    |
 | `e2e:v20`        | `out/e2e/suite/**/*.test.js`     | `./src/e2e/projects/v20`            | 120s    |
 | `e2e:v21`        | `out/e2e/suite/**/*.test.js`     | `./src/e2e/projects/v21`            | 120s    |
+| `e2e:v22`        | `out/e2e/suite/**/*.test.js`     | `./src/e2e/projects/v22`            | 120s    |
+| `e2e:v22-nx`     | `out/e2e/suite/**/*.test.js`     | `./src/e2e/projects/v22-nx`         | 120s    |
 | `generate`       | `out/e2e/generator/**/*.test.js` | `./src/e2e/projects/v19`            | 120s    |
 | `generate:v18`   | `out/e2e/generator/**/*.test.js` | `./src/e2e/projects/v18`            | 120s    |
 | `generate:v19`   | `out/e2e/generator/**/*.test.js` | `./src/e2e/projects/v19`            | 120s    |
 | `generate:v20`   | `out/e2e/generator/**/*.test.js` | `./src/e2e/projects/v20`            | 120s    |
 | `generate:v21`   | `out/e2e/generator/**/*.test.js` | `./src/e2e/projects/v21`            | 120s    |
+| `generate:v22`   | `out/e2e/generator/**/*.test.js` | `./src/e2e/projects/v22`            | 120s    |
+| `generate:v22-nx`| `out/e2e/generator/**/*.test.js` | `./src/e2e/projects/v22-nx`         | 120s    |
 
 Labels `e2e` and `generate` (without version suffix) are legacy aliases pointing to v19.
 
-Only versions with `node_modules/` installed appear as labels. Generate the project first if a label is missing.
+Installed version projects appear as labels when they have `node_modules/`. A fixture
+can opt in without a full install by committing `.e2e-no-install`; `v22-nx` does this.
+Generate or install a version project first if its label is missing.
+
+## The fixture sweep
+
+`pnpm run test:fixtures` asks the server, for every installed fixture project, whether it
+reports anything the corpus did not record. A file may report only when a case says so
+with `preserveImports: true` — the flag that means "this fixture is missing an import as
+it is written". Every other case strips imports when it runs, so its fixture has to be
+clean at rest.
+
+It is what keeps a warning that nobody put there on purpose from being noticed by eye,
+and it is separate from `test:node` because it indexes each project's `node_modules`:
+about forty seconds for all four versions against seventeen for the rest of the suite.
 
 ## Troubleshooting
 

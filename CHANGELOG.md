@@ -4,6 +4,19 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.0.0] – 2026-08-26
+
+### Added
+- **Import path style**: `angular-auto-import.importModuleSpecifier` can choose `shortest`, `relative`, `non-relative`, or `project-relative`; the default now matches TypeScript/VS Code's shortest-path behavior
+- **Project-aware import formatting**: generated imports and changed `@Component imports` arrays now respect the nearest Prettier/EditorConfig `printWidth`, `tabWidth`, `useTabs`, and `singleQuote` values without reformatting the rest of the component; the configuration is read directly, so Prettier is not a dependency and a config written as code keeps Prettier's own defaults
+
+### Changed
+- **Language Server Protocol migration**: diagnostics, completions, definitions, quick fixes, project discovery, and indexing now run through a dedicated language server, separating Angular analysis from the VS Code extension host
+
+### Fixed
+- **Nx monorepo indexing**: workspace roots are accepted as Angular project roots, and libraries referenced through `compilerOptions.paths` are discovered and indexed ([#35](https://github.com/BaryshevRS/angular-auto-import/issues/35))
+- **Logical OR pipe detection**: the second `|` in a `||` expression is no longer reported as a missing Angular pipe import ([#34](https://github.com/BaryshevRS/angular-auto-import/issues/34))
+
 ## [2.8.0] - 2026-07-22
 
 ### Fixed

@@ -1,0 +1,26 @@
+{
+  "case": "nx-midpath-wildcard",
+  "componentPath": "apps/shop/src/app/beacon-host.component.ts",
+  "templatePath": "apps/shop/src/app/beacon-host.component.html",
+  "diagnostics": [
+    {
+      "code": "missing-component-import:lib-wild-beacon",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 2,
+      "startCharacter": 0,
+      "endLine": 2,
+      "endCharacter": 17
+    }
+  ],
+  "quickfixes": [
+    {
+      "diagnosticCode": "missing-component-import:lib-wild-beacon",
+      "title": "⟐ Import WildBeaconComponent from '../../../../libs/wild/beacon/src/beacon.component'",
+      "expectedImport": {
+        "className": "WildBeaconComponent",
+        "moduleSpecifier": "../../../../libs/wild/beacon/src/beacon.component"
+      }
+    }
+  ]
+}

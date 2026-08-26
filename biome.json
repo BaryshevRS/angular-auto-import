@@ -28,7 +28,11 @@
     "lineEnding": "lf",
     "lineWidth": 120,
     "attributePosition": "auto",
-    "includes": ["src/**/*.ts", "src/**/*.js", "*.json"]
+    "includes": [
+      "src/**/*.ts",
+      "src/**/*.js",
+      "*.json"
+    ]
   },
   "linter": {
     "enabled": true,
@@ -59,7 +63,10 @@
                   "kind": "importAlias"
                 },
                 "match": "(.*)",
-                "formats": ["camelCase", "PascalCase"]
+                "formats": [
+                  "camelCase",
+                  "PascalCase"
+                ]
               }
             ]
           }
@@ -114,7 +121,6 @@
         "noConfusingLabels": "error",
         "noDuplicateCase": "error",
         "noDuplicateClassMembers": "error",
-
         "noMisleadingCharacterClass": "error",
         "noPrototypeBuiltins": "error",
         "noSelfCompare": "error",
@@ -162,7 +168,9 @@
   },
   "overrides": [
     {
-      "includes": ["src/**/*.ts"],
+      "includes": [
+        "src/**/*.ts"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -175,7 +183,10 @@
                       "kind": "importAlias"
                     },
                     "match": "(.*)",
-                    "formats": ["camelCase", "PascalCase"]
+                    "formats": [
+                      "camelCase",
+                      "PascalCase"
+                    ]
                   }
                 ]
               }
@@ -185,7 +196,9 @@
       }
     },
     {
-      "includes": ["src/test/**/*.ts"],
+      "includes": [
+        "src/test/**/*.ts"
+      ],
       "linter": {
         "rules": {
           "suspicious": {
@@ -196,6 +209,32 @@
           },
           "correctness": {
             "noUnusedFunctionParameters": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/core/**/*.ts",
+        "src/lsp/**/*.ts",
+        "src/adapters/lsp/**/*.ts",
+        "src/adapters/node/**/*.ts",
+        "src/test/node/**/*.ts",
+        "!src/lsp/client.ts",
+        "!src/lsp/client-commands.ts",
+        "!src/lsp/client-status.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "vscode": "Editor-agnostic code must not import vscode; take a core port instead."
+                }
+              }
+            }
           }
         }
       }

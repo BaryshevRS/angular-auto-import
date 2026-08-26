@@ -1,0 +1,16 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@shop/data-access": ["./libs/data-access/src/index.ts"],
+      "@shop/ui-kit": ["./libs/ui-kit/src/index.ts"],
+      "@wild/*": ["./libs/wild/*/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "tmp"]
+}

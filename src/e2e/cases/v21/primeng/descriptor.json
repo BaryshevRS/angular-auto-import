@@ -736,7 +736,7 @@
   "quickfixes": [
     {
       "diagnosticCode": "missing-component-import:p-toast",
-      "title": "⟐ Import Toast from 'primeng/toast'",
+      "title": "\u27d0 Import Toast from 'primeng/toast'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Toast",
@@ -745,7 +745,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-menubar",
-      "title": "⟐ Import Menubar from 'primeng/menubar'",
+      "title": "\u27d0 Import Menubar from 'primeng/menubar'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Menubar",
@@ -754,7 +754,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-breadcrumb",
-      "title": "⟐ Import Breadcrumb from 'primeng/breadcrumb'",
+      "title": "\u27d0 Import Breadcrumb from 'primeng/breadcrumb'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Breadcrumb",
@@ -763,7 +763,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-button",
-      "title": "⟐ Import Button from 'primeng/button'",
+      "title": "\u27d0 Import Button from 'primeng/button'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Button",
@@ -772,7 +772,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-panel",
-      "title": "⟐ Import Panel from 'primeng/panel'",
+      "title": "\u27d0 Import Panel from 'primeng/panel'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Panel",
@@ -781,7 +781,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pRipple]",
-      "title": "⟐ Import Button from 'primeng/button'",
+      "title": "\u27d0 Import Button from 'primeng/button'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Button",
@@ -790,7 +790,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pRipple]",
-      "title": "⟐ Import Ripple from 'primeng/ripple'",
+      "title": "\u27d0 Import Ripple from 'primeng/ripple'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Ripple",
@@ -799,7 +799,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pTooltip]",
-      "title": "⟐ Import Button from 'primeng/button'",
+      "title": "\u27d0 Import Button from 'primeng/button'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Button",
@@ -808,7 +808,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pTooltip]",
-      "title": "⟐ Import Tooltip from 'primeng/tooltip'",
+      "title": "\u27d0 Import Tooltip from 'primeng/tooltip'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Tooltip",
@@ -817,7 +817,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-badge",
-      "title": "⟐ Import Badge from 'primeng/badge'",
+      "title": "\u27d0 Import Badge from 'primeng/badge'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Badge",
@@ -826,7 +826,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-avatar",
-      "title": "⟐ Import Avatar from 'primeng/avatar'",
+      "title": "\u27d0 Import Avatar from 'primeng/avatar'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Avatar",
@@ -835,7 +835,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-chip",
-      "title": "⟐ Import Chip from 'primeng/chip'",
+      "title": "\u27d0 Import Chip from 'primeng/chip'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Chip",
@@ -844,7 +844,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-tag",
-      "title": "⟐ Import Tag from 'primeng/tag'",
+      "title": "\u27d0 Import Tag from 'primeng/tag'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Tag",
@@ -853,7 +853,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pButton]",
-      "title": "⟐ Import ButtonDirective from 'primeng/button'",
+      "title": "\u27d0 Import ButtonDirective from 'primeng/button'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "ButtonDirective",
@@ -862,7 +862,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pStyleClass]",
-      "title": "⟐ Import StyleClass from 'primeng/styleclass'",
+      "title": "\u27d0 Import StyleClass from 'primeng/styleclass'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "StyleClass",
@@ -871,7 +871,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-message",
-      "title": "⟐ Import Message from 'primeng/message'",
+      "title": "\u27d0 Import Message from 'primeng/message'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Message",
@@ -880,7 +880,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-floatlabel",
-      "title": "⟐ Import FloatLabel from 'primeng/floatlabel'",
+      "title": "\u27d0 Import FloatLabel from 'primeng/floatlabel'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FloatLabel",
@@ -889,7 +889,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pInputText]",
-      "title": "⟐ Import InputText from 'primeng/inputtext'",
+      "title": "\u27d0 Import InputText from 'primeng/inputtext'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "InputText",
@@ -898,7 +898,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-autocomplete",
-      "title": "⟐ Import AutoComplete from 'primeng/autocomplete'",
+      "title": "\u27d0 Import AutoComplete from 'primeng/autocomplete'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "AutoComplete",
@@ -907,7 +907,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-autocomplete",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -916,7 +916,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[ngModel]:not([formControlName]):not([formControl])",
-      "title": "⟐ Import AutoComplete from 'primeng/autocomplete'",
+      "title": "\u27d0 Import AutoComplete from 'primeng/autocomplete'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "AutoComplete",
@@ -925,7 +925,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[ngModel]:not([formControlName]):not([formControl])",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -934,7 +934,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-select",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -943,7 +943,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-select",
-      "title": "⟐ Import Select from 'primeng/select'",
+      "title": "\u27d0 Import Select from 'primeng/select'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Select",
@@ -952,7 +952,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-datepicker",
-      "title": "⟐ Import DatePicker from 'primeng/datepicker'",
+      "title": "\u27d0 Import DatePicker from 'primeng/datepicker'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "DatePicker",
@@ -961,7 +961,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-datepicker",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -970,7 +970,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-inputnumber",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -979,7 +979,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-inputnumber",
-      "title": "⟐ Import InputNumber from 'primeng/inputnumber'",
+      "title": "\u27d0 Import InputNumber from 'primeng/inputnumber'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "InputNumber",
@@ -988,7 +988,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-checkbox",
-      "title": "⟐ Import Checkbox from 'primeng/checkbox'",
+      "title": "\u27d0 Import Checkbox from 'primeng/checkbox'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Checkbox",
@@ -997,7 +997,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-checkbox",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -1006,7 +1006,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-toggleswitch",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -1015,7 +1015,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-toggleswitch",
-      "title": "⟐ Import ToggleSwitch from 'primeng/toggleswitch'",
+      "title": "\u27d0 Import ToggleSwitch from 'primeng/toggleswitch'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "ToggleSwitch",
@@ -1024,7 +1024,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-selectbutton",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -1033,7 +1033,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-selectbutton",
-      "title": "⟐ Import SelectButton from 'primeng/selectbutton'",
+      "title": "\u27d0 Import SelectButton from 'primeng/selectbutton'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "SelectButton",
@@ -1042,7 +1042,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-colorPicker",
-      "title": "⟐ Import ColorPicker from 'primeng/colorpicker'",
+      "title": "\u27d0 Import ColorPicker from 'primeng/colorpicker'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "ColorPicker",
@@ -1051,7 +1051,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-colorPicker",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -1060,7 +1060,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-blockUI",
-      "title": "⟐ Import BlockUI from 'primeng/blockui'",
+      "title": "\u27d0 Import BlockUI from 'primeng/blockui'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "BlockUI",
@@ -1069,7 +1069,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-dialog",
-      "title": "⟐ Import Dialog from 'primeng/dialog'",
+      "title": "\u27d0 Import Dialog from 'primeng/dialog'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Dialog",
@@ -1078,7 +1078,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-tabs",
-      "title": "⟐ Import Tabs from 'primeng/tabs'",
+      "title": "\u27d0 Import Tabs from 'primeng/tabs'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Tabs",
@@ -1087,7 +1087,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-tablist",
-      "title": "⟐ Import TabList from 'primeng/tabs'",
+      "title": "\u27d0 Import TabList from 'primeng/tabs'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TabList",
@@ -1096,7 +1096,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-tab",
-      "title": "⟐ Import Tab from 'primeng/tabs'",
+      "title": "\u27d0 Import Tab from 'primeng/tabs'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Tab",
@@ -1105,7 +1105,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-tabpanels",
-      "title": "⟐ Import TabPanels from 'primeng/tabs'",
+      "title": "\u27d0 Import TabPanels from 'primeng/tabs'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TabPanels",
@@ -1114,7 +1114,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-tabpanel",
-      "title": "⟐ Import TabPanel from 'primeng/tabs'",
+      "title": "\u27d0 Import TabPanel from 'primeng/tabs'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TabPanel",
@@ -1123,7 +1123,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-progressBar",
-      "title": "⟐ Import ProgressBar from 'primeng/progressbar'",
+      "title": "\u27d0 Import ProgressBar from 'primeng/progressbar'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "ProgressBar",
@@ -1132,7 +1132,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-accordion",
-      "title": "⟐ Import Accordion from 'primeng/accordion'",
+      "title": "\u27d0 Import Accordion from 'primeng/accordion'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Accordion",
@@ -1141,7 +1141,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-accordion-panel",
-      "title": "⟐ Import AccordionPanel from 'primeng/accordion'",
+      "title": "\u27d0 Import AccordionPanel from 'primeng/accordion'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "AccordionPanel",
@@ -1150,7 +1150,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-accordion-header",
-      "title": "⟐ Import AccordionHeader from 'primeng/accordion'",
+      "title": "\u27d0 Import AccordionHeader from 'primeng/accordion'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "AccordionHeader",
@@ -1159,7 +1159,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-accordion-content",
-      "title": "⟐ Import AccordionContent from 'primeng/accordion'",
+      "title": "\u27d0 Import AccordionContent from 'primeng/accordion'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "AccordionContent",
@@ -1168,7 +1168,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-skeleton",
-      "title": "⟐ Import Skeleton from 'primeng/skeleton'",
+      "title": "\u27d0 Import Skeleton from 'primeng/skeleton'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Skeleton",
@@ -1177,7 +1177,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-divider",
-      "title": "⟐ Import Divider from 'primeng/divider'",
+      "title": "\u27d0 Import Divider from 'primeng/divider'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "Divider",
@@ -1186,7 +1186,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-contextMenu",
-      "title": "⟐ Import ContextMenu from 'primeng/contextmenu'",
+      "title": "\u27d0 Import ContextMenu from 'primeng/contextmenu'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "ContextMenu",
@@ -1195,7 +1195,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-table",
-      "title": "⟐ Import TableModule from 'primeng/table'",
+      "title": "\u27d0 Import TableModule from 'primeng/table'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TableModule",
@@ -1204,16 +1204,20 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[pTemplate]",
-      "title": "⟐ Import PrimeTemplate from 'primeng/api'",
+      "title": "\u27d0 Import PrimeTemplate from 'primeng/api'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "PrimeTemplate",
         "moduleSpecifier": "primeng/api"
+      },
+      "satisfiedBy": {
+        "className": "TableModule",
+        "moduleSpecifier": "primeng/table"
       }
     },
     {
       "diagnosticCode": "missing-directive-import:[pSortableColumn]",
-      "title": "⟐ Import TableModule from 'primeng/table'",
+      "title": "\u27d0 Import TableModule from 'primeng/table'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TableModule",
@@ -1222,7 +1226,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-sortIcon",
-      "title": "⟐ Import TableModule from 'primeng/table'",
+      "title": "\u27d0 Import TableModule from 'primeng/table'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TableModule",
@@ -1231,7 +1235,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:p-scrollTop",
-      "title": "⟐ Import ScrollTop from 'primeng/scrolltop'",
+      "title": "\u27d0 Import ScrollTop from 'primeng/scrolltop'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "ScrollTop",

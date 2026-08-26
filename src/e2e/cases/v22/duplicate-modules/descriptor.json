@@ -1,0 +1,18 @@
+{
+  "case": "duplicate-modules",
+  "componentPath": "apps/angular-demo/src/app/duplicate-modules/duplicate-modules.component.ts",
+  "templatePath": "apps/angular-demo/src/app/duplicate-modules/duplicate-modules.component.html",
+  "preserveImports": true,
+  "diagnostics": [
+    {
+      "code": "missing-component-import:app-right-badge",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 2,
+      "startCharacter": 0,
+      "endLine": 2,
+      "endCharacter": 17
+    }
+  ],
+  "quickfixes": []
+}

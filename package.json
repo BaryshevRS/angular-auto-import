@@ -3,7 +3,7 @@
   "displayName": "Angular Auto Import",
   "description": "Intelligent auto-import for Angular standalone components, directives & pipes. Fix all missing imports with one command. Works with templates, external libraries & monorepos.",
   "publisher": "baryshevrs",
-  "version": "2.8.0",
+  "version": "3.0.0",
   "icon": "img/icon.png",
   "galleryBanner": {
     "color": "#0f172a",
@@ -87,21 +87,10 @@
         "category": "Angular Auto Import"
       },
       {
-        "command": "angular-auto-import.clearCache",
-        "title": "Angular Auto Import: Clear Cache",
-        "category": "Angular Auto Import"
-      },
-      {
         "command": "angular-auto-import.showLogs",
         "title": "Show Logs",
         "category": "Angular Auto Import",
         "icon": "$(output)"
-      },
-      {
-        "command": "angular-auto-import.showPerformanceMetrics",
-        "title": "Show Performance Metrics (Debug)",
-        "category": "Angular Auto Import",
-        "icon": "$(graph)"
       },
       {
         "command": "angular-auto-import.fix-all",
@@ -125,12 +114,24 @@
             "null"
           ],
           "default": null,
-          "description": "Optional. Absolute path to the Angular project root. If set, overrides workspace folders. If not set, uses open workspace folders."
+          "description": "Optional. Absolute path to the Angular project root. If set, overrides workspace folders and is used as given, without checking its package.json for @angular/core \u2014 which is what makes it work for the root of a monorepo. Libraries outside it are still indexed when its tsconfig maps them in through compilerOptions.paths. If not set, uses open workspace folders."
         },
-        "angular-auto-import.index.refreshInterval": {
-          "type": "number",
-          "default": 60,
-          "description": "Interval in minutes for automatically reindexing Angular elements. Set to 0 to disable periodic reindexing."
+        "angular-auto-import.importModuleSpecifier": {
+          "type": "string",
+          "enum": [
+            "shortest",
+            "relative",
+            "non-relative",
+            "project-relative"
+          ],
+          "enumDescriptions": [
+            "Prefer the path with fewer segments, matching the default TypeScript/VS Code auto-import behavior.",
+            "Always use a relative path for project elements.",
+            "Prefer a tsconfig paths alias whenever one resolves the element.",
+            "Use a tsconfig paths alias only when a relative import would cross a project or package boundary."
+          ],
+          "default": "shortest",
+          "description": "Controls module specifiers generated for indexed project elements. External package imports are unchanged."
         },
         "angular-auto-import.completion.pipes.enabled": {
           "type": "boolean",
@@ -184,29 +185,6 @@
           "default": "INFO",
           "description": "Set the logging level."
         },
-        "angular-auto-import.logging.fileLoggingEnabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable or disable logging to a file."
-        },
-        "angular-auto-import.logging.logDirectory": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null,
-          "description": "The directory where log files will be stored. If not set, a default directory within the extension's storage path will be used."
-        },
-        "angular-auto-import.logging.rotationMaxSize": {
-          "type": "number",
-          "default": 5,
-          "description": "The maximum size of a log file in megabytes before it is rotated."
-        },
-        "angular-auto-import.logging.rotationMaxFiles": {
-          "type": "number",
-          "default": 5,
-          "description": "The maximum number of log files to keep."
-        },
         "angular-auto-import.logging.outputFormat": {
           "type": "string",
           "enum": [
@@ -228,8 +206,8 @@
     "package": "pnpm run check-types && pnpm run lint && node esbuild.js --production",
     "compile-tests": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\" && tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
-    "copy-test-fixtures": "cp -r src/test/fixtures out/test/",
-    "copy-e2e-cases": "cp -r src/e2e/cases out/e2e/",
+    "copy-test-fixtures": "node -e \"require('fs').cpSync('src/test/fixtures', 'out/test/fixtures', { recursive: true })\"",
+    "copy-e2e-cases": "node -e \"require('fs').cpSync('src/e2e/cases', 'out/e2e/cases', { recursive: true })\"",
     "check-types": "tsc --noEmit",
     "lint": "pnpm run check:fix && pnpm run lint:stopslop && pnpm run check-types",
     "lint:biome": "biome lint --diagnostic-level=error --no-errors-on-unmatched src",
@@ -241,20 +219,29 @@
     "check": "biome check --error-on-warnings src",
     "check:fix": "biome check --write --error-on-warnings src",
     "test": "vscode-test",
-    "test:unit": "pnpm run compile-tests && pnpm run copy-test-fixtures && vscode-test --label unit",
+    "test:node": "pnpm run compile-tests && pnpm run copy-test-fixtures && pnpm run test:node:run",
+    "test:fixtures": "pnpm run compile-tests && node scripts/sweep-fixtures.mjs",
+    "test:node:run": "mocha --ui bdd --timeout 20000 \"out/test/node/**/*.test.js\"",
+    "test:unit": "pnpm run compile-tests && pnpm run copy-test-fixtures && pnpm run test:node:run && vscode-test --label unit",
+    "test:lsp-lifecycle": "pnpm run package && pnpm run compile-tests && vscode-test --label lsp-lifecycle",
     "test:e2e": "pnpm run compile-tests && pnpm run copy-e2e-cases && vscode-test --label e2e",
     "test:e2e:v19": "pnpm run compile-tests && pnpm run copy-e2e-cases && vscode-test --label e2e:v19",
     "test:e2e:v21": "pnpm run compile-tests && pnpm run copy-e2e-cases && vscode-test --label e2e:v21",
     "test:e2e:v22": "pnpm run compile-tests && pnpm run copy-e2e-cases && vscode-test --label e2e:v22",
+    "test:e2e:v22-nx": "pnpm run compile-tests && pnpm run copy-e2e-cases && vscode-test --label e2e:v22-nx",
     "test:e2e:v19:parallel": "pnpm run compile-tests && pnpm run copy-e2e-cases && node scripts/e2e-parallel.mjs v19",
     "test:e2e:v21:parallel": "pnpm run compile-tests && pnpm run copy-e2e-cases && node scripts/e2e-parallel.mjs v21",
     "test:e2e:v22:parallel": "pnpm run compile-tests && pnpm run copy-e2e-cases && node scripts/e2e-parallel.mjs v22",
     "test:generate:v22": "pnpm run compile-tests && pnpm run copy-e2e-cases && vscode-test --label generate:v22",
+    "test:generate:v22-nx": "pnpm run compile-tests && pnpm run copy-e2e-cases && vscode-test --label generate:v22-nx",
     "generate:test-projects": "node --import tsx scripts/generate-test-projects.ts",
     "test:coverage": "c8 --experimental-monocart --reporter=v8 --reporter=lcov pnpm run test",
     "coverage:generate": "node scripts/generate-coverage.js",
     "coverage:sonar": "pnpm run coverage:generate && node scripts/sonar-scan.js",
     "vsce:package": "vsce package --no-dependencies",
+    "vsce:inspect": "node scripts/inspect-vsix.mjs",
+    "benchmark": "pnpm run compile-tests && node scripts/benchmark.mjs",
+    "host-cost": "pnpm run package && pnpm run compile-tests && vscode-test --label host-cost",
     "vsce:publish": "vsce publish --no-dependencies",
     "release": "pnpm run vsce:package && pnpm run vsce:publish",
     "docs:build": "rm -rf docs && typedoc",
@@ -267,7 +254,7 @@
     "@types/node": "~20.19.43",
     "@types/vscode": "^1.105.0",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.5.2",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
     "c8": "^10.1.3",
     "esbuild": "^0.25.12",
@@ -287,7 +274,11 @@
     "@angular/compiler": "^22.0.1",
     "get-tsconfig": "^4.14.0",
     "p-limit": "7.3.0",
-    "ts-morph": "^26.0.0"
+    "ts-morph": "^26.0.0",
+    "vscode-languageclient": "^10.1.0",
+    "vscode-languageserver": "^10.1.0",
+    "vscode-languageserver-protocol": "3.18.2",
+    "vscode-languageserver-textdocument": "^1.0.12"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

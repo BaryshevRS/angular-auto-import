@@ -5,6 +5,7 @@ import { NzMenuDirective, NzMenuItemComponent, NzSubMenuComponent } from 'ng-zor
 import { NzIconDirective } from 'ng-zorro-antd/icon';
 import { NzDropdownButtonDirective, NzDropDownDirective, NzDropdownMenuComponent } from 'ng-zorro-antd/dropdown';
 import { NzButtonComponent } from 'ng-zorro-antd/button';
+import { NzWaveDirective } from 'ng-zorro-antd/core/wave';
 import { NzBadgeComponent } from 'ng-zorro-antd/badge';
 import { NzAvatarComponent } from 'ng-zorro-antd/avatar';
 import { NzBreadCrumbComponent, NzBreadCrumbItemComponent } from 'ng-zorro-antd/breadcrumb';
@@ -56,6 +57,7 @@ import { NzCheckboxComponent } from 'ng-zorro-antd/checkbox';
     NzHeaderComponent,
     NzDropDownDirective,
     NzButtonComponent,
+    NzWaveDirective,
     NzDropdownMenuComponent,
     NzMenuItemComponent,
     NzBadgeComponent,
