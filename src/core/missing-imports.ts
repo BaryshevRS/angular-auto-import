@@ -52,11 +52,14 @@ export interface MissingImportDiagnostic {
 interface CssSelectorLike {
   setElement(name: string): void;
   addAttribute(name: string, value: string): void;
+  addClassName(name: string): void;
   toString(): string;
   /** The tag the selector requires, or null when it matches any. */
   element?: string | null;
   /** The attributes it requires, flattened as name, value, name, value. */
   attrs?: string[];
+  /** The classes it requires, which a `.foo` is parsed into rather than into `attrs`. */
+  classNames?: string[];
   /** The `:not(...)` parts, which narrow where it applies. */
   notSelectors?: CssSelectorLike[];
 }
@@ -191,17 +194,22 @@ function rankOf(
 ): { isTheAttributeItself: boolean; demands: number; length: number } {
   const [parsed] = context.selectors.cssSelector.parse(selector);
   const attributes = parsed ? [...attributesOf(parsed)] : [];
+  const classes = parsed?.classNames ?? [];
   const [name, value] = attributes[0] ?? ["", ""];
   return {
-    // `[foo]` and nothing else: no tag, no value, no condition. `[foo]:not([disabled])`
-    // is a directive for some of the attribute's uses, not for the attribute.
+    // `[foo]` and nothing else: no tag, no value, no class, no condition. Each of those
+    // makes it a directive for some of the attribute's uses rather than for the
+    // attribute — `[foo].a` no less than `[foo]:not([disabled])`, and letting it hold the
+    // marker puts `.a[foo]` in the diagnostic, which is what a quick fix then looks
+    // elements up by.
     isTheAttributeItself:
       !parsed?.element &&
       (parsed?.notSelectors?.length ?? 0) === 0 &&
+      classes.length === 0 &&
       attributes.length === 1 &&
       name === token &&
       !value,
-    demands: attributes.length,
+    demands: attributes.length + classes.length,
     length: selector.length,
   };
 }
@@ -404,25 +412,30 @@ function demandsTheSame(selector: string, other: string, context: MissingImportC
  * excludes exactly what `:not([readonly][disabled])` excludes. Every part is therefore
  * sorted, and the `:not(...)` parts are selectors in their own right, read the same way.
  *
- * Class selectors are left out on purpose: Angular's own guidance is that a component or
- * directive is selected by tag and attribute, and this codebase follows it rather than
- * carrying a comparison for a form it does not otherwise handle.
+ * Classes count, and have to: a `.foo` is parsed into `classNames` rather than into
+ * `attrs`, so leaving them out made `[foo].a` and `[foo].b` one demand — and an imported
+ * `[foo].b` then answered for a missing `[foo].a` on an element carrying both, which is
+ * two directives Angular applies at once. Rare in libraries, where four of 1804 selectors
+ * mention a class at all, but the matcher decides these cases now and the comparison has
+ * to be told the same thing the matcher was.
  * @internal
  */
 function demandsOf(selector: CssSelectorLike): SelectorDemands {
   const attributes = attributesOf(selector).sort(
     ([oneName, oneValue], [otherName, otherValue]) => compare(oneName, otherName) || compare(oneValue, otherValue)
   );
+  const classes = [...(selector.classNames ?? [])].sort(compare);
   const conditions = (selector.notSelectors ?? []).map(demandsOf);
   conditions.sort((one, other) => compare(demandsKeyOf(one), demandsKeyOf(other)));
 
-  return { element: selector.element ?? "", attributes, conditions };
+  return { element: selector.element ?? "", attributes, classes, conditions };
 }
 
 /** What a selector asks for, with nothing left implicit. @internal */
 interface SelectorDemands {
   element: string;
   attributes: Array<[string, string]>;
+  classes: string[];
   conditions: SelectorDemands[];
 }
 
@@ -546,6 +559,9 @@ function getMatchedSelectors(
   templateCssSelector.setElement(element.tagName);
   for (const attr of element.attributes) {
     templateCssSelector.addAttribute(attr.name, attr.value ?? "");
+  }
+  for (const className of element.classNames ?? []) {
+    templateCssSelector.addClassName(className);
   }
 
   const matchedSelectors: string[] = [];

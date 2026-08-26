@@ -4,7 +4,8 @@
  * Two questions decide what a template token reports, and both are about selectors alone:
  *
  * - **Is it missing?** An imported element answers for a token only when its selector
- *   demands the same thing — same tag, same attributes, same values, same `:not(...)`.
+ *   demands the same thing — same tag, same attributes, same values, same classes, same
+ *   `:not(...)`.
  *   Anything else is a different directive that merely also matches here.
  * - **Which one speaks for it?** One token is one marker: it goes to the selector that is
  *   exactly the attribute, then to the one that demands the most, then to the longer.
@@ -40,6 +41,11 @@ const SELECTORS = [
   "[foo]:not([readonly][disabled])",
   "[foo][bar]",
   "[bar][foo]",
+  "[foo].a",
+  ".a[foo]",
+  "[foo]:not(.b)",
+  "[foo]:not(.c)",
+  "[foo].a.d",
 ] as const;
 
 type Selector = (typeof SELECTORS)[number];
@@ -62,6 +68,11 @@ const EQUIVALENT: Record<Selector, string> = {
   "[foo]:not([readonly][disabled])": "attribute, not both",
   "[foo][bar]": "two attributes",
   "[bar][foo]": "two attributes",
+  "[foo].a": "attribute and class",
+  ".a[foo]": "attribute and class",
+  "[foo]:not(.b)": "attribute, not class b",
+  "[foo]:not(.c)": "attribute, not class c",
+  "[foo].a.d": "attribute and two classes",
 };
 
 /** The element every case is asked about: it matches all of the selectors above. */
@@ -70,7 +81,16 @@ const TAG = "button";
 const ATTRIBUTES = [
   { name: "foo", value: "check" },
   { name: "bar", value: "" },
+  { name: "class", value: "a d" },
 ];
+/**
+ * What the scan would have put on the element for that `class`.
+ *
+ * Carried apart from the attribute because that is how it reaches the matcher: a `.a` in
+ * a selector is parsed into `classNames`, and an element that only has `class="a"` among
+ * its attributes has no classes at all as far as matching is concerned.
+ */
+const CLASSES = ["a", "d"];
 
 /** A directive answering to one selector, named so the name says nothing about the selector. */
 function directiveFor(selector: string, token: string = TOKEN): AngularElementData {
@@ -104,10 +124,16 @@ describe("Selector rules", function () {
   function report(
     present: readonly string[],
     imported: readonly string[],
-    on: { token: string; tag: string; attributes: Array<{ name: string; value: string }> } = {
+    on: {
+      token: string;
+      tag: string;
+      attributes: Array<{ name: string; value: string }>;
+      classNames?: string[];
+    } = {
       token: TOKEN,
       tag: TAG,
       attributes: ATTRIBUTES,
+      classNames: CLASSES,
     }
   ): string[] {
     const elements = present.map((selector) => directiveFor(selector, on.token));
@@ -135,12 +161,27 @@ describe("Selector rules", function () {
       isAttribute: true,
       tagName: on.tag,
       attributes: on.attributes,
+      classNames: on.classNames ?? [],
       range: { start: { line: 0, character: 0 }, end: { line: 0, character: on.token.length } },
     };
 
     return findMissingImports([element], "warning", context).map((diagnostic) =>
       diagnostic.code.slice(diagnostic.code.indexOf(":") + 1)
     );
+  }
+
+  /**
+   * A selector as the matcher spells it, which is what a diagnostic carries.
+   *
+   * `[foo].a` and `.a[foo]` are one selector written two ways, and the matcher answers
+   * with its own spelling of it — class first. The table below is about what is reported,
+   * not about how it is punctuated, so the expectation is put through the same parse.
+   */
+  function asMatched(selector: string): string {
+    return compiler.selectors.cssSelector
+      .parse(selector)
+      .map((parsed) => parsed.toString())
+      .join(", ");
   }
 
   describe("what an imported element answers for", () => {
@@ -153,7 +194,7 @@ describe("Selector rules", function () {
         const silenced = EQUIVALENT[imported] === EQUIVALENT[missing];
 
         it(`${missing} with ${imported} imported is ${silenced ? "silent" : "reported"}`, () => {
-          assert.deepStrictEqual(report([missing, imported], [imported]), silenced ? [] : [missing]);
+          assert.deepStrictEqual(report([missing, imported], [imported]), silenced ? [] : [asMatched(missing)]);
         });
       }
     }
@@ -223,11 +264,21 @@ describe("Selector rules", function () {
         marker: "[foo=check]",
         because: "a value is more particular than a tag at equal length",
       },
+      {
+        missing: ["[foo]", "[foo].a", "button[foo]"],
+        marker: "[foo]",
+        because: "a class makes it a directive for some of the attribute's uses, not for the attribute",
+      },
+      {
+        missing: ["[foo][bar]", "[foo].a.d"],
+        marker: "[foo].a.d",
+        because: "classes count towards what a selector demands, and two of them outweigh one attribute",
+      },
     ];
 
     for (const { missing, marker, because } of markerCases) {
       it(`gives it to ${marker} out of ${missing.length}: ${because}`, () => {
-        assert.deepStrictEqual(report(missing, []), [marker]);
+        assert.deepStrictEqual(report(missing, []), [asMatched(marker)]);
       });
     }
 
@@ -278,6 +329,7 @@ describe("Selector rules", function () {
               isAttribute: true,
               tagName: "div",
               attributes: [{ name: "foo", value: "" }],
+              classNames: [],
               range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
             },
           ],

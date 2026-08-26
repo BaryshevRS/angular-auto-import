@@ -46,6 +46,17 @@ export interface ScannedTemplateElement {
   tagName: string;
   isAttribute: boolean;
   attributes: TemplateElementAttribute[];
+  /**
+   * The classes the element carries statically, which is what a `.foo` in a selector is
+   * matched against.
+   *
+   * Separate from {@link ScannedTemplateElement.attributes} because a bound `[class]`
+   * must contribute none: Angular decides which directives apply before any expression
+   * has a value, so a class that is only ever computed selects nothing. The compiler
+   * says the same by giving every bound attribute an empty value in
+   * `getAttrsForDirectiveMatching`.
+   */
+  classNames: string[];
 }
 
 /** The slice of the element index the walk needs. */
@@ -62,6 +73,25 @@ export interface TemplateAstConstructors {
   tmplAstReference: TemplateAstClass<TmplAstReference>;
   tmplAstBoundAttribute: TemplateAstClass<TmplAstBoundAttribute>;
   tmplAstBoundText: TemplateAstClass<TmplAstBoundText>;
+  /**
+   * A `name="value"` written out in the template.
+   *
+   * Needed by name rather than by elimination: a `#class="ref"` is a reference whose
+   * name and value are both plain strings, and nothing but the node's kind tells it
+   * apart from the `class` attribute it is spelled like.
+   */
+  tmplAstTextAttribute: TemplateAstClass<{ name: string; value: string }>;
+  /**
+   * Which kinds of binding overwrite an attribute of the same name.
+   *
+   * `[class]` is a property binding named `class` and wipes a static `class="a"`;
+   * `[class.a]` is a class binding named `a` and leaves it alone. Only the kind tells
+   * them apart, since `[class.class]` would be a class binding named `class`.
+   *
+   * The compiler's own `BindingType`, taken whole rather than as named members, so the
+   * members keep the names the compiler gives them at the point of use.
+   */
+  bindingType: Readonly<Record<string, number>>;
   /**
    * The compiler's expression-AST walker, subclassed to find pipe nodes.
    *
@@ -365,22 +395,24 @@ function processElementOrTemplateNode(node: TmplAstElement | TmplAstTemplate, co
     value: "value" in attr && attr.value ? String(attr.value) : "",
   }));
 
+  const classNames = staticClassNames(node, isTemplate, context);
+
   const nodeName = isTemplate ? "ng-template" : node.name;
 
   if (isKnownHtmlTag(nodeName)) {
     // For known HTML tags (like button, input, a), check if they have Angular directives
     // by searching for compound selectors like "button[mat-button]", "input[matInput]"
-    addCompoundSelectorMatches(nodeName, regularAttrs, attributes, context);
+    addCompoundSelectorMatches(nodeName, regularAttrs, attributes, classNames, context);
   } else {
-    addAngularElementsToList(node, nodeName, attributes, context);
+    addAngularElementsToList(node, nodeName, attributes, classNames, context);
   }
 
   // Process attributes
   for (const attr of regularAttrs) {
-    processSingleAttribute(attr, false, nodeName, attributes, context);
+    processSingleAttribute(attr, false, nodeName, attributes, classNames, context);
   }
   for (const attr of templateAttrs) {
-    processSingleAttribute(attr, true, nodeName, attributes, context);
+    processSingleAttribute(attr, true, nodeName, attributes, classNames, context);
   }
 }
 
@@ -397,6 +429,7 @@ function addCompoundSelectorMatches(
   nodeName: string,
   regularAttrs: unknown[],
   attributes: TemplateElementAttribute[],
+  classNames: string[],
   context: ScanContext
 ): void {
   // A single element can have multiple directives, but we should not add the same directive instance twice.
@@ -438,10 +471,90 @@ function addCompoundSelectorMatches(
           range: attributeRange, // Use attribute position, not entire tag
           tagName: nodeName,
           attributes,
+          classNames,
         });
       }
     }
   }
+}
+
+/**
+ * The classes written out on the element, as the matcher wants them.
+ *
+ * Only a static `class="a b"` counts, and only where Angular counts it — which is not
+ * the same as wherever one is written. `getAttrsForDirectiveMatching` folds the node into
+ * one map, attributes first and then property, two-way and event bindings, and the last
+ * writer wins with an empty value. So `<div class="a" [class]="computed">` has no classes
+ * at all for matching: the binding overwrote the attribute, and directives are matched
+ * before any binding has a value. A `[class.a]` is a class binding named `a`, overwrites
+ * nothing, and leaves the static classes standing.
+ *
+ * A `#class="ref"` contributes nothing either, being a reference that merely shares the
+ * spelling. That falls out of reading the node's own attributes rather than the flattened
+ * list the rest of the scan works from, which holds references beside them; the kind
+ * check then says which of those attributes count, so that neither the reading nor the
+ * check is the only thing standing between a reference and a class.
+ *
+ * A `<div *foo class="x">` parses into a synthetic template that keeps the element's own
+ * attributes, and those are not the template's: Angular matches such a node against its
+ * `templateAttrs` alone. A written-out `<ng-template class="x">` is the other case, and
+ * there the class does count — the compiler tells them apart by `tagName`, and so does
+ * this.
+ *
+ * The split of the value is the compiler's too: the name is compared case-insensitively
+ * and the value is broken on whitespace.
+ * @internal
+ */
+function staticClassNames(node: TmplAstElement | TmplAstTemplate, isTemplate: boolean, context: ScanContext): string[] {
+  // @ts-expect-error: Complex Angular template AST node types from ts-morph
+  if (isTemplate && node.tagName !== "ng-template") {
+    return [];
+  }
+
+  const classes: string[] = [];
+  for (const [name, value] of directiveMatchingAttributes(node, context)) {
+    if (name.toLowerCase() !== "class") {
+      continue;
+    }
+    for (const className of value.split(/\s+/)) {
+      if (className !== "") {
+        classes.push(className);
+      }
+    }
+  }
+  return classes;
+}
+
+/**
+ * The node folded into one map the way `getAttrsForDirectiveMatching` folds it: written
+ * attributes first, then the bindings that overwrite one of the same name with nothing.
+ * @internal
+ */
+function directiveMatchingAttributes(
+  node: TmplAstElement | TmplAstTemplate,
+  context: ScanContext
+): Map<string, string> {
+  const attributes = new Map<string, string>();
+
+  for (const attr of node.attributes ?? []) {
+    if (attr instanceof context.constructors.tmplAstTextAttribute) {
+      attributes.set(attr.name, attr.value);
+    }
+  }
+
+  const { Property, TwoWay } = context.constructors.bindingType;
+  for (const binding of node.inputs ?? []) {
+    const { name, type } = binding as unknown as { name: string; type: number };
+    if (type === Property || type === TwoWay) {
+      attributes.set(name, "");
+    }
+  }
+
+  for (const binding of node.outputs ?? []) {
+    attributes.set((binding as unknown as { name: string }).name, "");
+  }
+
+  return attributes;
 }
 
 /**
@@ -452,6 +565,7 @@ function addAngularElementsToList(
   node: TmplAstElement | TmplAstTemplate,
   nodeName: string,
   attributes: TemplateElementAttribute[],
+  classNames: string[],
   context: ScanContext
 ): void {
   for (const candidate of context.lookup.getElements(nodeName)) {
@@ -466,6 +580,7 @@ function addAngularElementsToList(
         range: spanToRange(context, node.startSourceSpan.start.offset, node.startSourceSpan.end.offset),
         tagName: nodeName,
         attributes,
+        classNames,
       });
     }
   }
@@ -480,6 +595,7 @@ function processSingleAttribute(
   isTemplateAttr: boolean,
   nodeName: string,
   attributes: TemplateElementAttribute[],
+  classNames: string[],
   context: ScanContext
 ): void {
   // @ts-expect-error: Complex Angular template AST node types from ts-morph
@@ -511,6 +627,7 @@ function processSingleAttribute(
     range: spanToRange(context, keySpan.start.offset, keySpan.end.offset),
     tagName: nodeName,
     attributes,
+    classNames,
   });
 
   // Check for pipes in bound attribute values (like *ngIf="expression | pipe")
@@ -571,6 +688,7 @@ function pushPipes(context: ScanContext, expression: unknown): void {
       tagName: "pipe",
       isAttribute: false,
       attributes: [],
+      classNames: [],
     });
   }
 }

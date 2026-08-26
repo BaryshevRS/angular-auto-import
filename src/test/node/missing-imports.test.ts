@@ -20,6 +20,7 @@ function element(overrides: Partial<ScannedTemplateElement> = {}): ScannedTempla
     isAttribute: false,
     range,
     attributes: [],
+    classNames: [],
     ...overrides,
   };
 }

@@ -139,6 +139,8 @@ describe("Template scan", () => {
       tmplAstReference: angular.TmplAstReference,
       tmplAstBoundAttribute: angular.TmplAstBoundAttribute,
       tmplAstBoundText: angular.TmplAstBoundText,
+      tmplAstTextAttribute: angular.TmplAstTextAttribute,
+      bindingType: angular.BindingType,
       recursiveAstVisitor: angular.RecursiveAstVisitor,
     } as TemplateAstConstructors;
     recursiveAstVisitor = angular.RecursiveAstVisitor as RecursiveAstVisitorClass;

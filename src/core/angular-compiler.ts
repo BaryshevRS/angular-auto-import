@@ -82,6 +82,8 @@ export function adoptAngularCompiler(compiler: CompilerModule): AngularCompilerA
       tmplAstReference: compiler.TmplAstReference,
       tmplAstBoundAttribute: compiler.TmplAstBoundAttribute,
       tmplAstBoundText: compiler.TmplAstBoundText,
+      tmplAstTextAttribute: compiler.TmplAstTextAttribute,
+      bindingType: compiler.BindingType,
       recursiveAstVisitor: compiler.RecursiveAstVisitor,
     },
     selectors: { cssSelector: compiler.CssSelector, selectorMatcher: compiler.SelectorMatcher },

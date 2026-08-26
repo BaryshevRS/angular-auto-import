@@ -26,6 +26,9 @@ FIXNEXT.md
 TOFIX.md
 biome.json
 knip.json
+stopslop.json
+stopslop-badge.json
+.stopslop-baseline.json
 typedoc.json
 CLAUDE.md
 .env
@@ -35,3 +38,6 @@ coverage/
 .scannerwork/
 scripts/
 FIX_COMPLETION.md
+IDEA_INPUTS.md
+.github/
+BUG_CSS_CLASS.md

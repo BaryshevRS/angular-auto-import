@@ -537,6 +537,7 @@ function createElement(
     range: rangeOf(name),
     tagName,
     attributes,
+    classNames: [],
   };
 }
 
@@ -548,6 +549,7 @@ function createPipeElement(name: string): ScannedTemplateElement {
     range: rangeOf(name),
     tagName: "pipe",
     attributes: [],
+    classNames: [],
   };
 }
 
