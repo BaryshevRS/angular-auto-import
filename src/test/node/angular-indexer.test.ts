@@ -1148,6 +1148,68 @@ export declare const MockBundle: readonly [typeof MockBundleInput, typeof MockBu
       }
     });
 
+    it("carries the inputs, outputs and content selectors a library declares", async () => {
+      const libPath = path.join(mockNodeModulesPath, "mock-api-lib");
+      fs.mkdirSync(libPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(libPath, "package.json"),
+        JSON.stringify(
+          {
+            name: "mock-api-lib",
+            version: "1.0.0",
+            peerDependencies: { "@angular/core": "^17.0.0" },
+            types: "./index.d.ts",
+          },
+          null,
+          2
+        )
+      );
+      fs.writeFileSync(
+        path.join(libPath, "index.d.ts"),
+        `import * as i0 from '@angular/core';
+
+export declare class MockApiCard {
+  static ɵfac: i0.ɵɵFactoryDeclaration<MockApiCard, never>;
+  static ɵcmp: i0.ɵɵComponentDeclaration<MockApiCard, "mock-api-card", never, { "heading": { "alias": "mockHeading"; "required": true; }; "tone": { "alias": "tone"; "required": false; "isSignal": true; }; }, { "closed": "mockClosed"; }, never, ["[header]", "*"], true, never>;
+}
+`
+      );
+
+      const projectManifestPath = path.join(testProjectPath, "package.json");
+      const projectManifest = fs.readFileSync(projectManifestPath, "utf8");
+      const withDependency = JSON.parse(projectManifest);
+      withDependency.dependencies = { ...withDependency.dependencies, "mock-api-lib": "1.0.0" };
+      fs.writeFileSync(projectManifestPath, JSON.stringify(withDependency, null, 2));
+
+      try {
+        await indexer.indexNodeModules();
+
+        const [card] = indexer.getElements("mock-api-card");
+        assert.ok(card, "the component should be indexed");
+        assert.deepStrictEqual(card.inputs, [
+          { name: "mockHeading", propertyName: "heading", required: true, isSignal: false },
+          { name: "tone", propertyName: undefined, required: false, isSignal: true },
+        ]);
+        assert.deepStrictEqual(card.outputs, [{ name: "mockClosed", propertyName: "closed" }]);
+        assert.deepStrictEqual(card.contentSelectors, ["[header]", "*"]);
+
+        // The surface is rebuilt field by field when a cache is loaded, so anything the
+        // rebuild forgets is lost on the next start rather than on this one.
+        const restored = new AngularIndexer({ cacheStore, ...hostPorts() });
+        restored.setProjectRoot(testProjectPath);
+        assert.ok(await restored.loadFromWorkspace(), "the cache should be loadable");
+
+        const [cached] = restored.getElements("mock-api-card");
+        assert.ok(cached, "the component should come back from the cache");
+        assert.deepStrictEqual(cached.inputs, card.inputs, "its inputs survive the round trip");
+        assert.deepStrictEqual(cached.outputs, card.outputs);
+        assert.deepStrictEqual(cached.contentSelectors, card.contentSelectors);
+        restored.dispose();
+      } finally {
+        fs.writeFileSync(projectManifestPath, projectManifest);
+      }
+    });
+
     it("records the entry point file of a library module, so an alias to it still resolves", async () => {
       const libPath = path.join(mockNodeModulesPath, "mock-ui-lib");
       fs.mkdirSync(libPath, { recursive: true });

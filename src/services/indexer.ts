@@ -24,6 +24,7 @@ import { isLibraryExcluded } from "../config/excluded-libraries";
 import { bundleMembersOf } from "../core/bundles";
 import type { CacheStore } from "../core/cache";
 import { type CancellationSignal, neverCancelled } from "../core/cancellation";
+import { type ElementApi, EMPTY_ELEMENT_API, readElementApi } from "../core/element-api";
 import type { BundleEntry } from "../core/element-index";
 import {
   AngularElementIndex,
@@ -1735,6 +1736,12 @@ export class AngularIndexer {
       isExternal: value.isExternal ?? value.path.includes("node_modules"), // Use cached isExternal, fallback for old cache
       exportingModuleName: value.exportingModuleName,
       absolutePath: value.absolutePath,
+      // Absent in a cache written before these were read, which is why they stay
+      // undefined rather than becoming empty: an element that declares no inputs and one
+      // whose inputs nobody has read are not the same answer.
+      inputs: value.inputs,
+      outputs: value.outputs,
+      contentSelectors: value.contentSelectors,
     });
 
     // Index under all its selectors
@@ -2838,6 +2845,7 @@ export class AngularIndexer {
     elementType: "component" | "directive" | "pipe";
     selector: string;
     isStandalone: boolean;
+    api: ElementApi;
   } | null {
     // Check for component, then directive, then pipe
     const componentResult = this._analyzeElementType(classDecl, "ɵcmp", "component");
@@ -2862,7 +2870,7 @@ export class AngularIndexer {
     classDecl: ClassDeclaration,
     propertyName: "ɵcmp" | "ɵdir",
     elementType: "component" | "directive"
-  ): { elementType: "component" | "directive"; selector: string; isStandalone: boolean } | null {
+  ): { elementType: "component" | "directive"; selector: string; isStandalone: boolean; api: ElementApi } | null {
     const { prop } = this._findInheritedStaticProperty(classDecl, propertyName);
     if (!prop) {
       return null;
@@ -2883,12 +2891,13 @@ export class AngularIndexer {
       elementType,
       selector,
       isStandalone: this._isStandaloneFromTypeReference(typeRef, elementType),
+      api: readElementApi(typeRef.getTypeArguments()),
     };
   }
 
   private _analyzePipeElement(
     classDecl: ClassDeclaration
-  ): { elementType: "pipe"; selector: string; isStandalone: boolean } | null {
+  ): { elementType: "pipe"; selector: string; isStandalone: boolean; api: ElementApi } | null {
     const { prop: pipeDef } = this._findInheritedStaticProperty(classDecl, "ɵpipe");
     if (!pipeDef) {
       return null;
@@ -2909,6 +2918,8 @@ export class AngularIndexer {
       elementType: "pipe",
       selector,
       isStandalone: this._isStandaloneFromTypeReference(typeRef, "pipe"),
+      // A pipe's declaration carries a name and nothing else; there is no surface to read.
+      api: EMPTY_ELEMENT_API,
     };
   }
 
@@ -2928,24 +2939,24 @@ export class AngularIndexer {
 
   /**
    * Creates and indexes Angular element data.
-   * @param className The class name.
-   * @param elementType The element type.
-   * @param selector The selector string.
-   * @param isStandalone Whether the element is standalone.
-   * @param importPath The original import path.
-   * @param componentToModuleMap Map of components to modules.
-   * @param absoluteFilePath The absolute file path of the element.
+   * @param request What was read out of one library declaration, and where it was read.
    * @internal
    */
-  private async _createAndIndexElementData(
-    className: string,
-    elementType: "component" | "directive" | "pipe",
-    selector: string,
-    isStandalone: boolean,
-    importPath: string,
-    componentToModuleMap: Map<string, { moduleName: string; importPath: string; exportCount: number }>,
-    absoluteFilePath: string
-  ): Promise<void> {
+  private async _createAndIndexElementData(request: {
+    className: string;
+    elementType: "component" | "directive" | "pipe";
+    selector: string;
+    isStandalone: boolean;
+    /** The specifier the element is imported from. */
+    importPath: string;
+    componentToModuleMap: Map<string, { moduleName: string; importPath: string; exportCount: number }>;
+    /** The file the class is declared in, which is not the entry point it is reached through. */
+    absoluteFilePath: string;
+    /** What a template may write on it, as its own declaration gives it. */
+    api: ElementApi;
+  }): Promise<void> {
+    const { className, elementType, selector, isStandalone, importPath, componentToModuleMap, absoluteFilePath, api } =
+      request;
     const exportingModule = componentToModuleMap.get(className);
     const individualSelectors = await parseAngularSelector(selector);
 
@@ -2981,6 +2992,9 @@ export class AngularIndexer {
       isExternal: true, // This method only indexes elements coming from node_modules.
       exportingModuleName: !isStandalone && exportingModule ? exportingModule.moduleName : undefined,
       absolutePath: absoluteFilePath,
+      inputs: api.inputs,
+      outputs: api.outputs,
+      contentSelectors: api.contentSelectors,
     });
 
     for (const sel of individualSelectors) {
@@ -3132,15 +3146,16 @@ export class AngularIndexer {
           const actualSourceFile = classDecl.getSourceFile();
           const actualAbsoluteFilePath = actualSourceFile.getFilePath();
 
-          await this._createAndIndexElementData(
+          await this._createAndIndexElementData({
             className,
-            elementInfo.elementType,
-            elementInfo.selector,
-            elementInfo.isStandalone,
+            elementType: elementInfo.elementType,
+            selector: elementInfo.selector,
+            isStandalone: elementInfo.isStandalone,
             importPath,
             componentToModuleMap,
-            actualAbsoluteFilePath
-          );
+            absoluteFilePath: actualAbsoluteFilePath,
+            api: elementInfo.api,
+          });
         }
       }
     } catch (error) {

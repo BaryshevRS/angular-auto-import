@@ -36,8 +36,13 @@ import { type CoreLogger, silentLogger } from "../core/logging";
  *
  * 6: external-template ownership is stored with the index. Older files cannot recover
  * owners whose component and template basenames differ without rescanning sources.
+ *
+ * 7: an element carries the inputs, outputs and content selectors its declaration gives
+ * it. A version-5 cache is not wrong about them, it is silent — and silence is
+ * indistinguishable from an element that declares none, so it is discarded rather than
+ * reused and quietly believed.
  */
-export const CACHE_SCHEMA_VERSION = 6;
+export const CACHE_SCHEMA_VERSION = 7;
 
 /** What a cached file must still agree with to be reused. */
 export type CacheFingerprint = Record<string, string>;
