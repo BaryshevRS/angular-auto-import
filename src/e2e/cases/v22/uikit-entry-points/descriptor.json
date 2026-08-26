@@ -1,0 +1,8 @@
+{
+  "case": "uikit-entry-points",
+  "componentPath": "apps/angular-demo/src/app/uikit-entry-points/uikit-entry-points.component.ts",
+  "templatePath": "apps/angular-demo/src/app/uikit-entry-points/uikit-entry-points.component.html",
+  "preserveImports": true,
+  "diagnostics": [],
+  "quickfixes": []
+}

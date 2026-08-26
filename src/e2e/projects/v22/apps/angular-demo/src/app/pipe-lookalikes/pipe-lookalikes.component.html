@@ -1,0 +1,35 @@
+<h2>Pipes, and things that look like them</h2>
+
+<!-- Real uses. Both must be reported: the pipe exists and is not imported. -->
+<p>{{ size | bytes }}</p>
+<p>{{ `total ${size | bytes}` }}</p>
+
+<!-- A logical OR. The name after it is a component property, not a pipe. -->
+<p>{{ isLarge || bytes }}</p>
+
+<!-- A bar inside a string literal is part of the string. -->
+<p>{{ 'a|bytes' }}</p>
+
+<!-- A backtick literal is text too, outside its ${} holes. -->
+<p>{{ `a|bytes` }}</p>
+
+<!-- Alternation inside a regular expression is not a pipe operator. -->
+<p>{{ /a|bytes/.test(label) }}</p>
+
+<!-- Both spellings in one expression: only the second is a pipe. -->
+<p [title]="'a|bytes' + (size | bytes)">quoted and real</p>
+
+<!-- A brace inside a string does not close the ${} hole around it. -->
+<p>{{ `x ${"}" + (size | bytes)}` }}</p>
+
+<!-- A slash after a pattern is division, not the start of another pattern. -->
+<p>{{ /x/ / size | bytes }}</p>
+
+<!-- A slash after an object literal is division too. -->
+<p>{{ {a: 1} / size | bytes }}</p>
+
+<!-- A non-null assertion ends a value, so the slash after it divides. -->
+<p>{{ size! / 2 | bytes }}</p>
+
+<!-- So does the trailing dot of a number. -->
+<p>{{ 1. / size | bytes }}</p>

@@ -1,0 +1,90 @@
+{
+  "case": "pipe-lookalikes",
+  "componentPath": "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.ts",
+  "templatePath": "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.html",
+  "preserveImports": true,
+  "diagnostics": [
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 3,
+      "startCharacter": 13,
+      "endLine": 3,
+      "endCharacter": 18
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 4,
+      "startCharacter": 22,
+      "endLine": 4,
+      "endCharacter": 27
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 19,
+      "startCharacter": 32,
+      "endLine": 19,
+      "endCharacter": 37
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 22,
+      "startCharacter": 25,
+      "endLine": 22,
+      "endCharacter": 30
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 25,
+      "startCharacter": 19,
+      "endLine": 25,
+      "endCharacter": 24
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 28,
+      "startCharacter": 22,
+      "endLine": 28,
+      "endCharacter": 27
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 31,
+      "startCharacter": 18,
+      "endLine": 31,
+      "endCharacter": 23
+    },
+    {
+      "code": "missing-pipe-import:bytes",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 34,
+      "startCharacter": 18,
+      "endLine": 34,
+      "endCharacter": 23
+    }
+  ],
+  "quickfixes": [
+    {
+      "diagnosticCode": "missing-pipe-import:bytes",
+      "title": "\u27d0 Import UiDemoBytesPipe from '@angular-demo/ui-demo-one'",
+      "expectedImport": {
+        "className": "UiDemoBytesPipe",
+        "moduleSpecifier": "@angular-demo/ui-demo-one"
+      }
+    }
+  ]
+}

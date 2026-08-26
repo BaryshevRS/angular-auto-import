@@ -1,0 +1,43 @@
+{
+  "case": "alias-scope",
+  "componentPath": "apps/angular-demo/src/app/alias-scope/alias-scope.component.ts",
+  "templatePath": "apps/angular-demo/src/app/alias-scope/alias-scope.component.html",
+  "diagnostics": [
+    {
+      "code": "missing-component-import:lib-shared-badge",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 2,
+      "startCharacter": 0,
+      "endLine": 2,
+      "endCharacter": 18
+    },
+    {
+      "code": "missing-component-import:app-wild-beacon",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 6,
+      "startCharacter": 0,
+      "endLine": 6,
+      "endCharacter": 17
+    }
+  ],
+  "quickfixes": [
+    {
+      "diagnosticCode": "missing-component-import:lib-shared-badge",
+      "title": "⟐ Import SharedBadgeComponent from '@shared/badge/badge.component'",
+      "expectedImport": {
+        "className": "SharedBadgeComponent",
+        "moduleSpecifier": "@shared/badge/badge.component"
+      }
+    },
+    {
+      "diagnosticCode": "missing-component-import:app-wild-beacon",
+      "title": "⟐ Import WildBeaconComponent from './wild/beacon/beacon.component'",
+      "expectedImport": {
+        "className": "WildBeaconComponent",
+        "moduleSpecifier": "./wild/beacon/beacon.component"
+      }
+    }
+  ]
+}

@@ -862,7 +862,7 @@
   "quickfixes": [
     {
       "diagnosticCode": "missing-component-import:header[tuiNavigationHeader]",
-      "title": "⟐ Import TuiHeaderComponent from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiHeaderComponent from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiHeaderComponent",
@@ -871,7 +871,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:[tuiNavigationLogo]",
-      "title": "⟐ Import TuiLogoComponent from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiLogoComponent from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiLogoComponent",
@@ -880,7 +880,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiMessage]",
-      "title": "⟐ Import TuiMessage from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiMessage from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiMessage",
@@ -889,7 +889,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:button[tuiButton]",
-      "title": "⟐ Import TuiButton from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiButton from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiButton",
@@ -898,7 +898,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiHint]:not(ng-container):not(ng-template)",
-      "title": "⟐ Import TuiHintDirective from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiHintDirective from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiHintDirective",
@@ -907,7 +907,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:aside[tuiNavigationAside]",
-      "title": "⟐ Import TuiAsideComponent from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiAsideComponent from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiAsideComponent",
@@ -916,7 +916,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiAsideItem]",
-      "title": "⟐ Import TuiAsideItemDirective from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiAsideItemDirective from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiAsideItemDirective",
@@ -925,7 +925,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-aside-group",
-      "title": "⟐ Import TuiAsideGroupComponent from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiAsideGroupComponent from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiAsideGroupComponent",
@@ -934,7 +934,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:main[tuiNavigationMain]",
-      "title": "⟐ Import TuiMainComponent from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiMainComponent from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiMainComponent",
@@ -943,7 +943,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:[tuiNavigationSubheader]:not([compact])",
-      "title": "⟐ Import TuiSubheaderComponent from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiSubheaderComponent from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiSubheaderComponent",
@@ -952,7 +952,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-breadcrumbs",
-      "title": "⟐ Import TuiBreadcrumbs from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiBreadcrumbs from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiBreadcrumbs",
@@ -961,7 +961,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiAvatar]",
-      "title": "⟐ Import TuiAvatar from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiAvatar from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiAvatar",
@@ -970,7 +970,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiBadge]",
-      "title": "⟐ Import TuiBadge from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiBadge from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiBadge",
@@ -979,7 +979,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiChip]",
-      "title": "⟐ Import TuiChip from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiChip from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiChip",
@@ -988,7 +988,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:button[tuiIconButton]",
-      "title": "⟐ Import TuiButton from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiButton from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiButton",
@@ -997,7 +997,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-icon:not([tuiBadge])",
-      "title": "⟐ Import TuiIcon from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiIcon from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiIcon",
@@ -1006,7 +1006,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:tui-tabs:not([vertical])",
-      "title": "⟐ Import TuiTabsHorizontal from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiTabsHorizontal from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiTabsHorizontal",
@@ -1015,7 +1015,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:button[tuiTab]",
-      "title": "⟐ Import TuiTab from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiTab from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiTab",
@@ -1024,7 +1024,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:progress[tuiProgressBar]",
-      "title": "⟐ Import TuiProgressBar from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiProgressBar from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiProgressBar",
@@ -1033,7 +1033,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-progress-circle",
-      "title": "⟐ Import TuiProgressCircle from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiProgressCircle from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiProgressCircle",
@@ -1042,7 +1042,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiStatus]",
-      "title": "⟐ Import TuiStatus from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiStatus from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiStatus",
@@ -1051,7 +1051,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:label[tuiLabel]",
-      "title": "⟐ Import TuiLabel from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiLabel from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiLabel",
@@ -1060,7 +1060,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:input[type=checkbox][tuiCheckbox]",
-      "title": "⟐ Import TuiCheckbox from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiCheckbox from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiCheckbox",
@@ -1069,7 +1069,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[ngModel]:not([formControlName]):not([formControl])",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -1078,7 +1078,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:input[type=checkbox][tuiSwitch]",
-      "title": "⟐ Import TuiSwitch from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiSwitch from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiSwitch",
@@ -1087,7 +1087,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:input[type=range][tuiSlider]",
-      "title": "⟐ Import TuiSliderComponent from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiSliderComponent from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiSliderComponent",
@@ -1096,7 +1096,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-rating",
-      "title": "⟐ Import FormsModule from '@angular/forms'",
+      "title": "\u27d0 Import FormsModule from '@angular/forms'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "FormsModule",
@@ -1105,7 +1105,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-rating",
-      "title": "⟐ Import TuiRating from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiRating from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiRating",
@@ -1114,7 +1114,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-textfield:not([multi])",
-      "title": "⟐ Import TuiTextfieldComponent from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiTextfieldComponent from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiTextfieldComponent",
@@ -1123,7 +1123,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:input[tuiComboBox]",
-      "title": "⟐ Import TuiComboBoxDirective from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiComboBoxDirective from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiComboBoxDirective",
@@ -1132,7 +1132,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-data-list-wrapper:not([labels])",
-      "title": "⟐ Import TuiDataListWrapperComponent from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiDataListWrapperComponent from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiDataListWrapperComponent",
@@ -1141,7 +1141,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiChevron]",
-      "title": "⟐ Import TuiChevron from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiChevron from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiChevron",
@@ -1150,7 +1150,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiChevron]",
-      "title": "⟐ Import TuiTextfieldComponent from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiTextfieldComponent from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiTextfieldComponent",
@@ -1159,7 +1159,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:input[tuiSelect]",
-      "title": "⟐ Import TuiSelectDirective from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiSelectDirective from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiSelectDirective",
@@ -1168,7 +1168,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:input[tuiInputDate]",
-      "title": "⟐ Import TuiInputDateDirective from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiInputDateDirective from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiInputDateDirective",
@@ -1177,7 +1177,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:input[tuiInputNumber]",
-      "title": "⟐ Import TuiInputNumberDirective from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiInputNumberDirective from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiInputNumberDirective",
@@ -1186,7 +1186,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-textfield[multi]",
-      "title": "⟐ Import TuiTextfieldMultiComponent from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiTextfieldMultiComponent from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiTextfieldMultiComponent",
@@ -1195,7 +1195,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:input[tuiInputChip]",
-      "title": "⟐ Import TuiInputChipDirective from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiInputChipDirective from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiInputChipDirective",
@@ -1204,7 +1204,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:textarea[tuiTextarea]",
-      "title": "⟐ Import TuiTextareaComponent from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiTextareaComponent from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiTextareaComponent",
@@ -1213,7 +1213,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-block-status",
-      "title": "⟐ Import TuiBlockStatusComponent from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiBlockStatusComponent from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiBlockStatusComponent",
@@ -1222,7 +1222,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[tuiSlot]",
-      "title": "⟐ Import TuiAppBarDirective from '@taiga-ui/layout'",
+      "title": "\u27d0 Import TuiAppBarDirective from '@taiga-ui/layout'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiAppBarDirective",
@@ -1231,7 +1231,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-accordion",
-      "title": "⟐ Import TuiAccordionComponent from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiAccordionComponent from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiAccordionComponent",
@@ -1240,7 +1240,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:button[tuiAccordion]",
-      "title": "⟐ Import TuiAccordionDirective from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiAccordionDirective from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiAccordionDirective",
@@ -1249,7 +1249,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:tui-expand",
-      "title": "⟐ Import TuiExpand from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiExpand from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiExpand",
@@ -1258,7 +1258,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[ngForOf]",
-      "title": "⟐ Import NgForOf from '@angular/common'",
+      "title": "\u27d0 Import NgForOf from '@angular/common'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "NgForOf",
@@ -1267,7 +1267,7 @@
     },
     {
       "diagnosticCode": "missing-pipe-import:tuiInitials",
-      "title": "⟐ Import TuiInitialsPipe from '@taiga-ui/kit'",
+      "title": "\u27d0 Import TuiInitialsPipe from '@taiga-ui/kit'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiInitialsPipe",
@@ -1276,7 +1276,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[ngIf]",
-      "title": "⟐ Import NgIf from '@angular/common'",
+      "title": "\u27d0 Import NgIf from '@angular/common'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "NgIf",
@@ -1285,7 +1285,7 @@
     },
     {
       "diagnosticCode": "missing-pipe-import:tuiObfuscate",
-      "title": "⟐ Import TuiObfuscatePipe from '@taiga-ui/cdk'",
+      "title": "\u27d0 Import TuiObfuscatePipe from '@taiga-ui/cdk'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiObfuscatePipe",
@@ -1294,7 +1294,7 @@
     },
     {
       "diagnosticCode": "missing-pipe-import:tuiFormatNumber",
-      "title": "⟐ Import TuiFormatNumberPipe from '@taiga-ui/core'",
+      "title": "\u27d0 Import TuiFormatNumberPipe from '@taiga-ui/core'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "TuiFormatNumberPipe",

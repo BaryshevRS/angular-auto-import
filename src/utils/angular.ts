@@ -9,8 +9,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ClassDeclaration, Decorator } from "ts-morph";
 import { SyntaxKind } from "ts-morph";
-import { STANDARD_ANGULAR_ELEMENTS } from "../config";
-import { logger } from "../logger";
+import { STANDARD_ANGULAR_ELEMENTS } from "../config/angular-elements";
+import type { ElementLookup } from "../core/element-lookup";
+import { sharedLogger } from "../core/logging";
 import type { AngularIndexer } from "../services";
 import { AngularElementData } from "../types";
 
@@ -101,7 +102,7 @@ function extractStandaloneFlagFromDecorator(
 
     return undefined;
   } catch (error) {
-    logger.error(
+    sharedLogger().error(
       `Error checking standalone flag for ${classDeclaration.getName() ?? "unknown class"}:`,
       error as Error
     );
@@ -235,7 +236,7 @@ function processCssSelector(cssSelector: CssSelectorForParsing, collection: stri
  * @param indexer An instance of the AngularIndexer to search for elements.
  * @returns An array of `AngularElementData` that match the selector.
  */
-export function getAngularElements(selector: string, indexer: AngularIndexer): AngularElementData[] {
+export function getAngularElements(selector: string, indexer: ElementLookup): AngularElementData[] {
   // Basic validation
   if (!selector || typeof selector !== "string" || !indexer) {
     return [];
@@ -290,7 +291,7 @@ function addNgForVariants(base: string, selectorsToTry: string[]): void {
   }
 }
 
-function findElementsForSelectors(uniqueSelectors: string[], indexer: AngularIndexer): AngularElementData[] {
+function findElementsForSelectors(uniqueSelectors: string[], indexer: ElementLookup): AngularElementData[] {
   const foundElements: AngularElementData[] = [];
   const seenElements = new Set<string>(); // path:name to avoid duplicates
 
@@ -336,7 +337,7 @@ function findStandardElement(selector: string, seenElements: Set<string>): Angul
 
 function findIndexedElements(
   selector: string,
-  indexer: AngularIndexer,
+  indexer: ElementLookup,
   seenElements: Set<string>
 ): AngularElementData[] {
   try {
@@ -353,7 +354,7 @@ function findIndexedElements(
 
     return uniqueElements;
   } catch (error) {
-    logger.warn(`Error getting element from indexer for selector '${selector}': ${(error as Error).message}`);
+    sharedLogger().warn(`Error getting element from indexer for selector '${selector}': ${(error as Error).message}`);
     return [];
   }
 }
@@ -381,7 +382,7 @@ export async function getAngularElementAsync(
   }
 
   // Uses Angular SelectorMatcher for precise matching
-  return await getBestMatchUsingAngularMatcher(selector, elements);
+  return (await getMatchesUsingAngularMatcher(selector, elements))[0];
 }
 
 /**
@@ -454,25 +455,33 @@ export function createElementComparator(selector?: string): (a: AngularElementDa
 }
 
 /**
- * Uses the Angular SelectorMatcher to select the most appropriate element from a list of candidates.
+ * Orders elements already known to match, most specific first.
  *
- * @param selector The selector to match against.
- * @param candidates A list of candidate `AngularElementData` to choose from.
- * @returns A promise that resolves to the best matching `AngularElementData` or `undefined`.
- * @internal
+ * Not the same question as `getAngularElementAsync`, which also decides *whether* each
+ * candidate matches — and can only do that against the selector it is given. A
+ * diagnostic's elements were matched against the template node itself, tag, attributes
+ * and values included, while its code carries just the one selector one of them matched
+ * under: re-running the matcher against that string drops `button[foo]` from a `[foo]`
+ * token, and `[foo=check]`, and everything else that demands more than the token names.
+ * @param selector The selector as the template writes it, used only to rank.
+ * @param elements The elements to order.
  */
-async function getBestMatchUsingAngularMatcher(
+export function orderElementsForSelector(selector: string, elements: AngularElementData[]): AngularElementData[] {
+  return [...elements].sort(createElementComparator(selector));
+}
+
+async function getMatchesUsingAngularMatcher(
   selector: string,
   candidates: AngularElementData[]
-): Promise<AngularElementData | undefined> {
+): Promise<AngularElementData[]> {
   try {
     const { CssSelector, SelectorMatcher } = await import("@angular/compiler");
 
     // Parse the incoming selector using Angular compiler
     const templateCssSelectors = CssSelector.parse(selector);
     if (templateCssSelectors.length === 0) {
-      logger.warn(`Could not parse selector: "${selector}"`);
-      return candidates[0];
+      sharedLogger().warn(`Could not parse selector: "${selector}"`);
+      return candidates.slice(0, 1);
     }
 
     // Use the first parsed selector as the template selector
@@ -509,20 +518,16 @@ async function getBestMatchUsingAngularMatcher(
     }
 
     if (bestMatches.length === 0) {
-      return undefined; // candidates[0];
-    }
-
-    if (bestMatches.length === 1) {
-      return bestMatches[0];
+      return [];
     }
 
     // Sort by type, selector specificity, and name to find the best match
     bestMatches.sort(createElementComparator(selector));
 
-    return bestMatches[0];
+    return bestMatches;
   } catch (error) {
-    logger.error("Error using Angular SelectorMatcher:", error as Error);
-    return candidates[0];
+    sharedLogger().error("Error using Angular SelectorMatcher:", error as Error);
+    return candidates.slice(0, 1);
   }
 }
 
@@ -541,7 +546,7 @@ function walkUpDirectoryTree(startDir: string): number | null {
   let currentDir: string | null = startDir;
   const visited = new Set<string>();
 
-  for (let i = 0; i < 10 && currentDir && !visited.has(currentDir); i++) {
+  while (currentDir && !visited.has(currentDir)) {
     visited.add(currentDir);
 
     const version = findAngularVersionInDirectory(currentDir);

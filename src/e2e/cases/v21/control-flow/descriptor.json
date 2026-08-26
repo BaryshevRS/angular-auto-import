@@ -283,6 +283,15 @@
       "endCharacter": 20
     },
     {
+      "code": "missing-pipe-import:percent",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 45,
+      "startCharacter": 25,
+      "endLine": 45,
+      "endCharacter": 32
+    },
+    {
       "code": "missing-directive-import:[ngIf]",
       "severity": "Warning",
       "source": "angular-auto-import",
@@ -430,7 +439,7 @@
   "quickfixes": [
     {
       "diagnosticCode": "missing-directive-import:[ngIf]",
-      "title": "⟐ Import NgIf from '@angular/common'",
+      "title": "\u27d0 Import NgIf from '@angular/common'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "NgIf",
@@ -439,7 +448,7 @@
     },
     {
       "diagnosticCode": "missing-component-import:lib-ui-demo-one",
-      "title": "⟐ Import UiDemoOneComponent from '@angular-demo/ui-demo-one'",
+      "title": "\u27d0 Import UiDemoOneComponent from '@angular-demo/ui-demo-one'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "UiDemoOneComponent",
@@ -448,7 +457,7 @@
     },
     {
       "diagnosticCode": "missing-directive-import:[libDirectivePrefixLess]",
-      "title": "⟐ Import DirectivePrefixLess from '@angular-demo/ui-moon'",
+      "title": "\u27d0 Import DirectivePrefixLess from '@angular-demo/ui-moon'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "DirectivePrefixLess",
@@ -457,7 +466,7 @@
     },
     {
       "diagnosticCode": "missing-pipe-import:bytes",
-      "title": "⟐ Import UiDemoBytesPipe from '@angular-demo/ui-demo-one'",
+      "title": "\u27d0 Import UiDemoBytesPipe from '@angular-demo/ui-demo-one'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "UiDemoBytesPipe",
@@ -466,7 +475,7 @@
     },
     {
       "diagnosticCode": "missing-pipe-import:percent",
-      "title": "⟐ Import PercentPipe from '@angular/common'",
+      "title": "\u27d0 Import PercentPipe from '@angular/common'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "PercentPipe",
@@ -475,7 +484,7 @@
     },
     {
       "diagnosticCode": "missing-pipe-import:keyvalue",
-      "title": "⟐ Import KeyValuePipe from '@angular/common'",
+      "title": "\u27d0 Import KeyValuePipe from '@angular/common'",
       "command": "angular-auto-import.importElement",
       "expectedImport": {
         "className": "KeyValuePipe",

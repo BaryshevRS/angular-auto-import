@@ -48,3 +48,12 @@ export function getRelativeFilePath(fromFileAbs: string, toFileAbsNoExt: string)
   const normalized = normalizePath(relative);
   return normalized.startsWith(".") ? normalized : `./${normalized}`;
 }
+
+/** Returns whether candidatePath is rootPath itself or one of its descendants. */
+export function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const relativePath = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return (
+    relativePath === "" ||
+    (!path.isAbsolute(relativePath) && !relativePath.startsWith(`..${path.sep}`) && relativePath !== "..")
+  );
+}

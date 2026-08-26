@@ -1,0 +1,8 @@
+{
+  "name": "@nx-fixture/data-access",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "22.0.2"
+  }
+}

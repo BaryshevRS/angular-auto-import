@@ -7,10 +7,6 @@ export function getLoggerConfig(): LoggerConfig {
   return {
     enabled: config.get<boolean>("enabled", true),
     level: config.get<LogLevel>("level", "INFO"),
-    fileLoggingEnabled: config.get<boolean>("fileLoggingEnabled", false),
-    logDirectory: config.get<string | null>("logDirectory", null),
-    rotationMaxSize: config.get<number>("rotationMaxSize", 5),
-    rotationMaxFiles: config.get<number>("rotationMaxFiles", 5),
     outputFormat: config.get<LogOutputFormat>("outputFormat", "plain"),
   };
 }

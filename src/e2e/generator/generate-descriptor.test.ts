@@ -12,7 +12,6 @@ import type { CaseConfig, QuickfixDescriptor } from "../types";
 import { severityToString } from "../types";
 
 const DIAGNOSTIC_SOURCE = "angular-auto-import";
-const IMPORT_COMMAND = "angular-auto-import.importElement";
 const CASE_FILTER = process.env.AAI_E2E_CASE;
 
 function isInlineTemplateCase(caseConfig: CaseConfig): boolean {
@@ -47,6 +46,47 @@ const CASES: CaseConfig[] = [
     name: "ngx-translate-missing",
     componentPath: "apps/angular-demo/src/app/ngx-translate/ngx-translate-missing.component.ts",
     templatePath: "apps/angular-demo/src/app/ngx-translate/ngx-translate-missing.component.ts",
+  },
+  {
+    // Regression for https://github.com/BaryshevRS/angular-auto-import/issues/34 and the
+    // two cases found while fixing it: a bar means a pipe only outside string literals,
+    // regular expressions, the text of a template literal, and the `||` operator.
+    name: "pipe-lookalikes",
+    componentPath: "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.ts",
+    templatePath: "apps/angular-demo/src/app/pipe-lookalikes/pipe-lookalikes.component.html",
+  },
+  {
+    // Regression for https://github.com/BaryshevRS/angular-auto-import/issues/35: what a
+    // `paths` entry maps in is part of the project, and the specifier written for it is
+    // the alias — except for an entry whose `*` sits mid-path, which cannot be inverted
+    // and is deliberately written as a relative path instead.
+    name: "alias-scope",
+    componentPath: "apps/angular-demo/src/app/alias-scope/alias-scope.component.ts",
+    templatePath: "apps/angular-demo/src/app/alias-scope/alias-scope.component.html",
+  },
+  {
+    // https://github.com/BaryshevRS/angular-auto-import/issues/35, in the layout that
+    // reports it: the libraries live outside the project root and are reachable only
+    // through `compilerOptions.paths`. Runs against `v22-nx`; every other fixture
+    // project keeps its libraries inside the root, where this cannot go wrong.
+    name: "nx-aliased-libraries",
+    componentPath: "apps/shop/src/app/catalog.component.ts",
+    templatePath: "apps/shop/src/app/catalog.component.html",
+  },
+  {
+    // The same layout, for an entry whose `*` sits mid-path. No specifier can be
+    // rebuilt from a file under it, and what must not happen is an absolute path.
+    name: "nx-midpath-wildcard",
+    componentPath: "apps/shop/src/app/beacon-host.component.ts",
+    templatePath: "apps/shop/src/app/beacon-host.component.html",
+  },
+  {
+    // A declared package lives only in the workspace ancestor's node_modules. The
+    // application is still the project root, so dependency lookup has to walk upward.
+    name: "nx-hoisted-package",
+    componentPath: "apps/shop/src/app/hoisted-host.component.ts",
+    templatePath: "apps/shop/src/app/hoisted-host.component.html",
+    expectedDiagnostics: 1,
   },
   {
     name: "control-flow",
@@ -145,16 +185,21 @@ async function buildDescriptor(caseConfig: CaseConfig, templateUri: vscode.Uri, 
   }));
 
   // Collect quickfixes for each unique diagnostic code
-  const quickfixMap = await collectQuickFixes(templateUri, diagnostics, IMPORT_COMMAND);
+  const quickfixMap = await collectQuickFixes(templateUri, diagnostics);
 
   const quickfixDescriptors: QuickfixDescriptor[] = [];
   for (const [code, actions] of quickfixMap) {
     for (const action of actions) {
-      // Extract className and path from command arguments
+      // An action carries its edit directly now, so there are no command arguments to
+      // read the class name from — recorded descriptors from before that change still
+      // have one. The title states it either way: "⟐ Import X from 'path'".
       const element = action.command?.arguments?.[0] as
         | { name?: string; isExternal?: boolean; path?: string }
         | undefined;
-      const className = element?.name ?? "";
+      const className = element?.name ?? action.title.match(/Import\s+(\S+)\s+from\s+'/)?.[1] ?? "";
+      if (!className) {
+        throw new Error(`Could not determine the imported class name from the action title: ${action.title}`);
+      }
 
       // For external elements, use the element path directly as moduleSpecifier
       // For local elements, extract from action title: "⟐ Import X from 'path'"
@@ -169,7 +214,6 @@ async function buildDescriptor(caseConfig: CaseConfig, templateUri: vscode.Uri, 
       quickfixDescriptors.push({
         diagnosticCode: code,
         title: action.title,
-        command: action.command?.command ?? "",
         expectedImport: { className, moduleSpecifier },
       });
     }
@@ -285,7 +329,17 @@ describe("Descriptor Generator", function () {
         const doc = await vscode.workspace.openTextDocument(context.templateUri);
         await vscode.window.showTextDocument(doc);
 
-        const diagnostics = await waitForDiagnosticsToStabilize(context.templateUri, DIAGNOSTIC_SOURCE);
+        if (caseConfig.expectedDiagnostics !== undefined) {
+          await vscode.commands.executeCommand("angular-auto-import.reindex");
+        }
+
+        const diagnostics = await waitForDiagnosticsToStabilize(
+          context.templateUri,
+          DIAGNOSTIC_SOURCE,
+          60000,
+          3000,
+          caseConfig.expectedDiagnostics
+        );
         console.log(`Found ${diagnostics.length} diagnostics for ${caseConfig.name}`);
 
         const descriptor = await buildDescriptor(caseConfig, context.templateUri, diagnostics);

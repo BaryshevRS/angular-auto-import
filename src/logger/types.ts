@@ -5,10 +5,6 @@ export type LogOutputFormat = "plain" | "json";
 export interface LoggerConfig {
   enabled: boolean;
   level: LogLevel;
-  fileLoggingEnabled: boolean;
-  logDirectory: string | null;
-  rotationMaxSize: number;
-  rotationMaxFiles: number;
   outputFormat: LogOutputFormat;
 }
 

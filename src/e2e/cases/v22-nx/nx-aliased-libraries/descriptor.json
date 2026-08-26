@@ -1,0 +1,60 @@
+{
+  "case": "nx-aliased-libraries",
+  "componentPath": "apps/shop/src/app/catalog.component.ts",
+  "templatePath": "apps/shop/src/app/catalog.component.html",
+  "diagnostics": [
+    {
+      "code": "missing-component-import:lib-badge",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 2,
+      "startCharacter": 0,
+      "endLine": 2,
+      "endCharacter": 11
+    },
+    {
+      "code": "missing-directive-import:[libHighlight]",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 3,
+      "startCharacter": 3,
+      "endLine": 3,
+      "endCharacter": 15
+    },
+    {
+      "code": "missing-pipe-import:money",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 7,
+      "startCharacter": 13,
+      "endLine": 7,
+      "endCharacter": 18
+    }
+  ],
+  "quickfixes": [
+    {
+      "diagnosticCode": "missing-component-import:lib-badge",
+      "title": "⟐ Import BadgeComponent from '@shop/ui-kit'",
+      "expectedImport": {
+        "className": "BadgeComponent",
+        "moduleSpecifier": "@shop/ui-kit"
+      }
+    },
+    {
+      "diagnosticCode": "missing-directive-import:[libHighlight]",
+      "title": "⟐ Import HighlightDirective from '@shop/ui-kit'",
+      "expectedImport": {
+        "className": "HighlightDirective",
+        "moduleSpecifier": "@shop/ui-kit"
+      }
+    },
+    {
+      "diagnosticCode": "missing-pipe-import:money",
+      "title": "⟐ Import MoneyPipe from '@shop/data-access'",
+      "expectedImport": {
+        "className": "MoneyPipe",
+        "moduleSpecifier": "@shop/data-access"
+      }
+    }
+  ]
+}

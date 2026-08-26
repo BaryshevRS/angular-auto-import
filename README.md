@@ -2,13 +2,11 @@
 
 [![StopSlop](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BaryshevRS/angular-auto-import/main/stopslop-badge.json)](https://www.npmjs.com/package/stopslop)
 [![Clone Alert: 0 clones](https://img.shields.io/badge/Clone%20Alert-0%20clones-brightgreen?style=flat-square)](https://www.npmjs.com/package/clone-alert)
-[![VS Marketplace](https://img.shields.io/badge/VS%20Marketplace-Angular%20Auto--Import-blue?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=baryshevrs.angular-auto-import)
-[![Install in VS Code](https://img.shields.io/badge/Install%20in-VS%20Code-007ACC?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=baryshevrs.angular-auto-import)
 
+[![Install in VS Code](https://img.shields.io/badge/Install%20in-VS%20Code-007ACC?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=baryshevrs.angular-auto-import)
 [![GitHub release](https://img.shields.io/github/v/release/BaryshevRS/angular-auto-import?style=flat-square&sort=semver)](https://github.com/BaryshevRS/angular-auto-import/releases)
 [![GitHub stars](https://img.shields.io/github/stars/BaryshevRS/angular-auto-import?style=flat-square)](https://github.com/BaryshevRS/angular-auto-import/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/BaryshevRS/angular-auto-import?style=flat-square)](https://github.com/BaryshevRS/angular-auto-import/issues)
-[![GitHub license](https://img.shields.io/github/license/BaryshevRS/angular-auto-import?style=flat-square)](https://github.com/BaryshevRS/angular-auto-import/blob/main/LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/BaryshevRS/angular-auto-import?style=flat-square)](https://github.com/BaryshevRS/angular-auto-import/commits/main)
 
 **Stop manually importing Angular components, directives, and pipes.** Let Angular Auto-Import handle it for you with intelligent Quick Fixes and bulk import capabilities.
@@ -183,7 +181,16 @@ Customize the extension's behavior in your VS Code settings (`File > Preferences
 | Setting | Description | Default |
 | ------- | ----------- | ------- |
 | `angular-auto-import.projectPath` | Absolute path to Angular project root. Overrides workspace folder detection. Useful for monorepos. | `null` |
-| `angular-auto-import.index.refreshInterval` | Auto-reindex interval in minutes. Set to `0` to disable periodic reindexing. | `60` |
+| `angular-auto-import.importModuleSpecifier` | Import path style: `shortest`, `relative`, `non-relative`, or `project-relative`. Uses the same preference names as TypeScript/VS Code; choose `non-relative` for WebStorm-like alias-first imports. | `shortest` |
+
+Generated TypeScript imports and the changed `@Component imports` array follow the
+nearest Prettier configuration and supported `.editorconfig` values. The extension
+respects `printWidth`, `tabWidth`, `useTabs`, and `singleQuote` without formatting the
+rest of the file. Those values are read straight from the declarative formats —
+`.prettierrc`, `.prettierrc.json`, and a `prettier` key in `package.json`; a
+configuration written as code (`prettier.config.js` and its siblings) is detected but
+never executed, so such a project gets Prettier's own defaults. Projects without a
+formatter config keep the previous 120-character, two-space behavior.
 
 ### Completion Settings
 
@@ -208,7 +215,6 @@ Access these commands from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | ------- | ----------- | ----------- |
 | **Fix all missing imports in current file** | Automatically imports all missing Angular elements in the active file | After creating new templates or moving code between files |
 | **Reindex Project(s)** | Manually triggers a full project reindex | When new components aren't being detected |
-| **Clear Cache** | Clears all cached indexing data | When experiencing persistent issues or after major project changes |
 | **Show Logs** | Opens the extension's output channel | For debugging or reporting issues |
 
 ## Troubleshooting
