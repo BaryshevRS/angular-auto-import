@@ -24,7 +24,7 @@ import { isLibraryExcluded } from "../config/excluded-libraries";
 import { bundleMembersOf } from "../core/bundles";
 import type { CacheStore } from "../core/cache";
 import { type CancellationSignal, neverCancelled } from "../core/cancellation";
-import { type ElementApi, EMPTY_ELEMENT_API, readElementApi } from "../core/element-api";
+import { type ElementApi, EMPTY_ELEMENT_API, mergeElementApis, readElementApi } from "../core/element-api";
 import type { BundleEntry } from "../core/element-index";
 import {
   AngularElementIndex,
@@ -1742,6 +1742,7 @@ export class AngularIndexer {
       inputs: value.inputs,
       outputs: value.outputs,
       contentSelectors: value.contentSelectors,
+      hostDirectives: value.hostDirectives,
     });
 
     // Index under all its selectors
@@ -2813,6 +2814,69 @@ export class AngularIndexer {
   }
 
   /**
+   * The whole surface of one element, its own declaration merged with what it extends.
+   *
+   * Gated on the `extends` clause being *written*, which is a syntactic question and
+   * costs nothing to ask, so only a class that has one pays for resolving where it leads.
+   * That gate is the whole of the speed story, and even it does not show: across the v22
+   * fixture — 536 declarations, 123 of them extending something, one base reused seven
+   * times — a cold index measures the same with the walk, without the gate, and with a
+   * memo of resolved bases added. It is free because the base's declaration file is one
+   * the indexer is walking anyway; a memo was written, measured against three runs of
+   * each, and removed for buying nothing. Re-adding it needs a workload where it shows.
+   * @internal
+   */
+  private _elementApiWithInheritance(
+    owner: ClassDeclaration,
+    own: ElementApi,
+    isComponent: boolean,
+    resolving: ReadonlySet<string> = new Set()
+  ): ElementApi {
+    if (owner.getExtends() === undefined) {
+      return own;
+    }
+
+    const base = owner.getBaseClass();
+    if (!base) {
+      return own;
+    }
+
+    const key = `${base.getSourceFile().getFilePath()}#${base.getName() ?? ""}`;
+    if (resolving.has(key)) {
+      // A class reachable from its own base. Not writable in TypeScript, but a malformed
+      // or generated declaration can say it, and the walk has to end either way.
+      return own;
+    }
+
+    const surface = this._elementApiWithInheritance(
+      base,
+      this._ownElementApi(base, isComponent),
+      isComponent,
+      new Set([...resolving, key])
+    );
+    return mergeElementApis([own, surface]);
+  }
+
+  /**
+   * What one class declares itself, ignoring what it extends.
+   *
+   * A directive may only extend a directive — the runtime throws otherwise — while a
+   * component may extend either, so which definitions are worth looking for depends on
+   * what started the walk.
+   * @internal
+   */
+  private _ownElementApi(cls: ClassDeclaration, isComponent: boolean): ElementApi {
+    for (const propertyName of isComponent ? (["ɵcmp", "ɵdir"] as const) : (["ɵdir"] as const)) {
+      const prop = cls.getStaticProperty(propertyName);
+      const typeNode = prop?.isKind(SyntaxKind.PropertyDeclaration) ? prop.getTypeNode() : undefined;
+      if (typeNode?.isKind(SyntaxKind.TypeReference)) {
+        return readElementApi(typeNode.getTypeArguments());
+      }
+    }
+    return EMPTY_ELEMENT_API;
+  }
+
+  /**
    * Extracts selector from a type reference node.
    * @param typeRef The type reference node.
    * @returns The selector string or undefined.
@@ -2871,7 +2935,7 @@ export class AngularIndexer {
     propertyName: "ɵcmp" | "ɵdir",
     elementType: "component" | "directive"
   ): { elementType: "component" | "directive"; selector: string; isStandalone: boolean; api: ElementApi } | null {
-    const { prop } = this._findInheritedStaticProperty(classDecl, propertyName);
+    const { owner, prop } = this._findInheritedStaticProperty(classDecl, propertyName);
     if (!prop) {
       return null;
     }
@@ -2891,7 +2955,11 @@ export class AngularIndexer {
       elementType,
       selector,
       isStandalone: this._isStandaloneFromTypeReference(typeRef, elementType),
-      api: readElementApi(typeRef.getTypeArguments()),
+      api: this._elementApiWithInheritance(
+        owner,
+        readElementApi(typeRef.getTypeArguments()),
+        elementType === "component"
+      ),
     };
   }
 
@@ -2995,6 +3063,7 @@ export class AngularIndexer {
       inputs: api.inputs,
       outputs: api.outputs,
       contentSelectors: api.contentSelectors,
+      hostDirectives: api.hostDirectives,
     });
 
     for (const sel of individualSelectors) {

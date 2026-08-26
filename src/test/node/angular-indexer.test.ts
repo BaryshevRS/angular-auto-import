@@ -1170,7 +1170,7 @@ export declare const MockBundle: readonly [typeof MockBundleInput, typeof MockBu
 
 export declare class MockApiCard {
   static ɵfac: i0.ɵɵFactoryDeclaration<MockApiCard, never>;
-  static ɵcmp: i0.ɵɵComponentDeclaration<MockApiCard, "mock-api-card", never, { "heading": { "alias": "mockHeading"; "required": true; }; "tone": { "alias": "tone"; "required": false; "isSignal": true; }; }, { "closed": "mockClosed"; }, never, ["[header]", "*"], true, never>;
+  static ɵcmp: i0.ɵɵComponentDeclaration<MockApiCard, "mock-api-card", never, { "heading": { "alias": "mockHeading"; "required": true; }; "tone": { "alias": "tone"; "required": false; "isSignal": true; }; }, { "closed": "mockClosed"; }, never, ["[header]", "*"], true, [{ directive: typeof i1.MockApiBehavior; inputs: { "behaviourId": "id"; }; outputs: {}; }]>;
 }
 `
       );
@@ -1192,6 +1192,9 @@ export declare class MockApiCard {
         ]);
         assert.deepStrictEqual(card.outputs, [{ name: "mockClosed", propertyName: "closed" }]);
         assert.deepStrictEqual(card.contentSelectors, ["[header]", "*"]);
+        assert.deepStrictEqual(card.hostDirectives, [
+          { name: "MockApiBehavior", inputs: [{ name: "id", directiveName: "behaviourId" }], outputs: [] },
+        ]);
 
         // The surface is rebuilt field by field when a cache is loaded, so anything the
         // rebuild forgets is lost on the next start rather than on this one.
@@ -1204,7 +1207,77 @@ export declare class MockApiCard {
         assert.deepStrictEqual(cached.inputs, card.inputs, "its inputs survive the round trip");
         assert.deepStrictEqual(cached.outputs, card.outputs);
         assert.deepStrictEqual(cached.contentSelectors, card.contentSelectors);
+        assert.deepStrictEqual(cached.hostDirectives, card.hostDirectives);
         restored.dispose();
+      } finally {
+        fs.writeFileSync(projectManifestPath, projectManifest);
+      }
+    });
+
+    it("takes the inputs a base class declares, which Angular does not fold into the subclass", async () => {
+      // MatTable's own input map is empty and CdkTable's holds everything a template
+      // writes on it. The base is in another package there; here it is another file,
+      // which is the same resolution and a cheaper fixture.
+      const libPath = path.join(mockNodeModulesPath, "mock-inherit-lib");
+      fs.mkdirSync(libPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(libPath, "package.json"),
+        JSON.stringify(
+          {
+            name: "mock-inherit-lib",
+            version: "1.0.0",
+            peerDependencies: { "@angular/core": "^17.0.0" },
+            types: "./index.d.ts",
+          },
+          null,
+          2
+        )
+      );
+      fs.writeFileSync(
+        path.join(libPath, "base.d.ts"),
+        `import * as i0 from '@angular/core';
+
+export declare class MockBaseTable {
+  static ɵfac: i0.ɵɵFactoryDeclaration<MockBaseTable, never>;
+  static ɵdir: i0.ɵɵDirectiveDeclaration<MockBaseTable, never, never, { "trackBy": { "alias": "trackBy"; "required": false; }; "dataSource": { "alias": "dataSource"; "required": true; }; }, { "rendered": "rendered"; }, never, never, true, never>;
+}
+`
+      );
+      fs.writeFileSync(
+        path.join(libPath, "index.d.ts"),
+        `import * as i0 from '@angular/core';
+import { MockBaseTable } from './base';
+
+export declare class MockDerivedTable extends MockBaseTable {
+  static ɵfac: i0.ɵɵFactoryDeclaration<MockDerivedTable, never>;
+  static ɵcmp: i0.ɵɵComponentDeclaration<MockDerivedTable, "mock-derived-table", never, { "trackBy": { "alias": "trackBy"; "required": true; "isSignal": true; }; }, {}, never, ["*"], true, never>;
+}
+export { MockBaseTable };
+`
+      );
+
+      const projectManifestPath = path.join(testProjectPath, "package.json");
+      const projectManifest = fs.readFileSync(projectManifestPath, "utf8");
+      const withDependency = JSON.parse(projectManifest);
+      withDependency.dependencies = { ...withDependency.dependencies, "mock-inherit-lib": "1.0.0" };
+      fs.writeFileSync(projectManifestPath, JSON.stringify(withDependency, null, 2));
+
+      try {
+        await indexer.indexNodeModules();
+
+        const [derived] = indexer.getElements("mock-derived-table");
+        assert.ok(derived, "the component should be indexed");
+        assert.deepStrictEqual(
+          derived.inputs,
+          [
+            // Its own declaration wins for the name it redeclares, which is the override.
+            { name: "trackBy", propertyName: undefined, required: true, isSignal: true },
+            { name: "dataSource", propertyName: undefined, required: true, isSignal: false },
+          ],
+          "a base class input reaches the subclass, and an override replaces it"
+        );
+        assert.deepStrictEqual(derived.outputs, [{ name: "rendered", propertyName: undefined }]);
+        assert.deepStrictEqual(derived.contentSelectors, ["*"], "content selectors are the subclass's own");
       } finally {
         fs.writeFileSync(projectManifestPath, projectManifest);
       }

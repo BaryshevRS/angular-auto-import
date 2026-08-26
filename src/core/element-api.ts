@@ -25,12 +25,13 @@
  */
 
 import { type Node, SyntaxKind, type TypeNode } from "ts-morph";
-import type { ElementInput, ElementOutput } from "../types";
+import type { ElementHostDirective, ElementInput, ElementOutput, ExposedBinding } from "../types";
 
 /** Where each part of the surface sits in the declaration's type arguments. */
 const INPUT_MAP = 3;
 const OUTPUT_MAP = 4;
 const NG_CONTENT_SELECTORS = 6;
+const HOST_DIRECTIVES = 8;
 
 /** The part of an element's public surface this module reads. */
 export interface ElementApi {
@@ -38,10 +39,17 @@ export interface ElementApi {
   outputs: ElementOutput[];
   /** The `ng-content` selectors a component projects into, in declaration order. */
   contentSelectors: string[];
+  /** The directives that come with it, and what each exposes on the host. */
+  hostDirectives: ElementHostDirective[];
 }
 
 /** Nothing declared, which is what most directives emit and what a bad read falls back to. */
-export const EMPTY_ELEMENT_API: ElementApi = { inputs: [], outputs: [], contentSelectors: [] };
+export const EMPTY_ELEMENT_API: ElementApi = {
+  inputs: [],
+  outputs: [],
+  contentSelectors: [],
+  hostDirectives: [],
+};
 
 /**
  * Reads the surface out of one declaration's type arguments.
@@ -53,7 +61,65 @@ export function readElementApi(typeArguments: TypeNode[]): ElementApi {
     inputs: readInputs(typeArguments[INPUT_MAP]),
     outputs: readOutputs(typeArguments[OUTPUT_MAP]),
     contentSelectors: readStringTuple(typeArguments[NG_CONTENT_SELECTORS]),
+    hostDirectives: readHostDirectives(typeArguments[HOST_DIRECTIVES]),
   };
+}
+
+/**
+ * The directives that come with this one, and what each of them exposes.
+ *
+ * The emit is a tuple of `{ directive: typeof X; inputs: {…}; outputs: {…} }`, and each
+ * map reads *directive name to host name*: `parseMappingString` splits `'menuId: id'`
+ * into the field and its alias and stores `{ menuId: "id" }`, so the value is what a
+ * template writes on the host and the key is what the host directive calls it. An empty
+ * map is the common case and the default — a host directive exposes nothing unless the
+ * host lists it.
+ * @internal
+ */
+function readHostDirectives(typeNode: TypeNode | undefined): ElementHostDirective[] {
+  if (!typeNode?.isKind(SyntaxKind.TupleType)) {
+    return [];
+  }
+
+  const hostDirectives: ElementHostDirective[] = [];
+  for (const element of typeNode.getElements()) {
+    const fields = new Map(members(element).map((member) => [member.name, member.type]));
+    const name = typeQueryName(fields.get("directive"));
+    if (name === undefined) {
+      continue;
+    }
+    hostDirectives.push({
+      name,
+      inputs: readExposedBindings(fields.get("inputs")),
+      outputs: readExposedBindings(fields.get("outputs")),
+    });
+  }
+  return hostDirectives;
+}
+
+/** @internal */
+function readExposedBindings(typeNode: TypeNode | undefined): ExposedBinding[] {
+  const exposed: ExposedBinding[] = [];
+  for (const { name, type } of members(typeNode)) {
+    const hostName = stringLiteralOf(type) ?? name;
+    exposed.push({ name: hostName, directiveName: propertyNameFor(name, hostName) });
+  }
+  return exposed;
+}
+
+/**
+ * The class a `typeof i1.SomeDirective` names.
+ *
+ * The qualifier is an import alias the emitting file chose — `i1` here, `i7` in the next
+ * file — and says nothing about the directive, so only the last name is kept.
+ * @internal
+ */
+function typeQueryName(typeNode: TypeNode | undefined): string | undefined {
+  if (!typeNode?.isKind(SyntaxKind.TypeQuery)) {
+    return undefined;
+  }
+  const written = typeNode.getExprName().getText();
+  return written.slice(written.lastIndexOf(".") + 1);
 }
 
 /**
@@ -167,4 +233,54 @@ function booleanOf(typeNode: Node | undefined): boolean | undefined {
     return true;
   }
   return literal.isKind(SyntaxKind.FalseKeyword) ? false : undefined;
+}
+
+/**
+ * One element's whole surface, out of its own declaration and those it extends.
+ *
+ * Every rule here is `ɵɵInheritDefinitionFeature`'s, which is what actually runs:
+ *
+ * - **inputs and outputs are inherited, and the nearer declaration wins.** The runtime
+ *   copies a base's entry only `if (target.inputs.hasOwnProperty(key)) continue`, so an
+ *   override replaces rather than adds. Keyed by the name a template writes, since that
+ *   is the name an override has to reuse to be one.
+ * - **content selectors are not inherited at all.** They come from a component's own
+ *   template, and a subclass that renders nothing has none; the feature does not touch
+ *   them.
+ * - **host directives are inherited, and the base's come first.**
+ *   `ɵɵHostDirectivesFeature` is marked `ngInherit`, and re-running it on a subclass
+ *   `unshift`s what the base brought onto what the subclass declares.
+ *
+ * @param chain The surfaces along the `extends` chain, the element's own first.
+ * @returns One surface, as Angular would assemble it.
+ */
+export function mergeElementApis(chain: ElementApi[]): ElementApi {
+  if (chain.length === 1) {
+    return chain[0];
+  }
+
+  const inputs = new Map<string, ElementInput>();
+  const outputs = new Map<string, ElementOutput>();
+  const hostDirectives: ElementHostDirective[][] = [];
+
+  for (const api of chain) {
+    for (const input of api.inputs) {
+      if (!inputs.has(input.name)) {
+        inputs.set(input.name, input);
+      }
+    }
+    for (const output of api.outputs) {
+      if (!outputs.has(output.name)) {
+        outputs.set(output.name, output);
+      }
+    }
+    hostDirectives.unshift(api.hostDirectives);
+  }
+
+  return {
+    inputs: [...inputs.values()],
+    outputs: [...outputs.values()],
+    contentSelectors: chain[0].contentSelectors,
+    hostDirectives: hostDirectives.flat(),
+  };
 }

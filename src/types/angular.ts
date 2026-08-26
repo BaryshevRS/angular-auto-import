@@ -72,6 +72,30 @@ export interface ElementInput {
   isSignal: boolean;
 }
 
+/** One binding a host directive puts on every element its host matches. */
+export interface ExposedBinding {
+  /** The name a template writes on the host element. */
+  name: string;
+  /** The name it has on the host directive, present only when the two differ. */
+  directiveName?: string;
+}
+
+/**
+ * A directive Angular applies wherever this element matches, and what of it shows through.
+ *
+ * Nothing shows through by default — a host directive exposes an input or an output only
+ * where the host says to, optionally under another name. What it exposes is written out
+ * in the host's own emit, so these names are known without opening the host directive;
+ * what is not known that way is whether each is required or a signal, which is a fact
+ * about the host directive's declaration and not about this one.
+ */
+export interface ElementHostDirective {
+  /** The class name as the declaration writes it, without the import alias in front. */
+  name: string;
+  inputs: ExposedBinding[];
+  outputs: ExposedBinding[];
+}
+
 /** One output a template can listen to, named the same way an input is. */
 export interface ElementOutput {
   name: string;
@@ -108,6 +132,8 @@ interface AngularElementDataOptions {
   outputs?: ElementOutput[];
   /** The `ng-content` selectors a component projects into, in declaration order. */
   contentSelectors?: string[];
+  /** The directives that come with it, and what they expose on the host. */
+  hostDirectives?: ElementHostDirective[];
 }
 
 /**
@@ -126,6 +152,7 @@ export class AngularElementData {
   public readonly inputs?: ElementInput[];
   public readonly outputs?: ElementOutput[];
   public readonly contentSelectors?: string[];
+  public readonly hostDirectives?: ElementHostDirective[];
 
   /**
    * Creates an instance of AngularElementData.
@@ -147,6 +174,7 @@ export class AngularElementData {
     this.inputs = options.inputs;
     this.outputs = options.outputs;
     this.contentSelectors = options.contentSelectors;
+    this.hostDirectives = options.hostDirectives;
   }
 }
 

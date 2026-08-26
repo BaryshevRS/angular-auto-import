@@ -9,7 +9,7 @@
 
 import * as assert from "node:assert";
 import { Project, SyntaxKind, type TypeReferenceNode } from "ts-morph";
-import { type ElementApi, readElementApi } from "../../core/element-api";
+import { type ElementApi, mergeElementApis, readElementApi } from "../../core/element-api";
 
 /**
  * The surface of the one declaration in a fragment of a `.d.ts`.
@@ -105,6 +105,117 @@ describe("Element API, out of the declaration", () => {
   it("says nothing rather than guessing when the arguments are not there", () => {
     const api = apiOf('static ɵpipe: i0.ɵɵPipeDeclaration<DatePipe, "date", true>;');
 
-    assert.deepStrictEqual(api, { inputs: [], outputs: [], contentSelectors: [] });
+    assert.deepStrictEqual(api, { inputs: [], outputs: [], contentSelectors: [], hostDirectives: [] });
+  });
+
+  it("reads a host directive that exposes nothing, which is the default", () => {
+    // ng-zorro's button, one of thirteen host directives in the fixture's dependencies
+    // and twelve of them exposing nothing at all.
+    const api = apiOf(
+      'static ɵdir: i0.ɵɵDirectiveDeclaration<NzButtonComponent, "button[nz-button]", never, {}, {}, never, never, ' +
+        "true, [{ directive: typeof i1.NzSpaceCompactItemDirective; inputs: {}; outputs: {}; }]>;"
+    );
+
+    assert.deepStrictEqual(api.hostDirectives, [{ name: "NzSpaceCompactItemDirective", inputs: [], outputs: [] }]);
+  });
+
+  it("reads the inputs a host directive does expose", () => {
+    // ng-zorro's menu, the one host directive in that corpus that exposes anything.
+    const api = apiOf(
+      'static ɵdir: i0.ɵɵDirectiveDeclaration<NzMenuDirective, "[nz-menu]", never, {}, {}, never, never, true, ' +
+        '[{ directive: typeof i1.NzAnimationCollapseDirective; inputs: { "open": "open"; "leavedClassName": "leavedClassName"; }; outputs: {}; }]>;'
+    );
+
+    assert.deepStrictEqual(api.hostDirectives, [
+      {
+        name: "NzAnimationCollapseDirective",
+        inputs: [
+          { name: "open", directiveName: undefined },
+          { name: "leavedClassName", directiveName: undefined },
+        ],
+        outputs: [],
+      },
+    ]);
+  });
+
+  it("names an exposed binding by what a template writes, not by what the directive calls it", () => {
+    // `hostDirectives: [{ directive: MenuBehavior, inputs: ['menuId: id'] }]`, which
+    // `parseMappingString` stores as `{ menuId: "id" }`: the key is the name on the host
+    // directive and the value is the one a template writes on the host.
+    const api = apiOf(
+      'static ɵcmp: i0.ɵɵComponentDeclaration<AdminMenu, "admin-menu", never, {}, {}, never, ["*"], true, ' +
+        '[{ directive: typeof i1.MenuBehavior; inputs: { "menuId": "id"; }; outputs: { "menuClosed": "closed"; }; }]>;'
+    );
+
+    assert.deepStrictEqual(api.hostDirectives, [
+      {
+        name: "MenuBehavior",
+        inputs: [{ name: "id", directiveName: "menuId" }],
+        outputs: [{ name: "closed", directiveName: "menuClosed" }],
+      },
+    ]);
+  });
+
+  describe("merged along the extends chain", () => {
+    const base: ElementApi = {
+      inputs: [
+        { name: "trackBy", required: false, isSignal: false },
+        { name: "dataSource", required: true, isSignal: false },
+      ],
+      outputs: [{ name: "contentChanged" }],
+      contentSelectors: ["*"],
+      hostDirectives: [{ name: "BaseBehavior", inputs: [], outputs: [] }],
+    };
+
+    it("takes what the base declares and the subclass does not", () => {
+      // MatTable's own input map is empty; everything a template writes on it is
+      // CdkTable's. Reading only the subclass answers "no inputs" for most of Material.
+      const merged = mergeElementApis([{ inputs: [], outputs: [], contentSelectors: [], hostDirectives: [] }, base]);
+
+      assert.deepStrictEqual(
+        merged.inputs.map((input) => input.name),
+        ["trackBy", "dataSource"]
+      );
+      assert.deepStrictEqual(merged.outputs, [{ name: "contentChanged" }]);
+    });
+
+    it("lets the nearer declaration win, which is what an override is", () => {
+      const own: ElementApi = {
+        inputs: [{ name: "trackBy", required: true, isSignal: true }],
+        outputs: [],
+        contentSelectors: [],
+        hostDirectives: [],
+      };
+
+      assert.deepStrictEqual(mergeElementApis([own, base]).inputs, [
+        { name: "trackBy", required: true, isSignal: true },
+        { name: "dataSource", required: true, isSignal: false },
+      ]);
+    });
+
+    it("does not inherit content selectors, which come from a template", () => {
+      const own: ElementApi = { inputs: [], outputs: [], contentSelectors: [], hostDirectives: [] };
+
+      assert.deepStrictEqual(mergeElementApis([own, base]).contentSelectors, []);
+      assert.deepStrictEqual(mergeElementApis([{ ...own, contentSelectors: ["[header]"] }, base]).contentSelectors, [
+        "[header]",
+      ]);
+    });
+
+    it("puts the host directives the base brings before the ones declared here", () => {
+      // `ɵɵHostDirectivesFeature` is `ngInherit`, and re-running it on a subclass
+      // `unshift`s what the base brought onto what the subclass declares.
+      const own: ElementApi = {
+        inputs: [],
+        outputs: [],
+        contentSelectors: [],
+        hostDirectives: [{ name: "OwnBehavior", inputs: [], outputs: [] }],
+      };
+
+      assert.deepStrictEqual(
+        mergeElementApis([own, base]).hostDirectives.map((hostDirective) => hostDirective.name),
+        ["BaseBehavior", "OwnBehavior"]
+      );
+    });
   });
 });
