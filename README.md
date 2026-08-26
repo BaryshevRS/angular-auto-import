@@ -1,6 +1,6 @@
 # Angular Auto-Import for VS Code
 
-[![StopSlop](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BaryshevRS/angular-auto-import/main/stopslop-badge.json)](https://www.npmjs.com/package/stopslop)
+[![AI slop](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BaryshevRS/stopslop/main/stopslop-badge.json)](https://github.com/BaryshevRS/stopslop)
 [![Clone Alert: 0 clones](https://img.shields.io/badge/Clone%20Alert-0%20clones-brightgreen?style=flat-square)](https://www.npmjs.com/package/clone-alert)
 
 [![Install in VS Code](https://img.shields.io/badge/Install%20in-VS%20Code-007ACC?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=baryshevrs.angular-auto-import)
