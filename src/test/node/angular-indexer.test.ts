@@ -657,6 +657,118 @@ export class TempComponent {}
       newIndexer.dispose();
     });
 
+    it("carries what a project's own component declares, including from its base class", async () => {
+      const basePath = path.join(testProjectPath, "src", "app", "surface-base.directive.ts");
+      const derivedPath = path.join(testProjectPath, "src", "app", "surface.component.ts");
+      fs.writeFileSync(
+        basePath,
+        `
+import { Directive, Input } from '@angular/core';
+
+@Directive({ standalone: true })
+export class SurfaceBaseDirective {
+  @Input({ required: true }) dataSource!: unknown;
+  @Input('appTone') tone = 'quiet';
+}
+`
+      );
+      fs.writeFileSync(
+        derivedPath,
+        `
+import { Component, input, model, output } from '@angular/core';
+import { SurfaceBaseDirective } from './surface-base.directive';
+
+@Component({ selector: 'app-surface', standalone: true, template: '', inputs: ['legacy: appLegacy'] })
+export class SurfaceComponent extends SurfaceBaseDirective {
+  heading = input.required<string>();
+  value = model('');
+  closed = output<void>();
+}
+`
+      );
+
+      try {
+        indexer.setProjectRoot(testProjectPath);
+        await indexer.generateFullIndex();
+
+        const [surface] = indexer.getElements("app-surface");
+        assert.ok(surface, "the component should be indexed");
+        assert.deepStrictEqual(
+          surface.inputs?.map(({ name, required, isSignal }) => [name, required, isSignal]),
+          [
+            // Declared on the decorator, then on the fields, then what the base brings.
+            ["appLegacy", false, false],
+            ["heading", true, true],
+            ["value", false, true],
+            ["dataSource", true, false],
+            ["appTone", false, false],
+          ]
+        );
+        assert.deepStrictEqual(
+          surface.outputs?.map((output) => output.name),
+          ["valueChange", "closed"],
+          "a model brings its own output, and it is named after the input"
+        );
+
+        const restored = new AngularIndexer({ cacheStore, ...hostPorts() });
+        restored.setProjectRoot(testProjectPath);
+        assert.ok(await restored.loadFromWorkspace(), "cache is loadable");
+        try {
+          const [cached] = restored.getElements("app-surface");
+          assert.deepStrictEqual(cached?.inputs, surface.inputs, "the surface survives the cache round trip");
+          assert.deepStrictEqual(cached?.outputs, surface.outputs);
+        } finally {
+          restored.dispose();
+        }
+      } finally {
+        fs.rmSync(basePath, { force: true });
+        fs.rmSync(derivedPath, { force: true });
+      }
+    });
+
+    it("indexes a selector and a pipe name written with backticks", async () => {
+      // ngtsc's evaluator reads a template literal with nothing interpolated as the
+      // string it spells, so these are ordinary declarations. Reading only quoted strings
+      // left the whole element out of the index, not just its name.
+      const backtickPath = path.join(testProjectPath, "src", "app", "backtick.ts");
+      fs.writeFileSync(
+        backtickPath,
+        [
+          "import { Component, Directive, Pipe } from '@angular/core';",
+          "",
+          "@Component({ selector: `app-backtick`, standalone: true, template: '' })",
+          "export class BacktickComponent {}",
+          "",
+          "@Directive({ selector: `[appBacktick]`, standalone: true })",
+          "export class BacktickDirective {}",
+          "",
+          "@Pipe({ name: `backtick`, standalone: true })",
+          "export class BacktickPipe { transform(value: string) { return value; } }",
+          "",
+        ].join("\n")
+      );
+
+      try {
+        indexer.setProjectRoot(testProjectPath);
+        await indexer.generateFullIndex();
+
+        assert.deepStrictEqual(
+          indexer.getElements("app-backtick").map((element) => element.name),
+          ["BacktickComponent"]
+        );
+        assert.deepStrictEqual(
+          indexer.getElements("[appBacktick]").map((element) => element.name),
+          ["BacktickDirective"]
+        );
+        assert.deepStrictEqual(
+          indexer.getElements("backtick").map((element) => element.name),
+          ["BacktickPipe"]
+        );
+      } finally {
+        fs.rmSync(backtickPath, { force: true });
+      }
+    });
+
     it("keeps both directives when two of them declare the same selector", async () => {
       // `[tuiSlot]` is TuiAppBarDirective in one Taiga entry point and
       // TuiBlockStatusDirective in another, and Angular applies both: only components

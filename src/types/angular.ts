@@ -40,6 +40,12 @@ export interface ComponentInfo {
    * Indicates if the component is standalone.
    */
   isStandalone: boolean;
+  /** What a template may bind on it, its own declaration merged with what it extends. */
+  inputs?: ElementInput[];
+  /** What a template may listen to on it. */
+  outputs?: ElementOutput[];
+  /** The directives that come with it, and what they expose on the host. */
+  hostDirectives?: ElementHostDirective[];
 }
 
 /**

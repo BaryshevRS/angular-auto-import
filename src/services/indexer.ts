@@ -25,6 +25,7 @@ import { bundleMembersOf } from "../core/bundles";
 import type { CacheStore } from "../core/cache";
 import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import { type ElementApi, EMPTY_ELEMENT_API, mergeElementApis, readElementApi } from "../core/element-api";
+import { readElementApiFromSource, staticText } from "../core/element-api-source";
 import type { BundleEntry } from "../core/element-index";
 import {
   AngularElementIndex,
@@ -759,6 +760,15 @@ export class AngularIndexer {
       }
 
       if (elementType && selector) {
+        const api =
+          elementType === "pipe"
+            ? EMPTY_ELEMENT_API
+            : this._elementApiWithInheritance(
+                classDeclaration,
+                readElementApiFromSource(classDeclaration),
+                elementType === "component"
+              );
+
         return {
           path: path.relative(this.projectRootPath, filePath),
           name: className,
@@ -767,6 +777,9 @@ export class AngularIndexer {
           hash: this.generateHash(fileContent), // Use content for hash
           type: elementType,
           isStandalone: isStandaloneElement,
+          inputs: api.inputs,
+          outputs: api.outputs,
+          hostDirectives: api.hostDirectives,
         };
       }
     }
@@ -788,9 +801,12 @@ export class AngularIndexer {
 
         const selectorProperty = objectLiteral.getProperty("selector");
         if (selectorProperty?.isKind(SyntaxKind.PropertyAssignment)) {
-          const initializer = selectorProperty.getInitializer();
-          if (initializer?.isKind(SyntaxKind.StringLiteral)) {
-            return initializer.getLiteralText();
+          // A backtick selector is a selector: ngtsc's evaluator reads a template literal
+          // with nothing interpolated as the string it spells, and reading only quoted
+          // ones left the element out of the index altogether rather than mis-naming it.
+          const selector = staticText(selectorProperty.getInitializer());
+          if (selector !== undefined) {
+            return selector;
           }
         }
       }
@@ -836,10 +852,7 @@ export class AngularIndexer {
 
         const nameProperty = objectLiteral.getProperty("name");
         if (nameProperty?.isKind(SyntaxKind.PropertyAssignment)) {
-          const initializer = nameProperty.getInitializer();
-          if (initializer?.isKind(SyntaxKind.StringLiteral)) {
-            name = initializer.getLiteralText();
-          }
+          name = staticText(nameProperty.getInitializer()) ?? name;
         }
       }
     } catch (error) {
@@ -1178,6 +1191,9 @@ export class AngularIndexer {
       isExternal: false,
       exportingModuleName: moduleToImport,
       absolutePath,
+      inputs: parsed.inputs,
+      outputs: parsed.outputs,
+      hostDirectives: parsed.hostDirectives,
     });
 
     for (const selector of individualSelectors) {
@@ -2873,7 +2889,12 @@ export class AngularIndexer {
         return readElementApi(typeNode.getTypeArguments());
       }
     }
-    return EMPTY_ELEMENT_API;
+
+    // No compiled definition, so this is a class as the project wrote it — which is also
+    // what a project element's base class is, when it has one inside the project.
+    return cls.getDecorator("Component") || cls.getDecorator("Directive")
+      ? readElementApiFromSource(cls)
+      : EMPTY_ELEMENT_API;
   }
 
   /**
