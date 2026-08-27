@@ -19,11 +19,23 @@ import type { AngularElementData } from "../types";
 import { packageOf } from "./library-usage";
 import type { TemplateProject } from "./verify-template";
 
-/** How many elements one answer carries. */
-const LIMIT = 5;
+/**
+ * How many matches are described in full.
+ *
+ * The rest are not dropped, only shortened: a fixed count of results is arbitrary at both
+ * ends, and hiding the sixty-seventh means hiding the right answer whenever the ranking
+ * is wrong — which it will sometimes be, because it ranks by string match and by what the
+ * workspace writes, while the model is the one holding the intent.
+ */
+const DETAILED = 10;
 
-/** Beyond this many matches the query is too broad to be answered by its first five. */
-const TOO_BROAD = 10;
+/**
+ * How many are named at all.
+ *
+ * Past this the query matched most of the index and no list is an answer. A name and a
+ * selector cost about a dozen tokens, so naming a hundred costs less than describing ten.
+ */
+const NAMED = 100;
 
 /** One candidate, with enough to choose by and no more. */
 export interface SearchHit {
@@ -47,10 +59,18 @@ export interface SearchHit {
 
 /** What `search` answers. */
 export interface SearchAnswer {
+  /** The best matches, described in full. */
   hits: SearchHit[];
-  /** How many further elements matched and were not returned. */
+  /**
+   * Everything else that matched, as `name · selector · library`.
+   *
+   * Named rather than dropped, so that a ranking this tool got wrong is still recoverable:
+   * ask `angular_element_api` for any of these by name.
+   */
+  others?: string[];
+  /** How many matched beyond even those named. */
   more: number;
-  /** Present only when nothing matched, saying what to do instead. */
+  /** Present when nothing matched, or when the query was too broad to answer with a list. */
   advice?: string;
 }
 
@@ -106,20 +126,27 @@ export async function searchElements(request: SearchRequest): Promise<SearchAnsw
     (one, other) => other.used - one.used || one.element.name.localeCompare(other.element.name)
   );
 
-  const more = Math.max(0, ranked.length - LIMIT);
+  const others = ranked.slice(DETAILED, NAMED);
   return {
-    hits: await Promise.all(ranked.slice(0, LIMIT).map(({ element, used }) => describe(element, used, request))),
-    more,
-    // Five of seventy is five arbitrary ones. Said out loud, because a model reading a
-    // list has no way to tell a shortlist from an answer.
-    ...(more >= TOO_BROAD
+    hits: await Promise.all(ranked.slice(0, DETAILED).map(({ element, used }) => describe(element, used, request))),
+    ...(others.length > 0 ? { others: others.map(({ element }) => name(element)) } : {}),
+    more: Math.max(0, ranked.length - NAMED),
+    ...(ranked.length > NAMED
       ? {
           advice:
-            `${ranked.length} elements match, so these five are a sample rather than the answer. ` +
+            `${ranked.length} elements match, which is too many for a list to be an answer. ` +
             "Narrow it: add a word, or set type to component, directive or pipe.",
         }
       : {}),
   };
+}
+
+/** One line for an element the answer names but does not describe. @internal */
+function name(element: AngularElementData): string {
+  const selector = element.originalSelector.replace(/\s+/g, " ").trim();
+  return element.isExternal
+    ? `${element.name} · ${selector} · ${packageOf(element.path)}`
+    : `${element.name} · ${selector}`;
 }
 
 /**

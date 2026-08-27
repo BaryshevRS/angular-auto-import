@@ -16,8 +16,17 @@ import { resolveElementImportPath } from "../core/import-resolution";
 import type { AngularElementData, ElementInput } from "../types";
 import type { TemplateProject } from "./verify-template";
 
-/** How many elements one answer carries when nothing matched exactly. */
-const LIMIT = 5;
+/**
+ * How many elements are described in full when nothing matched exactly.
+ *
+ * The rest are named rather than dropped: a surface is expensive to describe and cheap to
+ * name, and a query that missed is better answered with everything it nearly hit than
+ * with five of them and a number.
+ */
+const DETAILED = 5;
+
+/** How many are named at all. Past this the query named most of the index. */
+const NAMED = 100;
 
 /** The score of a selector or a class name the query names outright. */
 const EXACT = 4;
@@ -42,7 +51,9 @@ export interface ElementSummary {
 /** What `element_api` answers. */
 export interface ElementApiAnswer {
   matches: ElementSummary[];
-  /** How many further elements matched and were not returned. */
+  /** Everything else the query named, as `name · selector`; ask again by one of these. */
+  others?: string[];
+  /** How many matched beyond even those named. */
   more: number;
 }
 
@@ -67,8 +78,13 @@ export async function describeElements(request: ElementApiRequest): Promise<Elem
   const ranked = rank(query, request.runtime.indexer.searchWithSelectors(""));
   const answering = shortlist(ranked);
   const matches = await Promise.all(answering.map(({ element }) => summarize(element, request)));
+  const others = ranked.slice(answering.length, NAMED);
 
-  return { matches, more: Math.max(0, ranked.length - answering.length) };
+  return {
+    matches,
+    ...(others.length > 0 ? { others: others.map(({ element }) => name(element)) } : {}),
+    more: Math.max(0, ranked.length - Math.max(answering.length, NAMED)),
+  };
 }
 
 /**
@@ -119,7 +135,12 @@ function shortlist(ranked: Array<{ element: AngularElementData; score: number }>
   element: AngularElementData;
   score: number;
 }> {
-  return ranked[0]?.score === EXACT ? ranked.filter(({ score }) => score === EXACT) : ranked.slice(0, LIMIT);
+  return ranked[0]?.score === EXACT ? ranked.filter(({ score }) => score === EXACT) : ranked.slice(0, DETAILED);
+}
+
+/** One line for an element the answer names but does not describe. @internal */
+function name(element: AngularElementData): string {
+  return `${element.name} · ${element.originalSelector.replace(/\s+/g, " ").trim()}`;
 }
 
 /** @internal */

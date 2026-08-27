@@ -227,7 +227,7 @@ export class TableComponent {
       );
     });
 
-    it("says how many it left out when nothing matched exactly", async () => {
+    it("names what it did not describe, rather than hiding it", async () => {
       const files: Record<string, string> = {};
       for (let index = 0; index < 8; index += 1) {
         files[`thing-${index}.component.ts`] =
@@ -235,14 +235,19 @@ export class TableComponent {
       }
       const { project, root } = await projectOf(files);
 
-      const { matches, more } = await describeElements({
+      const { matches, others, more } = await describeElements({
         runtime: project,
         fromFile: path.join(root, "host.component.ts"),
         query: "thing",
       });
 
-      assert.strictEqual(matches.length, 5, "a shortlist, not everything");
-      assert.strictEqual(more, 3, "and an honest count of the rest");
+      assert.strictEqual(matches.length, 5, "a surface is expensive to describe");
+      assert.strictEqual(more, 0, "but nothing is dropped");
+      assert.deepStrictEqual(
+        others?.map((line) => line.split(" · ")[0]),
+        ["Thing5Component", "Thing6Component", "Thing7Component"],
+        "the rest are named, so a ranking this got wrong is still recoverable"
+      );
     });
   });
 
@@ -284,7 +289,7 @@ export class TableComponent {
       ]);
       assert.deepStrictEqual(overview.own, { standalone: 4, nonStandalone: 0 });
       assert.deepStrictEqual(overview.aliases, { "@app/*": ["src/app/*"] });
-      assert.strictEqual(overview.moreAliases, 0);
+      assert.strictEqual(overview.moreAliases, undefined, "with nothing left over, nothing is said about it");
     });
   });
 

@@ -113,7 +113,13 @@ a list gives a reader no way to tell one from an answer.
   Angular.
 - **Anything needing a line and a column.** An agent has no cursor and will invent them.
   This is why the tools are not the language server's requests in another wrapper.
-- **Unbounded results.** Five, with an honest count of the rest.
+- **Hidden results.** Nothing is dropped and counted; detail is what gets dropped. The
+  best ten matches are described in full and everything else is named — `name · selector ·
+  library`, about a dozen tokens each — so a ranking this tool got wrong is still
+  recoverable by asking again for one of the names. A query for "table" on the v22 fixture
+  answers with all seventy-two that way, for roughly 1,400 tokens. Only past a hundred is
+  anything actually left out, and then the answer says the query matched too much to be a
+  list.
 
 ## Why the work cannot be wasted
 

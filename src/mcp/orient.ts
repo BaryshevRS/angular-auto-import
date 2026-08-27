@@ -17,10 +17,21 @@ import type { AngularElementData } from "../types";
 import { countImporters, packageOf } from "./library-usage";
 import type { TemplateProject } from "./verify-template";
 
-/** How many libraries one answer names. */
-const LIBRARY_LIMIT = 8;
+/**
+ * How many libraries are named. All of them, in practice.
+ *
+ * A workspace installs a dozen, not a thousand, and each costs a name and two numbers.
+ * Capping this would hide the one the model needed on the grounds that it was twelfth.
+ */
+const LIBRARY_LIMIT = 40;
 
-/** How many path aliases it names. A monorepo can declare a hundred; a model needs the shape. */
+/**
+ * How many aliases are shown with their targets.
+ *
+ * The rest are named without them: what `@lib/foo` maps to matters when the model writes
+ * that import, and the shape — that `@lib/*` goes to `libs/` — is what it needs to know
+ * beforehand. A key costs a few tokens; a key and its targets cost twenty.
+ */
 const ALIAS_LIMIT = 12;
 
 /** One library, and how much of this workspace actually reaches for it. */
@@ -48,8 +59,8 @@ export interface Orientation {
   moreLibraries: number;
   /** `compilerOptions.paths`, which is how imports are written where it has entries. */
   aliases: Record<string, string[]>;
-  /** Further aliases beyond the ones named. */
-  moreAliases: number;
+  /** The remaining aliases, by name; ask for a file under one and the specifier comes back right. */
+  moreAliases?: string[];
 }
 
 export interface OrientRequest {
@@ -105,11 +116,15 @@ export async function orient(request: OrientRequest): Promise<Orientation> {
  * the agent will never write.
  * @internal
  */
-function someAliases(paths: Record<string, string[]>): { aliases: Record<string, string[]>; moreAliases: number } {
+function someAliases(paths: Record<string, string[]>): {
+  aliases: Record<string, string[]>;
+  moreAliases?: string[];
+} {
   const entries = Object.entries(paths);
+  const rest = entries.slice(ALIAS_LIMIT).map(([alias]) => alias);
   return {
     aliases: Object.fromEntries(entries.slice(0, ALIAS_LIMIT)),
-    moreAliases: Math.max(0, entries.length - ALIAS_LIMIT),
+    ...(rest.length > 0 ? { moreAliases: rest } : {}),
   };
 }
 
