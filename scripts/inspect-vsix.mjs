@@ -31,7 +31,14 @@ const EXPECTATIONS = [
     required: [
       { pattern: "parseTemplate", why: "the Angular compiler is what the analysis runs on" },
       { pattern: "createConnection", why: "the server has to be able to open a connection" },
+      { pattern: "StdioServerTransport", why: "one bundle is both servers, and this is the agent-facing one" },
     ],
+  },
+  {
+    file: "extension/dist/mcp.js",
+    label: "MCP launcher",
+    required: [{ pattern: 'require("./server.js")', why: "the launcher starts the server rather than being one" }],
+    forbidden: [{ pattern: "parseTemplate", why: "a launcher that carries the compiler is a second copy of it" }],
   },
   {
     file: "extension/dist/extension.js",
@@ -119,4 +126,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`\n${path.basename(archive)} carries both bundles and nothing they do not need.`);
+console.log(`\n${path.basename(archive)} carries the server, the client and nothing they do not need.`);

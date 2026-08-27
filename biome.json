@@ -222,7 +222,8 @@
         "src/test/node/**/*.ts",
         "!src/lsp/client.ts",
         "!src/lsp/client-commands.ts",
-        "!src/lsp/client-status.ts"
+        "!src/lsp/client-status.ts",
+        "!src/lsp/client-mcp.ts"
       ],
       "linter": {
         "rules": {

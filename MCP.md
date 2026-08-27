@@ -136,5 +136,21 @@ the `NzWaveDirective` that comes with the button, leaves an already-imported
 `<router-outlet>` alone, and hands back the component with three imports added. First call
 6.5 s — the cold index — and 3 to 10 ms after that, for any of the three.
 
+## Two ways in, one server
+
+Over npm as `angular-auto-import-mcp`, for Claude Code, Cursor and anything else that
+reads an `mcp.json`.
+
+Inside VS Code the extension registers the same server itself, through
+`vscode.lm.registerMcpServerDefinitionProvider`. That publishes it to the *editor*, in the
+same registry a user-configured server lands in — not to any one chat extension — so
+whatever asks the editor for tools finds these, and nobody has to install anything.
+
+Both start one bundle. The editor-facing and agent-facing servers answer from the same
+index, compiler and ts-morph project, so shipping them separately would ship that engine
+twice; `src/main.ts` decides which a process becomes from its arguments, and neither half
+knows the other exists. The VSIX grew by 140 KB rather than seven megabytes, and the npm
+`bin` is a hundred-and-thirty-byte launcher rather than a second copy.
+
 Sources checked: `angular.dev/ai/mcp`, `angular.dev/ai/develop-with-ai`,
 `github.com/push-based/angular-toolkit-mcp`, and developer reports collected on dev.to.

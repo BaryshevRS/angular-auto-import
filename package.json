@@ -83,6 +83,12 @@
     }
   ],
   "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "angular-auto-import.mcp",
+        "label": "Angular Auto-Import"
+      }
+    ],
     "commands": [
       {
         "command": "angular-auto-import.reindex",

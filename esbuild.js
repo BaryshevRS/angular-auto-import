@@ -1,4 +1,5 @@
 const esbuild = require("esbuild");
+const fs = require("node:fs");
 
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
@@ -55,22 +56,7 @@ async function main() {
 			plugins: [esbuildProblemMatcherPlugin],
 		}),
 		esbuild.context({
-			entryPoints: ["src/mcp/main.ts"],
-			bundle: true,
-			format: "cjs",
-			minify: production,
-			sourcemap: !production,
-			sourcesContent: false,
-			platform: "node",
-			target: "node22",
-			outfile: "dist/mcp.js",
-			logLevel: "silent",
-			external: ["*.node"],
-			banner: { js: "#!/usr/bin/env node" },
-			plugins: [esbuildProblemMatcherPlugin],
-		}),
-		esbuild.context({
-			entryPoints: ["src/lsp/server-main.ts"],
+			entryPoints: ["src/main.ts"],
 			bundle: true,
 			format: "cjs",
 			minify: production,
@@ -84,6 +70,20 @@ async function main() {
 			plugins: [esbuildProblemMatcherPlugin],
 		}),
 	]);
+
+	// The `bin` npm installs: a launcher rather than a second copy of the server, which
+	// would be the same seven megabytes under another name.
+	fs.writeFileSync(
+		"dist/mcp.js",
+		[
+			"#!/usr/bin/env node",
+			'// Starts the server in its agent-facing shape. See src/main.ts.',
+			'process.argv.push("mcp");',
+			'require("./server.js");',
+			"",
+		].join("\n"),
+		{ mode: 0o755 }
+	);
 
 	if (watch) {
 		await Promise.all(contexts.map((context) => context.watch()));

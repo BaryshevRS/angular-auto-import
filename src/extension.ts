@@ -13,6 +13,7 @@ import { installSharedLogger } from "./core/logging";
 import { clearLegacyCacheInBackground } from "./legacy-cache";
 import { logger } from "./logger";
 import { startLanguageClient, stopLanguageClient } from "./lsp/client";
+import { registerMcpServer } from "./lsp/client-mcp";
 
 /**
  * Activates the extension.
@@ -25,6 +26,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Nothing waits on this: it clears storage the extension no longer reads, and a
   // workspace that cannot be written is not a reason to refuse to start.
   clearLegacyCacheInBackground(context, logger);
+
+  // Offered before the language server is started, and independently of it: the editor
+  // starts the MCP server itself, when something asks it for tools.
+  registerMcpServer(context);
 
   try {
     await startLanguageClient(context);
