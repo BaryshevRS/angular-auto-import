@@ -47,6 +47,11 @@
 - `pnpm run test:unit` runs both; `pnpm run test:node` runs only the fast Node ones
 - `src/test/node/harness/lsp-harness.ts` runs the real server over an in-memory
   transport; the protocol, parity, and regression suites drive it
+- `pnpm run test:mcp` drives the *built* `dist/server.js` in its MCP shape, over stdio,
+  with the protocol's own client, against the installed `src/e2e/projects/v22`. Separate
+  from `test:node` for the reason `test:fixtures` is: it indexes a real `node_modules`.
+  It is the only suite that would catch a bundle that does not start or a tool schema a
+  client rejects
 - `src/test/node/lsp-parity.test.ts` replays the recorded E2E descriptors against the
   server, and reads its fixtures from `src/e2e/projects/v22` in the source tree
 - E2E projects live in `src/e2e/projects/` (`v19`, `v21`, `v22` — one per supported

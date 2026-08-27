@@ -133,6 +133,38 @@ describe("Verifying a template for an agent", function () {
     assert.ok(updated.includes("imports: [CardComponent]"), "and the component's imports array carries it");
   });
 
+  it("imports every directive one token needs, not one of them", async () => {
+    // `[appMark]` and `button[appMark]` both apply to `<button appMark>`, and they demand
+    // different things, so Angular applies both. Taking the most specific alone leaves the
+    // template still missing an import after the fix was applied — which is the failure
+    // this rule exists for, and the one an outcome that happens to look right hides.
+    const { project, root } = await projectOf({
+      "host.component.ts": HOST,
+      "mark.directive.ts": `import { Directive } from '@angular/core';
+
+@Directive({ selector: '[appMark]', standalone: true })
+export class MarkDirective {}
+
+@Directive({ selector: 'button[appMark]', standalone: true })
+export class ButtonMarkDirective {}
+`,
+    });
+
+    const verdict = await verifyTemplate({
+      runtime: project,
+      compiler,
+      componentPath: path.join(root, "host.component.ts"),
+      componentText: HOST,
+      template: "<button appMark>ok</button>",
+    });
+
+    assert.deepStrictEqual(
+      [...verdict.addedImports].sort(),
+      ["ButtonMarkDirective", "MarkDirective"],
+      "both, because one token here is two directives rather than a choice between two"
+    );
+  });
+
   it("says nothing about an element the component already imports", async () => {
     const { project, root } = await projectOf({ "host.component.ts": HOST, "card.component.ts": CARD });
     const componentPath = path.join(root, "host.component.ts");

@@ -152,5 +152,20 @@ twice; `src/main.ts` decides which a process becomes from its arguments, and nei
 knows the other exists. The VSIX grew by 140 KB rather than seven megabytes, and the npm
 `bin` is a hundred-and-thirty-byte launcher rather than a second copy.
 
+## Checked against a client
+
+`pnpm run test:mcp` runs the built bundle as a process and talks to it with the MCP SDK's
+own client, against the v22 fixture and its installed `node_modules` — eight cases,
+six seconds, the cold index being nearly all of it. It is the only place a bundle that
+does not start, or a tool schema a real client rejects, would be caught.
+
+Two of its assertions were written, found not to discriminate, and rewritten. Ranking by
+use looked tested until Angular Material's classes were noticed to sort before ng-zorro's
+by name as well, so the case became a pipe the workspace declares against one
+`@ngx-translate/core` ships, where the alphabet says the opposite. The rule that imports
+every directive a token needs turned out not to be exercised end to end at all — the
+three imports it seemed to prove come from three separate diagnostics — so it is tested
+where it applies instead, on a token that is two directives at once.
+
 Sources checked: `angular.dev/ai/mcp`, `angular.dev/ai/develop-with-ai`,
 `github.com/push-based/angular-toolkit-mcp`, and developer reports collected on dev.to.

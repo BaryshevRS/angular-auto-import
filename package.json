@@ -238,6 +238,7 @@
     "test": "vscode-test",
     "test:node": "pnpm run compile-tests && pnpm run copy-test-fixtures && pnpm run test:node:run",
     "test:fixtures": "pnpm run compile-tests && node scripts/sweep-fixtures.mjs",
+    "test:mcp": "pnpm run compile && pnpm run compile-tests && mocha --ui bdd --timeout 120000 \"out/test/mcp/**/*.test.js\"",
     "test:node:run": "mocha --ui bdd --timeout 20000 \"out/test/node/**/*.test.js\"",
     "test:unit": "pnpm run compile-tests && pnpm run copy-test-fixtures && pnpm run test:node:run && vscode-test --label unit",
     "test:lsp-lifecycle": "pnpm run package && pnpm run compile-tests && vscode-test --label lsp-lifecycle",
