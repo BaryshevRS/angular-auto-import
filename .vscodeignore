@@ -41,3 +41,8 @@ FIX_COMPLETION.md
 IDEA_INPUTS.md
 .github/
 BUG_CSS_CLASS.md
+MCP.md
+# The MCP server is delivered over npm, not to the editor. It comes back here only
+# if the extension ever registers it through vscode.lm.registerMcpServerDefinitionProvider.
+dist/mcp.js
+dist/mcp.js.map

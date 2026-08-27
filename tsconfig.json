@@ -3,6 +3,10 @@
     "module": "Node16",
     "target": "ES2022",
     "lib": ["ES2022"],
+    /* The MCP SDK's declarations reference DOM types and a dual CJS/ESM entry point that
+       Node16 resolution rejects. Adding "DOM" to lib instead would put `document` and
+       `window` in scope for a server that must never have them. */
+    "skipLibCheck": true,
     "sourceMap": true,
     "rootDir": "src",
     "strict": true /* enable all strict type-checking options */

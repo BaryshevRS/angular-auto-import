@@ -53,6 +53,9 @@
     "onLanguage:typescript"
   ],
   "main": "./dist/extension.js",
+  "bin": {
+    "angular-auto-import-mcp": "./dist/mcp.js"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/BaryshevRS/angular-auto-import.git"
@@ -122,7 +125,7 @@
             "null"
           ],
           "default": null,
-          "description": "Optional. Absolute path to the Angular project root. If set, overrides workspace folders and is used as given, without checking its package.json for @angular/core \u2014 which is what makes it work for the root of a monorepo. Libraries outside it are still indexed when its tsconfig maps them in through compilerOptions.paths. If not set, uses open workspace folders."
+          "description": "Optional. Absolute path to the Angular project root. If set, overrides workspace folders and is used as given, without checking its package.json for @angular/core — which is what makes it work for the root of a monorepo. Libraries outside it are still indexed when its tsconfig maps them in through compilerOptions.paths. If not set, uses open workspace folders."
         },
         "angular-auto-import.importModuleSpecifier": {
           "type": "string",
@@ -280,13 +283,15 @@
   },
   "dependencies": {
     "@angular/compiler": "^22.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "get-tsconfig": "^4.14.0",
     "p-limit": "7.3.0",
     "ts-morph": "^26.0.0",
     "vscode-languageclient": "^10.1.0",
     "vscode-languageserver": "^10.1.0",
     "vscode-languageserver-protocol": "3.18.2",
-    "vscode-languageserver-textdocument": "^1.0.12"
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "zod": "^4.4.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
