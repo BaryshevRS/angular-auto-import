@@ -18,6 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { describeElements } from "./element-api";
 import { orient } from "./orient";
+import { searchElements } from "./search";
 import { verifyTemplate } from "./verify-template";
 import { Workspace } from "./workspace";
 
@@ -165,6 +166,49 @@ export function createMcpServer(workspace: Workspace = new Workspace()): McpServ
       }
 
       return answer(await orient({ runtime: project.runtime }));
+    }
+  );
+
+  server.registerTool(
+    "angular_find_element",
+    {
+      title: "Find an Angular element by what it is for",
+      description: [
+        "Find a component, directive or pipe in this workspace by describing what you need:",
+        '"date picker", "table", "modal". Searches the workspace\'s own elements and every installed library.',
+        "",
+        "Results are ranked by what this repository actually writes, not by what it has installed,",
+        "so the first hit is the one that belongs here. Each carries the specifier to import it from",
+        "and the inputs it requires; ask angular_element_api for the rest of its surface.",
+        "",
+        "Every word must match. An empty answer means try another word for the same thing —",
+        "it does not mean the workspace has nothing of the kind.",
+      ].join("\n"),
+      inputSchema: {
+        fromFile: z.string().describe("Absolute path to any file in the project you are working in."),
+        query: z.string().describe("What the element is for, in words. One or two words work better than a sentence."),
+        type: z
+          .enum(["component", "directive", "pipe"])
+          .optional()
+          .describe("Narrow the search when the intent already says which kind you need."),
+      },
+    },
+    async ({ fromFile, query, type }) => {
+      const askingFrom = path.resolve(fromFile);
+      const project = await workspace.projectFor(askingFrom);
+      if (!project) {
+        return noProject(askingFrom);
+      }
+
+      return answer(
+        await searchElements({
+          runtime: project.runtime,
+          fromFile: askingFrom,
+          query,
+          type,
+          libraryUsage: await project.libraryUsage(),
+        })
+      );
     }
   );
 

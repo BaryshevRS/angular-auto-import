@@ -18,6 +18,7 @@ import { silentLogger, withInstrumentation } from "../../core/logging";
 import { silentProgressHost } from "../../core/progress";
 import { describeElements } from "../../mcp/element-api";
 import { orient } from "../../mcp/orient";
+import { searchElements } from "../../mcp/search";
 import { type TemplateProject, verifyTemplate } from "../../mcp/verify-template";
 import { AngularIndexer } from "../../services";
 import { AngularElementData } from "../../types";
@@ -284,6 +285,96 @@ export class TableComponent {
       assert.deepStrictEqual(overview.own, { standalone: 4, nonStandalone: 0 });
       assert.deepStrictEqual(overview.aliases, { "@app/*": ["src/app/*"] });
       assert.strictEqual(overview.moreAliases, 0);
+    });
+  });
+
+  describe("finding an element by what it is for", () => {
+    /** Two libraries offering the same concept, one of them the one this workspace writes. */
+    async function twoLibraries() {
+      const { project, root } = await projectOf({ "host.component.ts": HOST, "card.component.ts": CARD });
+      return {
+        root,
+        runtime: {
+          ...project,
+          indexer: withLibraries(project.indexer, [
+            { selector: "a-date-picker", element: external("ADatePicker", "lib-a/date-picker") },
+            { selector: "b-date-picker", element: external("BDatePicker", "lib-b/date-picker") },
+            { selector: "b-spin", element: external("BSpin", "lib-b/progress-spinner") },
+          ]),
+        },
+        // lib-b is installed and lib-a is what the files here import.
+        usage: new Map([
+          ["lib-a", 9],
+          ["lib-b", 1],
+        ]),
+      };
+    }
+
+    it("ranks by what the workspace writes, not by what it has installed", async () => {
+      const { runtime, root, usage } = await twoLibraries();
+
+      const { hits } = await searchElements({
+        runtime,
+        fromFile: path.join(root, "host.component.ts"),
+        query: "date picker",
+        libraryUsage: usage,
+      });
+
+      assert.deepStrictEqual(
+        hits.map((hit) => [hit.name, hit.usedByProject]),
+        [
+          ["ADatePicker", 9],
+          ["BDatePicker", 1],
+        ]
+      );
+    });
+
+    it("puts the workspace's own elements ahead of any library", async () => {
+      const { runtime, root, usage } = await twoLibraries();
+
+      const { hits } = await searchElements({
+        runtime,
+        fromFile: path.join(root, "host.component.ts"),
+        query: "card",
+        libraryUsage: usage,
+      });
+
+      assert.deepStrictEqual(
+        hits.map((hit) => [hit.name, hit.importFrom]),
+        [["CardComponent", "./card.component"]],
+        "and its specifier is one the asking file could write"
+      );
+    });
+
+    it("reads the entry point as words, which is where a concept often is", async () => {
+      // `lib-b/progress-spinner` says "spinner" while the class and selector do not.
+      const { runtime, root, usage } = await twoLibraries();
+
+      const { hits } = await searchElements({
+        runtime,
+        fromFile: path.join(root, "host.component.ts"),
+        query: "spinner",
+        libraryUsage: usage,
+      });
+
+      assert.deepStrictEqual(
+        hits.map((hit) => hit.name),
+        ["BSpin"]
+      );
+    });
+
+    it("answers nothing rather than something close, and says what to do", async () => {
+      const { runtime, root, usage } = await twoLibraries();
+
+      const { hits, advice } = await searchElements({
+        runtime,
+        fromFile: path.join(root, "host.component.ts"),
+        query: "sortable date picker",
+        libraryUsage: usage,
+      });
+
+      assert.deepStrictEqual(hits, [], "every word has to match, so a model retries with another word");
+      assert.ok(advice?.includes("a different word"), "and is told to, rather than left with silence");
     });
   });
 });

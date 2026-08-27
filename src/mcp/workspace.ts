@@ -13,11 +13,19 @@ import * as path from "node:path";
 import { type AngularCompilerApi, adoptAngularCompiler } from "../core/angular-compiler";
 import { AngularProjectDiscovery, nodeManifestReader } from "../core/project-discovery";
 import { ProjectRuntime } from "../lsp/project-runtime";
+import { countImporters, packageOf } from "./library-usage";
 
 /** A project, indexed and ready to answer. */
 export interface IndexedProject {
   runtime: ProjectRuntime;
   compiler: AngularCompilerApi;
+  /**
+   * How many of the project's files import from each installed package.
+   *
+   * Counted on the first question that needs it and kept, because it reads every source
+   * file in the workspace and the answer does not change while nobody edits one.
+   */
+  libraryUsage(): Promise<ReadonlyMap<string, number>>;
 }
 
 /**
@@ -78,7 +86,16 @@ export class Workspace {
   private async load(root: string): Promise<IndexedProject> {
     const runtime = new ProjectRuntime(root);
     await runtime.load();
-    return { runtime, compiler: await this.angularCompiler() };
+
+    let usage: Promise<ReadonlyMap<string, number>> | undefined;
+    return {
+      runtime,
+      compiler: await this.angularCompiler(),
+      libraryUsage: () => {
+        usage ??= countImporters(runtime, installedPackages(runtime));
+        return usage;
+      },
+    };
   }
 
   /**
@@ -93,4 +110,21 @@ export class Workspace {
     this.compiler ??= import("@angular/compiler").then((module) => adoptAngularCompiler(module));
     return this.compiler;
   }
+}
+
+/**
+ * The packages this project's index holds elements from.
+ *
+ * Only these are worth counting: a file importing `rxjs` says nothing about which UI
+ * library a template should be written with.
+ * @internal
+ */
+function installedPackages(runtime: ProjectRuntime): Set<string> {
+  const packages = new Set<string>();
+  for (const { element } of runtime.indexer.searchWithSelectors("")) {
+    if (element.isExternal) {
+      packages.add(packageOf(element.path));
+    }
+  }
+  return packages;
 }

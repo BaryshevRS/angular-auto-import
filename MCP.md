@@ -87,9 +87,23 @@ workspace's files import ng-zorro and eight import Material. Availability would 
 the wrong library. Imports are read with `ts.preProcessFile`, the compiler's own scanner
 for a file's module specifiers, which finds them without parsing the file.
 
-**4. `search` — find an element by what it does.** Last, and only worth having ranked by
-what this workspace already uses: unranked, it returns forty candidates and the model
-takes the first.
+**4. `search` — find an element by what it does.** *Built.* Ranked by what this workspace
+already writes: on the v22 fixture, "date picker" answers with Material's before
+ng-zorro's, because eight of its files import Material and three import ng-zorro, and the
+workspace's own elements outrank both.
+
+Words are matched against three places Angular puts meaning — the class name, the
+selector, and the entry point — which is how "spinner" finds
+`@angular/material/progress-spinner` when neither its class nor its selector says so.
+
+Matching is strict: every word has to appear, and a query that matches nothing gets
+nothing plus a sentence saying to try another word. That is deliberate. A model handed
+forty weak matches takes the first; a model handed a precise "no" asks again with a
+different word, which is the one part of this problem it is already better at than any
+index. It also means no synonym list has to be invented and maintained here.
+
+A query broad enough to match ten or more says so, because five of seventy is a sample and
+a list gives a reader no way to tell one from an answer.
 
 ## What deliberately stays out
 
@@ -110,7 +124,7 @@ already shipping got better anyway.
 
 ## State
 
-Three tools are built and driven end to end against the v22 fixture: an ng-zorro
+Four tools are built and driven end to end against the v22 fixture: an ng-zorro
 template on a real `AppComponent` returns `NzCheckListComponent`, `NzButtonComponent` and
 the `NzWaveDirective` that comes with the button, leaves an already-imported
 `<router-outlet>` alone, and hands back the component with three imports added. First call

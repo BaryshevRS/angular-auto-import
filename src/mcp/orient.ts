@@ -13,8 +13,8 @@
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import { ts } from "ts-morph";
 import type { AngularElementData } from "../types";
+import { countImporters, packageOf } from "./library-usage";
 import type { TemplateProject } from "./verify-template";
 
 /** How many libraries one answer names. */
@@ -111,63 +111,6 @@ function someAliases(paths: Record<string, string[]>): { aliases: Record<string,
     aliases: Object.fromEntries(entries.slice(0, ALIAS_LIMIT)),
     moreAliases: Math.max(0, entries.length - ALIAS_LIMIT),
   };
-}
-
-/**
- * How many of the project's own files import from each package.
- *
- * Read with `ts.preProcessFile`, the compiler's own scanner for a file's imports: it
- * finds every module specifier without parsing the file, which is what makes asking it
- * of a whole workspace affordable. Counting availability instead would say a workspace
- * with both Material and ng-zorro installed uses both, which is exactly the question a
- * model needs answered and the one availability cannot answer.
- * @internal
- */
-async function countImporters(
-  runtime: OrientRequest["runtime"],
-  packages: ReadonlySet<string>
-): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
-  const files = await runtime.listSourceFiles();
-
-  await Promise.all(
-    files.map(async (filePath) => {
-      let text: string;
-      try {
-        text = await fs.readFile(filePath, "utf8");
-      } catch {
-        return;
-      }
-
-      const reached = new Set<string>();
-      for (const imported of ts.preProcessFile(text, true, false).importedFiles) {
-        const name = packageOf(imported.fileName);
-        if (packages.has(name)) {
-          reached.add(name);
-        }
-      }
-      // Per file, not per statement: a file importing four entry points of one library
-      // is one file that uses it.
-      for (const name of reached) {
-        counts.set(name, (counts.get(name) ?? 0) + 1);
-      }
-    })
-  );
-
-  return counts;
-}
-
-/**
- * The package a specifier belongs to.
- *
- * `@angular/material/button` is `@angular/material` and `ng-zorro-antd/table` is
- * `ng-zorro-antd`: a scope counts as part of the name, and everything past it is an
- * entry point of the same library.
- * @internal
- */
-function packageOf(specifier: string): string {
-  const parts = specifier.split("/");
-  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
 }
 
 /** @internal */
