@@ -1,8 +1,7 @@
 /**
- * The workspace-wide diagnostics report.
+ * The project-wide missing-import audit.
  *
- * A debugging tool, and by far the most expensive thing the server does: it analyzes
- * every template in the scoped projects, most of which nobody has open. It therefore
+ * It analyzes every template in the scoped projects, most of which nobody has open. It therefore
  * works in batches, yields between them so the connection stays responsive, stops at
  * hard limits rather than growing without bound, and reports progress and honors
  * cancellation throughout.
@@ -18,10 +17,10 @@ import { type CancellationSignal, neverCancelled } from "../core/cancellation";
 import type { DocumentView } from "../core/document";
 import { type CoreLogger, silentLogger } from "../core/logging";
 import type { MissingImportDiagnostic } from "../core/missing-imports";
-import { switchFileType } from "../utils/path";
 import type { DiagnosticsHandler } from "./diagnostics";
+import type { RoutedDocument } from "./project-router";
 import type { ProjectRuntime } from "./project-runtime";
-import type { DiagnosticsReport, FileDiagnosticsReport, ReportedDiagnostic } from "./protocol";
+import type { AuditIncompleteReason, DiagnosticsReport, FileDiagnosticsReport, ReportedDiagnostic } from "./protocol";
 
 /** Files analyzed before yielding, so a long report never blocks the connection. */
 const BATCH_SIZE = 20;
@@ -35,6 +34,22 @@ const MAX_FILES = 500;
 const TRUNCATED_BY_DIAGNOSTICS = `Report limited to ${MAX_TOTAL_DIAGNOSTICS} total diagnostics to prevent memory overflow`;
 const TRUNCATED_BY_FILES = `Report limited to ${MAX_FILES} files to prevent memory overflow`;
 
+type AuditCandidate = RoutedDocument;
+
+interface AnalyzedFile {
+  report: FileDiagnosticsReport;
+  diagnosticLimitReached: boolean;
+}
+
+type FileAnalysisResult = AnalyzedFile | "read-error" | undefined;
+
+function markIncomplete(report: DiagnosticsReport, reason: AuditIncompleteReason): void {
+  report.complete = false;
+  if (!report.incompleteReasons.includes(reason)) {
+    report.incompleteReasons.push(reason);
+  }
+}
+
 /** How the caller learns how far along the scan is. */
 export interface ReportProgress {
   /**
@@ -46,6 +61,8 @@ export interface ReportProgress {
 
 export interface DiagnosticsReporterOptions {
   diagnostics: DiagnosticsHandler;
+  /** Whether the compiler-backed analysis can produce trustworthy results yet. */
+  analysisReady?(): boolean;
   /** Reads a file's text; injected so the reporter can be tested without disk. */
   readFile?(filePath: string): Promise<string>;
   logger?: CoreLogger;
@@ -70,14 +87,37 @@ export class DiagnosticsReporter {
   async run(
     runtimes: readonly ProjectRuntime[],
     progress?: ReportProgress,
-    cancellation: CancellationSignal = neverCancelled
+    cancellation: CancellationSignal = neverCancelled,
+    scope: "project" | "workspace" = runtimes.length === 1 ? "project" : "workspace"
   ): Promise<DiagnosticsReport> {
-    const report: DiagnosticsReport = { totalIssues: 0, files: [], timestamp: new Date().toISOString() };
+    const report: DiagnosticsReport = {
+      totalIssues: 0,
+      files: [],
+      timestamp: new Date().toISOString(),
+      scope,
+      projectsScanned: runtimes.length,
+      templatesScanned: 0,
+      complete: true,
+      incompleteReasons: [],
+    };
+
+    if (cancellation.isCancelled) {
+      report.projectsScanned = 0;
+      markIncomplete(report, "cancelled");
+      return report;
+    }
+
+    if (this.options.analysisReady?.() === false) {
+      markIncomplete(report, "analysis-not-ready");
+      return report;
+    }
+
     const candidates = await this.collectTemplates(runtimes);
     this.logger.info(`[Report] Scanning ${candidates.length} template(s) across ${runtimes.length} project(s)`);
 
-    for (const [index, filePath] of candidates.entries()) {
+    for (const [index, candidate] of candidates.entries()) {
       if (cancellation.isCancelled) {
+        markIncomplete(report, "cancelled");
         break;
       }
 
@@ -85,11 +125,11 @@ export class DiagnosticsReporter {
         break;
       }
 
-      progress?.report(shortName(filePath), Math.round((index / Math.max(candidates.length, 1)) * 100));
-      const fileReport = await this.analyzeFile(filePath);
-      if (fileReport) {
-        report.files.push(fileReport);
-        report.totalIssues += fileReport.diagnostics.length;
+      progress?.report(shortName(candidate.filePath), Math.round((index / Math.max(candidates.length, 1)) * 100));
+      this.recordAnalysis(report, await this.analyzeFile(candidate, cancellation));
+      if (cancellation.isCancelled) {
+        markIncomplete(report, "cancelled");
+        break;
       }
 
       // Yield between batches: the connection has to keep answering while this runs.
@@ -101,6 +141,28 @@ export class DiagnosticsReporter {
     return report;
   }
 
+  /** Incorporates one candidate's outcome into the report. */
+  private recordAnalysis(report: DiagnosticsReport, fileReport: FileAnalysisResult): void {
+    if (fileReport === "read-error") {
+      markIncomplete(report, "read-error");
+      return;
+    }
+    if (!fileReport) {
+      return;
+    }
+
+    report.templatesScanned += 1;
+    if (fileReport.diagnosticLimitReached) {
+      report.truncated = true;
+      report.truncationReason = `Template limited to ${MAX_DIAGNOSTICS_PER_FILE} diagnostics`;
+      markIncomplete(report, `diagnostic-limit:${fileReport.report.filePath}`);
+    }
+    if (fileReport.report.diagnostics.length > 0) {
+      report.files.push(fileReport.report);
+      report.totalIssues += fileReport.report.diagnostics.length;
+    }
+  }
+
   /**
    * Marks the report truncated once a limit is reached, and says which one.
    * @returns Whether the scan should stop.
@@ -110,40 +172,51 @@ export class DiagnosticsReporter {
     if (report.totalIssues >= MAX_TOTAL_DIAGNOSTICS) {
       report.truncated = true;
       report.truncationReason = TRUNCATED_BY_DIAGNOSTICS;
+      markIncomplete(report, "diagnostic-limit");
       return true;
     }
     if (report.files.length >= MAX_FILES) {
       report.truncated = true;
       report.truncationReason = TRUNCATED_BY_FILES;
+      markIncomplete(report, "file-limit");
       return true;
     }
     return false;
   }
 
   /**
-   * Analyzes one file, returning nothing for a file with no findings, so the report
-   * lists only what a reader has to act on.
+   * Analyzes one file, returning nothing when the file has no analyzable template.
+   * A template with no findings returns an empty file report so the caller can count it
+   * without listing it among the files a reader has to act on.
    * @internal
    */
-  private async analyzeFile(filePath: string): Promise<FileDiagnosticsReport | undefined> {
+  private async analyzeFile(candidate: AuditCandidate, cancellation: CancellationSignal): Promise<FileAnalysisResult> {
+    const { filePath } = candidate;
     let text: string;
     try {
       text = await this.readFile(filePath);
     } catch (error) {
       this.logger.debug(`[Report] Could not read ${filePath}: ${String(error)}`);
-      return undefined;
+      return "read-error";
     }
 
     const external = filePath.endsWith(".html");
-    const result = this.options.diagnostics.analyze(diskDocument(filePath, text, external));
-    if (!result || result.candidates.length === 0) {
+    const document = diskDocument(filePath, text, external);
+    const routedAnalysis = this.options.diagnostics.analyzeRouted;
+    const result = routedAnalysis
+      ? routedAnalysis.call(this.options.diagnostics, document, candidate, cancellation)
+      : this.options.diagnostics.analyze(document, cancellation);
+    if (!result) {
       return undefined;
     }
 
     return {
-      filePath,
-      templateType: external ? "external" : "inline",
-      diagnostics: result.candidates.slice(0, MAX_DIAGNOSTICS_PER_FILE).map(toReportedDiagnostic),
+      diagnosticLimitReached: result.candidates.length > MAX_DIAGNOSTICS_PER_FILE,
+      report: {
+        filePath,
+        templateType: external ? "external" : "inline",
+        diagnostics: result.candidates.slice(0, MAX_DIAGNOSTICS_PER_FILE).map(toReportedDiagnostic),
+      },
     };
   }
 
@@ -153,21 +226,25 @@ export class DiagnosticsReporter {
    * inline template.
    * @internal
    */
-  private async collectTemplates(runtimes: readonly ProjectRuntime[]): Promise<string[]> {
-    const files: string[] = [];
+  private async collectTemplates(runtimes: readonly ProjectRuntime[]): Promise<AuditCandidate[]> {
+    const candidates: AuditCandidate[] = [];
 
     for (const runtime of runtimes) {
       const [typescript, templates] = await Promise.all([runtime.listSourceFiles(), runtime.listTemplateFiles()]);
       const components = new Set(typescript);
 
-      files.push(
-        // A template with no component beside it has no imports array to be missing from.
-        ...templates.filter((filePath) => components.has(switchFileType(filePath, ".ts"))),
-        ...typescript
-      );
+      for (const filePath of templates) {
+        const componentFilePath = runtime.indexedComponentFileForTemplate(filePath);
+        if (componentFilePath && components.has(componentFilePath)) {
+          candidates.push({ filePath, componentFilePath, externalTemplate: true, runtime });
+        }
+      }
+      for (const filePath of typescript) {
+        candidates.push({ filePath, componentFilePath: filePath, externalTemplate: false, runtime });
+      }
     }
 
-    return files;
+    return candidates;
   }
 }
 

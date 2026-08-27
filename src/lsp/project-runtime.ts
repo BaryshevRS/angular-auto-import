@@ -29,6 +29,7 @@ import {
 import { TsConfigResolver } from "../core/tsconfig";
 import { AngularIndexer } from "../services/indexer";
 import type { ProcessedTsConfig } from "../types/tsconfig";
+import { switchFileType } from "../utils/path";
 import { FileCacheStore } from "./file-cache-store";
 
 /** Watches nothing; the default until the client's watched-file notifications are wired. */
@@ -164,6 +165,20 @@ export class ProjectRuntime {
       projectTemplateQueries(this.scope, this.boundaries).map((query) => this.fileSystem.findFiles(query))
     );
     return Array.from(new Set(searches.flat()));
+  }
+
+  /**
+   * Finds the TypeScript component that declares an external template.
+   * Falls back to the historical same-basename convention when no literal
+   * `templateUrl` in the current index identifies an owner.
+   */
+  componentFileForTemplate(templateFilePath: string): string {
+    return this.indexer.getTemplateOwner(templateFilePath) ?? switchFileType(templateFilePath, ".ts");
+  }
+
+  /** Finds only an owner explicitly declared by a literal `templateUrl`. */
+  indexedComponentFileForTemplate(templateFilePath: string): string | undefined {
+    return this.indexer.getTemplateOwner(templateFilePath);
   }
 
   /**

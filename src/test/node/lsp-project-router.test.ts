@@ -9,7 +9,10 @@ const nested = path.join(root, "libs", "ui");
 
 /** The router only ever hands the runtime back, so an identifiable stand-in suffices. */
 function fakeRuntime(rootPath: string): ProjectRuntime {
-  return { rootPath } as ProjectRuntime;
+  return {
+    rootPath,
+    componentFileForTemplate: (templateFilePath: string) => templateFilePath.replace(/\.html$/i, ".ts"),
+  } as ProjectRuntime;
 }
 
 function routerFor(roots: string[], loaded: string[] = roots): ProjectRouter {

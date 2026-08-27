@@ -39,6 +39,7 @@ import type { Disposable } from "../core/events";
 import { Emitter, type EventSource } from "../core/events";
 import type { FileSystem } from "../core/file-system";
 import type { FileChange, FileWatcherFactory } from "../core/file-watching";
+import { findExternalTemplateUrl } from "../core/inline-template";
 import type { CoreLogger, InstrumentedLogger, PerformanceMetrics } from "../core/logging";
 import type { ProgressHost, ProgressReporter } from "../core/progress";
 import { elementIdentityKey } from "../core/selector-trie";
@@ -244,6 +245,12 @@ type StoredModuleExports = Array<{
   external?: boolean;
 }>;
 
+/** Persisted evidence that an external template belongs to one component source. */
+interface TemplateOwner {
+  componentFilePath: string;
+  sourceHash: string;
+}
+
 /**
  * Reads a module's persisted declarations.
  * @internal
@@ -311,6 +318,8 @@ export class AngularIndexer {
    * fills and queries this state; it owns scanning, watching, and persistence.
    */
   private readonly index = new AngularElementIndex();
+  /** External template path to the component source that declares it. */
+  private readonly templateOwners = new Map<string, TemplateOwner>();
   /**
    * The source-file subscription for the project, or `null` while it is not watching.
    */
@@ -363,6 +372,8 @@ export class AngularIndexer {
   public workspaceExternalModulesExportsCacheKey: string = "";
   /** Where the bundles a library exports are persisted. */
   public workspaceBundlesCacheKey: string = "";
+  /** Where external-template ownership is persisted. */
+  public workspaceTemplateOwnersCacheKey: string = "";
 
   private readonly fileSystem: FileSystem;
   private readonly progressHost: ProgressHost;
@@ -434,6 +445,7 @@ export class AngularIndexer {
     this.workspaceModulesCacheKey = `angularModulesCache_${projectHash}`;
     this.workspaceExternalModulesExportsCacheKey = `angularExternalModulesExports_${projectHash}`;
     this.workspaceBundlesCacheKey = `angularBundles_${projectHash}`;
+    this.workspaceTemplateOwnersCacheKey = `angularTemplateOwners_${projectHash}`;
     this.logger.info(
       `AngularIndexer: Project root set to ${projectPath}. Cache keys: ${this.workspaceFileCacheKey}, ${this.workspaceIndexCacheKey}, ${this.workspaceModulesCacheKey}, ${this.workspaceExternalModulesExportsCacheKey}`
     );
@@ -919,6 +931,7 @@ export class AngularIndexer {
 
       await this.removeOldSelectorsFromIndex(cachedFile);
       const parsedElements = this.parseAngularElementsWithTsMorph(filePath, content);
+      this.refreshTemplateOwner(filePath);
       this.indexBundlesDeclaredIn(filePath);
       if (options.modules !== false) {
         await this.reindexModulesDeclaredIn(filePath);
@@ -1210,6 +1223,49 @@ export class AngularIndexer {
     }
   }
 
+  /** Replaces the external-template ownership contributed by one component source. */
+  private refreshTemplateOwner(filePath: string): void {
+    const componentFilePath = path.resolve(filePath);
+    this.removeTemplateOwner(componentFilePath);
+
+    const sourceFile = this.project.getSourceFile(componentFilePath);
+    if (!sourceFile) {
+      return;
+    }
+    const templateUrl = findExternalTemplateUrl(sourceFile);
+    if (!templateUrl) {
+      return;
+    }
+
+    const templateFilePath = path.resolve(path.dirname(componentFilePath), templateUrl);
+    if (!this.templateOwners.has(templateFilePath)) {
+      this.templateOwners.set(templateFilePath, {
+        componentFilePath,
+        sourceHash: this.generateHash(sourceFile.getFullText()),
+      });
+    }
+  }
+
+  /** Retracts every external template declared by one component source. */
+  private removeTemplateOwner(filePath: string): boolean {
+    const componentFilePath = path.resolve(filePath);
+    let removed = false;
+    for (const [templateFilePath, owner] of this.templateOwners) {
+      if (owner.componentFilePath === componentFilePath) {
+        this.templateOwners.delete(templateFilePath);
+        removed = true;
+      }
+    }
+    return removed;
+  }
+
+  /** Refreshes every source currently materialized in the ts-morph project. */
+  private refreshLoadedTemplateOwners(): void {
+    for (const sourceFile of this.project.getSourceFiles()) {
+      this.refreshTemplateOwner(sourceFile.getFilePath());
+    }
+  }
+
   private async handleNoElementsFound(filePath: string): Promise<void> {
     this.index.files.delete(filePath);
     this.removeSourceFileFromProject(filePath);
@@ -1223,6 +1279,8 @@ export class AngularIndexer {
    * @internal
    */
   private async removeFromIndex(filePath: string): Promise<void> {
+    const hadTemplateOwner = this.removeTemplateOwner(filePath);
+
     // Remove from file cache
     const fileInfo = this.index.files.get(filePath);
     if (fileInfo) {
@@ -1244,7 +1302,7 @@ export class AngularIndexer {
     // Remove from ts-morph project with error handling
     this.removeSourceFileFromProject(filePath);
 
-    if (fileInfo || hadModules || hadBundles) {
+    if (fileInfo || hadModules || hadBundles || hadTemplateOwner) {
       await this.saveIndexToWorkspace();
     }
   }
@@ -1282,6 +1340,7 @@ export class AngularIndexer {
       // Clear existing ts-morph project files before full scan to avoid stale data
       removeAllSourceFiles(this.project, "full index", this.logger);
       this.index.clear();
+      this.templateOwners.clear();
 
       progress?.report({ message: "Discovering project files..." });
       const searches = await Promise.all(
@@ -1365,6 +1424,7 @@ export class AngularIndexer {
   private abandonIndexing(): Map<string, AngularElementData> {
     this.logger.info(`AngularIndexer (${path.basename(this.projectRootPath)}): Full index cancelled.`);
     this.index.clear();
+    this.templateOwners.clear();
     removeAllSourceFiles(this.project, "cancelled index", this.logger);
     return new Map();
   }
@@ -1407,14 +1467,24 @@ export class AngularIndexer {
    * @returns `true` if the index was loaded successfully, `false` otherwise.
    */
   async loadFromWorkspace(): Promise<boolean> {
-    if (!this.projectRootPath || !this.workspaceFileCacheKey || !this.workspaceIndexCacheKey) {
+    if (
+      !this.projectRootPath ||
+      !this.workspaceFileCacheKey ||
+      !this.workspaceIndexCacheKey ||
+      !this.workspaceTemplateOwnersCacheKey
+    ) {
       this.logger.error("AngularIndexer.loadFromWorkspace: projectRootPath or cache keys not set. Cannot load.");
       return false;
     }
 
+    this.templateOwners.clear();
     try {
       const workspaceData = this.retrieveWorkspaceData(this.cacheStore);
-      if (!workspaceData.storedCache || !workspaceData.storedIndex) {
+      if (!workspaceData.storedCache || !workspaceData.storedIndex || !workspaceData.storedTemplateOwners) {
+        logNoCacheFound(this.projectRootPath, this.logger);
+        return false;
+      }
+      if (!this.loadTemplateOwners(workspaceData)) {
         logNoCacheFound(this.projectRootPath, this.logger);
         return false;
       }
@@ -1439,9 +1509,10 @@ export class AngularIndexer {
         this.logger.warn(
           `AngularIndexer (${path.basename(
             this.projectRootPath
-          )}): Cache references a missing file (${staleFile}). Discarding cache and forcing a full reindex.`
+          )}): Cache references a changed or missing file (${staleFile}). Discarding cache and forcing a full reindex.`
         );
         this.index.clear();
+        this.templateOwners.clear();
         return false;
       }
 
@@ -1452,6 +1523,7 @@ export class AngularIndexer {
       );
       return true;
     } catch (error) {
+      this.templateOwners.clear();
       this.logger.error(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Error loading index from workspace:`,
         error as Error
@@ -1471,7 +1543,12 @@ export class AngularIndexer {
    * @internal
    */
   private findStaleCachedProjectFile(): string | null {
-    return this.missingModuleFile() ?? this.missingBundleFile() ?? this.missingElementFile();
+    return (
+      this.missingModuleFile() ??
+      this.missingBundleFile() ??
+      this.missingElementFile() ??
+      this.missingTemplateOwnerFile()
+    );
   }
 
   /**
@@ -1518,7 +1595,7 @@ export class AngularIndexer {
   }
 
   /**
-   * A cached file that declared elements and is gone.
+   * A cached file that declared elements and changed or is gone.
    *
    * External library files live under `node_modules` and are refreshed by the dependency
    * watcher, so they are skipped rather than made a reason to rescan everything.
@@ -1526,12 +1603,36 @@ export class AngularIndexer {
    */
   private missingElementFile(): string | null {
     const nodeModulesPath = path.join(this.projectRootPath, "node_modules");
-    for (const filePath of this.index.files.keys()) {
+    for (const [filePath, cachedFile] of this.index.files) {
       if (isPathInside(nodeModulesPath, filePath)) {
         continue;
       }
-      if (!fs.existsSync(filePath)) {
+      try {
+        const currentHash = this.generateHash(fs.readFileSync(filePath, "utf8"));
+        if (currentHash !== cachedFile.hash) {
+          return filePath;
+        }
+      } catch {
         return filePath;
+      }
+    }
+    return null;
+  }
+
+  /** A cached external-template owner whose component source changed or is gone. */
+  private missingTemplateOwnerFile(): string | null {
+    const nodeModulesPath = path.join(this.projectRootPath, "node_modules");
+    for (const owner of this.templateOwners.values()) {
+      if (isPathInside(nodeModulesPath, owner.componentFilePath)) {
+        continue;
+      }
+      try {
+        const currentHash = this.generateHash(fs.readFileSync(owner.componentFilePath, "utf8"));
+        if (currentHash !== owner.sourceHash) {
+          return owner.componentFilePath;
+        }
+      } catch {
+        return owner.componentFilePath;
       }
     }
     return null;
@@ -1548,7 +1649,32 @@ export class AngularIndexer {
       storedBundles: cacheStore.get<{ bundles: Record<string, BundleEntry[]>; libraries: string[] }>(
         this.workspaceBundlesCacheKey
       ),
+      storedTemplateOwners: cacheStore.get<Record<string, TemplateOwner | string>>(
+        this.workspaceTemplateOwnersCacheKey
+      ),
     };
+  }
+
+  /** Restores external-template ownership persisted beside the selector index. */
+  private loadTemplateOwners(workspaceData: {
+    storedTemplateOwners?: Record<string, TemplateOwner | string>;
+  }): boolean {
+    this.templateOwners.clear();
+    for (const [templateFilePath, owner] of Object.entries(workspaceData.storedTemplateOwners ?? {})) {
+      if (
+        typeof owner === "string" ||
+        typeof owner.componentFilePath !== "string" ||
+        typeof owner.sourceHash !== "string"
+      ) {
+        this.templateOwners.clear();
+        return false;
+      }
+      this.templateOwners.set(path.resolve(templateFilePath), {
+        componentFilePath: path.resolve(owner.componentFilePath),
+        sourceHash: owner.sourceHash,
+      });
+    }
+    return true;
   }
 
   private async loadCacheData(workspaceData: {
@@ -1661,11 +1787,17 @@ export class AngularIndexer {
    * @internal
    */
   private async saveIndexToWorkspace(): Promise<void> {
-    if (!this.projectRootPath || !this.workspaceFileCacheKey || !this.workspaceIndexCacheKey) {
+    if (
+      !this.projectRootPath ||
+      !this.workspaceFileCacheKey ||
+      !this.workspaceIndexCacheKey ||
+      !this.workspaceTemplateOwnersCacheKey
+    ) {
       this.logger.error("AngularIndexer.saveIndexToWorkspace: projectRootPath or cache keys not set. Cannot save.");
       return;
     }
     try {
+      this.refreshLoadedTemplateOwners();
       const cacheStore = this.cacheStore;
       await cacheStore.set(this.workspaceFileCacheKey, Object.fromEntries(this.index.files));
 
@@ -1711,6 +1843,7 @@ export class AngularIndexer {
         bundles: serializableBundles,
         libraries: [...this.index.libraryPaths],
       });
+      await cacheStore.set(this.workspaceTemplateOwnersCacheKey, Object.fromEntries(this.templateOwners));
     } catch (error) {
       this.logger.error(
         `AngularIndexer (${path.basename(this.projectRootPath)}): Error saving index to workspace:`,
@@ -3029,6 +3162,11 @@ export class AngularIndexer {
     return this.index.getAllSelectors();
   }
 
+  /** Returns the component source that declares an external template. */
+  getTemplateOwner(templateFilePath: string): string | undefined {
+    return this.templateOwners.get(path.resolve(templateFilePath))?.componentFilePath;
+  }
+
   /**
    * Searches for selectors with a given prefix.
    * @param prefix The prefix to search for.
@@ -3053,6 +3191,7 @@ export class AngularIndexer {
     this._onDidIndexNodeModules.dispose();
     this._onDidChangeIndex.dispose();
     this.index.clear();
+    this.templateOwners.clear();
     // Note: Should we dispose the ts-morph Project as well? It doesn't have a dispose method, but we can clear its files
     removeAllSourceFiles(this.project, "dispose", this.logger);
   }

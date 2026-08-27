@@ -291,6 +291,113 @@ describe("LSP project runtime", function () {
     assert.deepStrictEqual(second.indexer.getAllSelectors(), ["shop-card"]);
   });
 
+  it("restores template ownership when component and template basenames differ", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const storagePath = path.join(sandbox, "storage");
+    const componentPath = path.join(root, "src", "host-shell.component.ts");
+    const templatePath = path.join(root, "src", "templates", "dashboard.html");
+    await writeProject(root);
+    await fs.mkdir(path.dirname(templatePath), { recursive: true });
+    await fs.writeFile(
+      componentPath,
+      [
+        'import { Component } from "@angular/core";',
+        "",
+        "@Component({",
+        '  selector: "host-shell",',
+        "  standalone: true,",
+        '  templateUrl: "./templates/dashboard.html",',
+        "})",
+        "export class HostShellComponent {}",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+    await fs.writeFile(templatePath, "<main>Dashboard</main>\n", "utf8");
+
+    const first = new ProjectRuntime(root, { storagePath });
+    await first.load();
+    first.dispose();
+
+    const restored = new ProjectRuntime(root, { storagePath });
+    await restored.load();
+
+    assert.strictEqual(restored.restoredFromCache, true);
+    assert.strictEqual(restored.componentFileForTemplate(templatePath), componentPath);
+    restored.dispose();
+  });
+
+  it("rejects stale cached template ownership when the component source changed while stopped", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const storagePath = path.join(sandbox, "storage");
+    const componentPath = path.join(root, "src", "host-shell.component.ts");
+    const oldTemplatePath = path.join(root, "src", "old.html");
+    const newTemplatePath = path.join(root, "src", "templates", "new.html");
+    await writeProject(root);
+    await fs.writeFile(
+      componentPath,
+      '@Component({ selector: "host-shell", standalone: true, templateUrl: "./old.html" })\n' +
+        "export class HostShellComponent {}\n",
+      "utf8"
+    );
+    await fs.writeFile(oldTemplatePath, "<main>Old</main>\n", "utf8");
+
+    const first = new ProjectRuntime(root, { storagePath });
+    await first.load();
+    first.dispose();
+
+    await fs.mkdir(path.dirname(newTemplatePath), { recursive: true });
+    await fs.writeFile(
+      componentPath,
+      '@Component({ selector: "host-shell", standalone: true, templateUrl: "./templates/new.html" })\n' +
+        "export class HostShellComponent {}\n",
+      "utf8"
+    );
+    await fs.writeFile(newTemplatePath, "<main>New</main>\n", "utf8");
+
+    const restored = new ProjectRuntime(root, { storagePath });
+    await restored.load();
+
+    assert.strictEqual(restored.restoredFromCache, false);
+    assert.strictEqual(restored.componentFileForTemplate(newTemplatePath), componentPath);
+    assert.notStrictEqual(restored.componentFileForTemplate(oldTemplatePath), componentPath);
+    restored.dispose();
+  });
+
+  it("rejects a cached index when a stopped component switches to an external template", async () => {
+    const root = path.join(sandbox, "apps", "shop");
+    const storagePath = path.join(sandbox, "storage");
+    const componentPath = path.join(root, "src", "host-shell.component.ts");
+    const templatePath = path.join(root, "src", "templates", "dashboard.html");
+    await writeProject(root);
+    await fs.writeFile(
+      componentPath,
+      '@Component({ selector: "host-shell", standalone: true, template: "" })\n' +
+        "export class HostShellComponent {}\n",
+      "utf8"
+    );
+
+    const first = new ProjectRuntime(root, { storagePath });
+    await first.load();
+    first.dispose();
+
+    await fs.writeFile(
+      componentPath,
+      '@Component({ selector: "host-shell", standalone: true, templateUrl: "./templates/dashboard.html" })\n' +
+        "export class HostShellComponent {}\n",
+      "utf8"
+    );
+    await fs.mkdir(path.dirname(templatePath), { recursive: true });
+    await fs.writeFile(templatePath, "<main>Dashboard</main>\n", "utf8");
+
+    const restored = new ProjectRuntime(root, { storagePath });
+    await restored.load();
+
+    assert.strictEqual(restored.restoredFromCache, false);
+    assert.strictEqual(restored.componentFileForTemplate(templatePath), componentPath);
+    restored.dispose();
+  });
+
   it("follows watched source changes without rescanning the project", async () => {
     const root = path.join(sandbox, "apps", "shop");
     const componentPath = path.join(root, "src", "shop-card.component.ts");

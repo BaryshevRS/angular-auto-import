@@ -79,6 +79,7 @@ export default defineConfig({
       label: 'unit',
       files: 'out/test/suite/**/*.test.js',
       workspaceFolder: './src/test/fixtures/simple-project',
+      launchArgs: isolationArgs,
       mocha: {
         ui: 'bdd',
         timeout: 20000,

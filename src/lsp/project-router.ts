@@ -10,7 +10,6 @@
 
 import * as path from "node:path";
 import { fileUriToPath } from "../core/document";
-import { switchFileType } from "../utils/path";
 import type { ProjectRuntime } from "./project-runtime";
 
 /** A document resolved onto the project runtime that serves it. */
@@ -64,7 +63,7 @@ export class ProjectRouter {
     const externalTemplate = path.extname(filePath).toLowerCase() === ".html";
     return {
       filePath,
-      componentFilePath: externalTemplate ? switchFileType(filePath, ".ts") : filePath,
+      componentFilePath: externalTemplate ? runtime.componentFileForTemplate(filePath) : filePath,
       externalTemplate,
       runtime,
     };

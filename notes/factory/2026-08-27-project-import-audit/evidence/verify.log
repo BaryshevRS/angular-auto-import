@@ -1,0 +1,48 @@
+Project-wide Missing Import Audit — release 3.1.0 verification
+Date: 2026-08-27
+Branch: feat/project-import-audit
+
+Focused TDD verification
+- node --import tsx ./node_modules/mocha/bin/mocha.js src/test/node/lsp-report.test.ts src/test/node/report-webview.test.ts src/test/node/audit-message.test.ts
+- PASS: 21 passing
+- Covers external template ownership, alias-root routing, stale basename exclusion,
+  truthful counts/completeness, cancellation, limits, read failures, compiler
+  readiness, and incomplete-report rendering.
+
+Production package
+- pnpm run package
+- PASS: TypeScript noEmit, Biome (172 files), stopslop (0 new), production esbuild.
+
+Node suite
+- pnpm run test:node
+- PASS: 891 passing, 1 pending.
+
+VS Code Extension Host unit suite
+- AAI_VSCODE_DATA_DIR=/tmp/aai/unit-final pnpm exec vscode-test --label unit
+- PASS: 28 passing.
+- A short temporary VS Code data path avoids the macOS Unix-socket path limit in
+  this deliberately long worktree path.
+
+Angular 22 end-to-end matrix
+- pnpm run test:e2e:v22:parallel
+- PASS: angular-demo — 66 passing.
+- PASS: angular-material-demo — 29 passing.
+- PASS: ng-zorro-demo — 23 passing.
+
+Fixture gate (run last, per repository instructions)
+- pnpm run test:fixtures
+- PASS: 1 passing; v22 shows only the warnings its corpus records.
+
+Visual evidence
+- project-import-audit.png: rendered report with scope/counts and actionable findings.
+- project-import-audit-accessibility.yml: accessibility snapshot includes the indexed
+  matTooltip attribute-directive finding and its exact line/column navigation label.
+
+Independent audit
+- Initial review found readiness, truncation, routing, ownership, scope, notification,
+  and cancellation truthfulness gaps; these were fixed and covered by regression tests.
+- Final independent review: no remaining suggestions.
+
+Known documented limitation
+- Multiple components sharing one external template, and multiple @Component classes
+  in one TypeScript file, are not audited independently.

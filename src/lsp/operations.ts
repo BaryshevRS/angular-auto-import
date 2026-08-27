@@ -22,6 +22,12 @@ export interface ServerOperationsOptions {
   logger?: CoreLogger;
 }
 
+/** The runtimes selected for an audit and the truthful label for that selection. */
+export interface ResolvedAuditScope {
+  kind: "project" | "workspace";
+  runtimes: ProjectRuntime[];
+}
+
 /** Answers the extension's own requests. */
 export class ServerOperations {
   private readonly logger: CoreLogger;
@@ -67,6 +73,14 @@ export class ServerOperations {
   resolveScope(scope: ProjectScope): ProjectRuntime[] {
     const scoped = scope.uri ? this.options.router.resolve(scope.uri)?.runtime : undefined;
     return scoped ? [scoped] : this.options.runtimes();
+  }
+
+  /** Resolves both the audit targets and whether the request actually selected one project. */
+  resolveAuditScope(scope: ProjectScope): ResolvedAuditScope {
+    const runtime = scope.uri ? this.options.router.resolve(scope.uri)?.runtime : undefined;
+    return runtime
+      ? { kind: "project", runtimes: [runtime] }
+      : { kind: "workspace", runtimes: this.options.runtimes() };
   }
 
   /**

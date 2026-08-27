@@ -172,9 +172,25 @@ export class DiagnosticsHandler {
    * @param cancellation Checked during the analysis.
    */
   analyze(document: DocumentView, cancellation: CancellationSignal = neverCancelled): DiagnosticResult | undefined {
-    const compiler = this.options.compiler();
     const routed = this.options.router.resolve(document.uri);
-    if (!compiler || !routed) {
+    if (!routed) {
+      return undefined;
+    }
+    return this.analyzeRouted(document, routed, cancellation);
+  }
+
+  /**
+   * Runs the shared analysis against a route already selected by a project audit.
+   * This keeps paths-mapped templates attached to their runtime even when they live
+   * outside every discovered project root.
+   */
+  analyzeRouted(
+    document: DocumentView,
+    routed: RoutedDocument,
+    cancellation: CancellationSignal = neverCancelled
+  ): DiagnosticResult | undefined {
+    const compiler = this.options.compiler();
+    if (!compiler) {
       return undefined;
     }
 

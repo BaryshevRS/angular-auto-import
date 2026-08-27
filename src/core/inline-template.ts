@@ -26,6 +26,31 @@ export interface InlineTemplate {
 }
 
 /**
+ * Finds the literal `templateUrl` of the first component that declares one.
+ * @param sourceFile The component source file to inspect.
+ */
+export function findExternalTemplateUrl(sourceFile: SourceFile): string | null {
+  for (const classDeclaration of sourceFile.getClasses()) {
+    const componentDecorator = classDeclaration.getDecorator("Component");
+    if (!componentDecorator) {
+      continue;
+    }
+
+    const objectLiteral = decoratorMetadata(componentDecorator);
+    const templateUrlProperty = objectLiteral?.getProperty("templateUrl");
+    if (!templateUrlProperty?.isKind(SyntaxKind.PropertyAssignment)) {
+      continue;
+    }
+
+    const initializer = templateUrlProperty.getInitializer();
+    if (isLiteralTemplate(initializer)) {
+      return initializer.getLiteralText();
+    }
+  }
+  return null;
+}
+
+/**
  * Finds the first inline template in a component file.
  * @param sourceFile The file to look in.
  * @returns The template, or `null` for a file with none — including one whose template

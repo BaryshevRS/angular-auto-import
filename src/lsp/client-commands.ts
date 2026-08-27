@@ -9,9 +9,12 @@
  * @module
  */
 
+import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
+import { formatAuditCompletionMessage } from "../commands/audit-message";
+import { decodeAuditLocationMessage } from "../commands/report-navigation";
 import { renderDiagnosticsReportHtml } from "../commands/webviews";
 import { logger } from "../logger";
 import {
@@ -88,12 +91,12 @@ async function reindex(client: LanguageClient): Promise<void> {
  * @internal
  */
 async function generateDiagnosticsReport(context: vscode.ExtensionContext, client: LanguageClient): Promise<void> {
-  logger.info("Generate diagnostics report command invoked by user");
+  logger.info("Project-wide missing import audit invoked by user");
 
   const report = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "Angular Auto Import: Generating Diagnostics Report",
+      title: "Angular Auto Import: Auditing project-wide missing imports",
       cancellable: true,
     },
     (_progress, token) =>
@@ -108,17 +111,44 @@ async function generateDiagnosticsReport(context: vscode.ExtensionContext, clien
   }
 
   const panel = vscode.window.createWebviewPanel(
-    "angularDiagnosticsReport",
-    "Angular Auto Import - Diagnostics Report",
+    "angularMissingImportAudit",
+    "Project-wide Missing Import Audit",
     vscode.ViewColumn.One,
     { enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [] }
   );
   context.subscriptions.push(panel);
-  panel.webview.html = renderDiagnosticsReportHtml(report);
-
-  vscode.window.showInformationMessage(
-    `✅ Diagnostics report generated: ${report.totalIssues} issue(s) found across ${report.files.length} file(s)`
+  panel.webview.html = renderDiagnosticsReportHtml(report, randomBytes(16).toString("base64"));
+  context.subscriptions.push(
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      void openAuditLocation(message);
+    })
   );
+
+  vscode.window.showInformationMessage(formatAuditCompletionMessage(report));
+}
+
+/** Opens a location emitted by the audit webview and selects the exact diagnostic range. */
+async function openAuditLocation(message: unknown): Promise<void> {
+  const location = decodeAuditLocationMessage(message);
+  if (!location) {
+    logger.warn("Ignored malformed missing import audit navigation message");
+    return;
+  }
+
+  try {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(location.filePath));
+    const range = new vscode.Range(
+      location.range.start.line,
+      location.range.start.character,
+      location.range.end.line,
+      location.range.end.character
+    );
+    const editor = await vscode.window.showTextDocument(document, { preview: false, selection: range });
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  } catch (error) {
+    logger.error(`Could not open audit location ${location.filePath}`, error as Error);
+    vscode.window.showWarningMessage("Angular Auto Import: Could not open this audit finding.");
+  }
 }
 
 /**

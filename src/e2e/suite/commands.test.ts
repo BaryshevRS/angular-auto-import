@@ -34,7 +34,7 @@ const TEMPLATE_MISSING_ONE = "<lib-ui-moon></lib-ui-moon>\n";
 const FIX_ALL_KIND = "source.fixAll.angular-auto-import";
 
 /** What the report command titles its panel, as `client-commands` creates it. */
-const REPORT_PANEL_TITLE = "Angular Auto Import - Diagnostics Report";
+const REPORT_PANEL_TITLE = "Project-wide Missing Import Audit";
 
 /**
  * The app whose fixture this is, and the shard filter a parallel run sets.
@@ -78,7 +78,7 @@ describe("Palette commands", function () {
     assert.ok(await resolvedFixAll(), "After a reindex the server must still resolve the element it indexed");
   });
 
-  it("opens the diagnostics report on the project", async () => {
+  it("opens the missing import audit on the project", async () => {
     await vscode.commands.executeCommand("angular-auto-import.generateDiagnosticsReport");
 
     // A failed request leaves the user an error notification and no panel at all, so the

@@ -161,4 +161,25 @@ describe("LSP server operations", function () {
       [adminRoot]
     );
   });
+
+  it("labels an audit project-scoped only when its URI resolves to a project", () => {
+    const ownedUri = pathToFileURL(path.join(shopRoot, "src", "card.component.ts")).toString();
+    const unownedUri = pathToFileURL(path.join(sandbox, "elsewhere", "notes.ts")).toString();
+
+    const projectAudit = operations.resolveAuditScope({ uri: ownedUri });
+    const emptyAudit = operations.resolveAuditScope({});
+    const unownedAudit = operations.resolveAuditScope({ uri: unownedUri });
+
+    assert.deepStrictEqual(
+      [projectAudit, emptyAudit, unownedAudit].map((audit) => ({
+        kind: audit.kind,
+        roots: audit.runtimes.map((runtime) => runtime.rootPath),
+      })),
+      [
+        { kind: "project", roots: [shopRoot] },
+        { kind: "workspace", roots: [shopRoot, adminRoot] },
+        { kind: "workspace", roots: [shopRoot, adminRoot] },
+      ]
+    );
+  });
 });

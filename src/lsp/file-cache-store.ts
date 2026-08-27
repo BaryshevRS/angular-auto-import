@@ -33,8 +33,11 @@ import { type CoreLogger, silentLogger } from "../core/logging";
  *
  * 5: the indexed elements are a list rather than a map keyed by selector, since two
  * directives can declare the same selector and the map kept only one of them.
+ *
+ * 6: external-template ownership is stored with the index. Older files cannot recover
+ * owners whose component and template basenames differ without rescanning sources.
  */
-export const CACHE_SCHEMA_VERSION = 5;
+export const CACHE_SCHEMA_VERSION = 6;
 
 /** What a cached file must still agree with to be reused. */
 export type CacheFingerprint = Record<string, string>;

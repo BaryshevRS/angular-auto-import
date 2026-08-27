@@ -130,12 +130,26 @@ export interface FileDiagnosticsReport {
   diagnostics: ReportedDiagnostic[];
 }
 
-/** Everything a workspace scan found. */
+/** Why an audit could not inspect its whole requested scope. */
+export type AuditIncompleteReason =
+  | "cancelled"
+  | "analysis-not-ready"
+  | "read-error"
+  | "diagnostic-limit"
+  | `diagnostic-limit:${string}`
+  | "file-limit";
+
+/** Everything a project or workspace audit found. */
 export interface DiagnosticsReport {
   totalIssues: number;
   files: FileDiagnosticsReport[];
   /** ISO 8601; a `Date` does not survive JSON-RPC. */
   timestamp: string;
+  scope: "project" | "workspace";
+  projectsScanned: number;
+  templatesScanned: number;
+  complete: boolean;
+  incompleteReasons: AuditIncompleteReason[];
   /** Whether limits stopped the scan before it had seen everything. */
   truncated?: boolean;
   truncationReason?: string;
@@ -144,7 +158,7 @@ export interface DiagnosticsReport {
 /**
  * Scans every template in the scoped projects and reports what is missing an import.
  *
- * A debugging tool, and the most expensive thing the server does: it honors the
+ * This is the most expensive public operation the server performs, so it honors the
  * request's cancellation token and reports work-done progress against the token the
  * client supplies in `workDoneToken`.
  */

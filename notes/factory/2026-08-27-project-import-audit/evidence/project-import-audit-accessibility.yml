@@ -1,0 +1,38 @@
+- generic [active] [ref=e1]:
+  - heading "Project-wide Missing Import Audit" [level=1] [ref=e2]
+  - paragraph [ref=e3]: Selectors indexed from this project and its dependencies.
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: Scope
+      - generic [ref=e7]: Active project
+    - generic [ref=e8]:
+      - generic [ref=e9]: Projects scanned
+      - generic [ref=e10]: "1"
+    - generic [ref=e11]:
+      - generic [ref=e12]: Templates scanned
+      - generic [ref=e13]: "37"
+    - generic [ref=e14]:
+      - generic [ref=e15]: Missing imports
+      - generic [ref=e16]: "2"
+    - generic [ref=e17]:
+      - generic [ref=e18]: Generated
+      - generic [ref=e19]: 8/27/2026, 9:00:00 PM
+  - generic [ref=e20]: Complete scan
+  - generic [ref=e21]:
+    - generic [ref=e22]:
+      - heading "src/app/dashboard/templates/dashboard.html" [level=2] [ref=e23]
+      - generic [ref=e24]: External
+      - generic [ref=e25]: 2 issue(s)
+    - generic [ref=e26]:
+      - button "Open Warning shopCard is part of a known component, but it is not imported. (missing-component-import:shop-card) in src/app/dashboard/templates/dashboard.html at line 9, column 5" [ref=e27] [cursor=pointer]:
+        - generic [ref=e28]:
+          - generic [ref=e29]: Warning
+          - generic [ref=e30]: Line 9, Col 5
+        - generic [ref=e31]: shopCard is part of a known component, but it is not imported.
+        - generic [ref=e32]: missing-component-import:shop-card
+      - button "Open Warning matTooltip is part of a known directive, but it is not imported. (missing-directive-import:[matTooltip]) in src/app/dashboard/templates/dashboard.html at line 13, column 12" [ref=e33] [cursor=pointer]:
+        - generic [ref=e34]:
+          - generic [ref=e35]: Warning
+          - generic [ref=e36]: Line 13, Col 12
+        - generic [ref=e37]: matTooltip is part of a known directive, but it is not imported.
+        - generic [ref=e38]: missing-directive-import:[matTooltip]

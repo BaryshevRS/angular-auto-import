@@ -193,7 +193,11 @@ function createContext(connection: Connection): ServerContext {
       diagnostics,
       completions: new CompletionHandler({ router, documents: openDocuments, config, planner, logger }),
       definitions: new DefinitionHandler({ router, diagnostics, logger }),
-      reporter: new DiagnosticsReporter({ diagnostics, logger }),
+      reporter: new DiagnosticsReporter({
+        diagnostics,
+        analysisReady: () => state.compiler !== undefined,
+        logger,
+      }),
       operations: new ServerOperations({
         router,
         runtimes: () => state.runtimes?.all() ?? [],
@@ -602,13 +606,15 @@ function registerOperations(context: ServerContext): void {
 
   connection.onRequest(DiagnosticsReportRequest, (scope, token) => {
     const progress = scope.workDoneToken ? connection.window.attachWorkDoneProgress(scope.workDoneToken) : undefined;
-    progress?.begin("Angular Auto Import: Generating Diagnostics Report", 0, undefined, true);
+    progress?.begin("Angular Auto Import: Auditing project-wide missing imports", 0, undefined, true);
+    const auditScope = handlers.operations.resolveAuditScope(scope);
 
     return handlers.reporter
       .run(
-        handlers.operations.resolveScope(scope),
+        auditScope.runtimes,
         progress && { report: (message, percentage) => progress.report(percentage, message) },
-        toCancellationSignal(token)
+        toCancellationSignal(token),
+        auditScope.kind
       )
       .finally(() => progress?.done());
   });
