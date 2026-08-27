@@ -17,6 +17,7 @@ import * as path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { describeElements } from "./element-api";
+import { orient } from "./orient";
 import { verifyTemplate } from "./verify-template";
 import { Workspace } from "./workspace";
 
@@ -136,6 +137,34 @@ export function createMcpServer(workspace: Workspace = new Workspace()): McpServ
       }
 
       return answer(await describeElements({ runtime: project.runtime, fromFile: askingFrom, query }));
+    }
+  );
+
+  server.registerTool(
+    "angular_project_overview",
+    {
+      title: "What kind of Angular project this is",
+      description: [
+        "Get the shape of this Angular workspace before writing any of it: the installed Angular version,",
+        "whether its components are standalone or NgModule-based, which UI libraries its files actually",
+        "import and how widely, and the path aliases imports are written with.",
+        "",
+        "Call this once before your first file. None of it can be guessed from knowing Angular:",
+        "a workspace with both Angular Material and ng-zorro installed uses one of them, and writing",
+        "the other produces correct Angular that does not belong in this repository.",
+      ].join("\n"),
+      inputSchema: {
+        fromFile: z.string().describe("Absolute path to any file in the project you are working in."),
+      },
+    },
+    async ({ fromFile }) => {
+      const askingFrom = path.resolve(fromFile);
+      const project = await workspace.projectFor(askingFrom);
+      if (!project) {
+        return noProject(askingFrom);
+      }
+
+      return answer(await orient({ runtime: project.runtime }));
     }
   );
 

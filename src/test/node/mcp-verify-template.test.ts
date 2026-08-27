@@ -17,8 +17,10 @@ import { createMemoryCacheStore } from "../../core/cache";
 import { silentLogger, withInstrumentation } from "../../core/logging";
 import { silentProgressHost } from "../../core/progress";
 import { describeElements } from "../../mcp/element-api";
+import { orient } from "../../mcp/orient";
 import { type TemplateProject, verifyTemplate } from "../../mcp/verify-template";
 import { AngularIndexer } from "../../services";
+import { AngularElementData } from "../../types";
 
 let compiler: AngularCompilerApi;
 
@@ -57,6 +59,30 @@ async function projectOf(files: Record<string, string>): Promise<{ project: Temp
       },
     },
   };
+}
+
+/** The same index with more elements in it, without touching the one it was made from. */
+function withLibraries(
+  indexer: TemplateProject["indexer"],
+  extra: Array<{ selector: string; element: AngularElementData }>
+): TemplateProject["indexer"] {
+  const indexed = indexer.searchWithSelectors("");
+  return Object.create(indexer, {
+    searchWithSelectors: { value: () => [...extra, ...indexed] },
+  }) as TemplateProject["indexer"];
+}
+
+/** A library element, as the indexer records one. */
+function external(name: string, importPath: string): AngularElementData {
+  return new AngularElementData({
+    path: importPath,
+    name,
+    type: "component",
+    originalSelector: name.toLowerCase(),
+    selectors: [name.toLowerCase()],
+    isStandalone: true,
+    isExternal: true,
+  });
 }
 
 const HOST = `import { Component } from '@angular/core';
@@ -216,6 +242,48 @@ export class TableComponent {
 
       assert.strictEqual(matches.length, 5, "a shortlist, not everything");
       assert.strictEqual(more, 3, "and an honest count of the rest");
+    });
+  });
+
+  describe("orienting an agent in a workspace", () => {
+    it("counts what the workspace uses, not merely what it has", async () => {
+      // The distinction the whole tool exists for: a workspace with two UI libraries
+      // installed writes one of them, and availability cannot tell which.
+      const { project, root } = await projectOf({
+        "host.component.ts": HOST,
+        "card.component.ts": CARD,
+        "uses-a.component.ts": `import { Component } from '@angular/core';\nimport { AButton } from 'lib-a/button';\nimport { AIcon } from 'lib-a/icon';\n@Component({ selector: 'app-uses-a', standalone: true, template: '' })\nexport class UsesAComponent {}\n`,
+        "also-uses-a.component.ts": `import { Component } from '@angular/core';\nimport { AButton } from 'lib-a/button';\n@Component({ selector: 'app-also-uses-a', standalone: true, template: '' })\nexport class AlsoUsesAComponent {}\n`,
+      });
+
+      const overview = await orient({
+        runtime: {
+          ...project,
+          listSourceFiles: async () => [
+            path.join(root, "uses-a.component.ts"),
+            path.join(root, "also-uses-a.component.ts"),
+            path.join(root, "card.component.ts"),
+          ],
+          tsConfig: { paths: { "@app/*": ["src/app/*"] } },
+          // The project's own elements plus three from libraries nothing installed here.
+          // Taken before the override so that it does not call itself.
+          indexer: withLibraries(project.indexer, [
+            { selector: "a-button", element: external("AButton", "lib-a/button") },
+            { selector: "a-icon", element: external("AIcon", "lib-a/icon") },
+            { selector: "b-table", element: external("BTable", "lib-b/table") },
+          ]),
+        },
+      });
+
+      assert.deepStrictEqual(overview.libraries, [
+        // Two files reach for it, across two of its entry points.
+        { name: "lib-a", importedBy: 2, elements: 2 },
+        // Installed and indexed, and nothing here writes it.
+        { name: "lib-b", importedBy: 0, elements: 1 },
+      ]);
+      assert.deepStrictEqual(overview.own, { standalone: 4, nonStandalone: 0 });
+      assert.deepStrictEqual(overview.aliases, { "@app/*": ["src/app/*"] });
+      assert.strictEqual(overview.moreAliases, 0);
     });
   });
 });

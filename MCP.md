@@ -62,20 +62,30 @@ currently answers it. The first and third are what a planned import answers.
 
 Ranked by the strength of the evidence that it is needed, not by how obvious the tool is.
 
-**1. `element_api` — what a template may write on one element.** Inputs with their aliases
-and whether each is required, outputs, the selectors it projects content into, the host
-directives that come with it. Attacks the most-cited failure directly, and the data is
-already indexed.
+**1. `element_api` — what a template may write on one element.** *Built.* Inputs with
+their aliases and whether each is required, outputs, the selectors it projects content
+into, the host directives that come with it. Attacks the most-cited failure directly.
+
+An exact hit is the answer rather than one candidate among five, since a query of
+`nz-table` answered with `nz-table-cell` beside it spends tokens on something nobody
+asked about; where several elements match exactly, all are returned, because `[tuiSlot]`
+genuinely is three directives.
 
 **2. `verify_template` — check a template, get the imports that fix it.** *Built.* The
 counterpart to `devserver.wait_for_build`: 3 ms against a build, and the answer names the
 class and the specifier, which a build log never does. Returns the component file
 rewritten rather than a patch, because an agent writes files.
 
-**3. `orient` — what kind of project this is.** Angular version, standalone or NgModule,
-which UI libraries are actually used and how heavily, the path aliases, how many elements
-are indexed. One call at the start of a session. Stops a model writing Material in an
-ng-zorro workspace.
+**3. `orient` — what kind of project this is.** *Built.* Angular version, standalone or
+NgModule, which UI libraries are actually used and how heavily, the path aliases, how many
+elements are indexed. One call at the start of a session. Stops a model writing Material in
+an ng-zorro workspace.
+
+Use is counted, not availability, and the fixture shows why the two are different answers:
+ng-zorro offers 311 indexed elements there against Material's 182, while three of the
+workspace's files import ng-zorro and eight import Material. Availability would have named
+the wrong library. Imports are read with `ts.preProcessFile`, the compiler's own scanner
+for a file's module specifiers, which finds them without parsing the file.
 
 **4. `search` — find an element by what it does.** Last, and only worth having ranked by
 what this workspace already uses: unranked, it returns forty candidates and the model
@@ -100,11 +110,11 @@ already shipping got better anyway.
 
 ## State
 
-`verify_template` is built and driven end to end against the v22 fixture: an ng-zorro
+Three tools are built and driven end to end against the v22 fixture: an ng-zorro
 template on a real `AppComponent` returns `NzCheckListComponent`, `NzButtonComponent` and
 the `NzWaveDirective` that comes with the button, leaves an already-imported
 `<router-outlet>` alone, and hands back the component with three imports added. First call
-6.5 s — the cold index — and 3 ms after that.
+6.5 s — the cold index — and 3 to 10 ms after that, for any of the three.
 
 Sources checked: `angular.dev/ai/mcp`, `angular.dev/ai/develop-with-ai`,
 `github.com/push-based/angular-toolkit-mcp`, and developer reports collected on dev.to.
