@@ -11,11 +11,13 @@
 import * as assert from "node:assert";
 import * as vscode from "vscode";
 
+const FIX_ALL_COMMAND = "angular-auto-import.fix-all";
+
 /** Every command the extension contributes, as `package.json` promises them. */
 const CONTRIBUTED_COMMANDS = [
   "angular-auto-import.reindex",
   "angular-auto-import.showLogs",
-  "angular-auto-import.fix-all",
+  FIX_ALL_COMMAND,
   "angular-auto-import.generateDiagnosticsReport",
 ];
 
@@ -47,5 +49,18 @@ describe("Extension activation", function () {
       ?.packageJSON?.contributes?.commands?.map((command: { command: string }) => command.command);
 
     assert.deepStrictEqual([...(contributed ?? [])].sort(), [...CONTRIBUTED_COMMANDS].sort());
+  });
+
+  it("offers the existing fix-all command in an HTML editor context menu", () => {
+    const editorContextMenu = vscode.extensions.getExtension("baryshevrs.angular-auto-import")?.packageJSON?.contributes
+      ?.menus?.["editor/context"];
+
+    assert.ok(
+      editorContextMenu?.some(
+        (contribution: { command: string; when?: string }) =>
+          contribution.command === FIX_ALL_COMMAND && contribution.when === "editorLangId == html"
+      ),
+      "HTML editors must offer angular-auto-import.fix-all in editor/context"
+    );
   });
 });

@@ -105,6 +105,14 @@
         "icon": "$(file-text)"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "angular-auto-import.fix-all",
+          "when": "editorLangId == html"
+        }
+      ]
+    },
     "configuration": {
       "title": "Angular Auto Import",
       "properties": {
