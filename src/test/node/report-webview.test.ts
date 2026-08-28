@@ -24,6 +24,17 @@ function enabledFixAllButtons(html: string): string[] {
   return fixAllButtons(html).filter((button) => !/\sdisabled(?:\s|=|>)/i.test(button));
 }
 
+function skeletons(html: string): string[] {
+  return html.match(/<[^>]+\bclass=["'][^"']*\bskeleton(?:\b|-)[^"']*["'][^>]*>/gi) ?? [];
+}
+
+function enabledInteractiveButtons(html: string): string[] {
+  const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/gi) ?? [];
+  return buttons
+    .filter((button) => /\b(?:data-action|data-location)=/i.test(button))
+    .filter((button) => !/\sdisabled(?:\s|=|>)/i.test(button));
+}
+
 describe("Missing import audit webview", () => {
   it("does not claim a clean result when the scan is incomplete", () => {
     const report = {
@@ -106,7 +117,7 @@ describe("Missing import audit webview", () => {
     assert.match(html, /type\s*:\s*["']openLocation["']/);
   });
 
-  it("offers one accessible project-wide Fix All for every finding in a complete report", () => {
+  it("offers one accessible direct project-wide Fix All for every finding in a complete report", () => {
     const html = renderMissingImportAuditHtml(
       report({
         templatesScanned: 2,
@@ -151,9 +162,84 @@ describe("Missing import audit webview", () => {
     assert.strictEqual(buttons.length, 1, "A complete report must have one enabled bulk action, not one per file");
     assert.match(buttons[0], /\btype=["']button["']/i);
     assert.match(buttons[0], /\bclass=["'][^"']*\bfix-all\b[^"']*["']/i);
-    assert.match(buttons[0], /\baria-label=["']Fix all 3 missing imports project-wide["']/i);
-    assert.strictEqual(buttons[0].replace(/<[^>]+>/g, "").trim(), "Fix All (3)");
+    assert.match(buttons[0], /\baria-label=["']Fix all 3 findings project-wide["']/i);
+    assert.strictEqual(buttons[0].replace(/<[^>]+>/g, "").trim(), "Fix All (3 findings)");
     assert.match(html, /vscode\.postMessage\(\s*{\s*type\s*:\s*["']fixAll["']\s*}\s*\)/);
+    assert.doesNotMatch(html, /\b(?:window\.)?confirm\s*\(/i);
+  });
+
+  it("labels a 50-finding Fix All honestly without calling findings imports", () => {
+    const html = renderMissingImportAuditHtml(report({ totalIssues: 50 }), {
+      nonce: "test-nonce",
+      relativePath: (filePath) => filePath,
+    });
+
+    const buttons = enabledFixAllButtons(html);
+    assert.strictEqual(buttons.length, 1);
+    assert.match(buttons[0], /\baria-label=["']Fix all 50 findings project-wide["']/i);
+    assert.strictEqual(buttons[0].replace(/<[^>]+>/g, "").trim(), "Fix All (50 findings)");
+    assert.doesNotMatch(buttons[0], /\bimports?\b/i);
+  });
+
+  it("renders a separate accessible Refresh button that posts the exact refresh message", () => {
+    const html = renderMissingImportAuditHtml(report({ totalIssues: 1 }), {
+      nonce: "test-nonce",
+      relativePath: (filePath) => filePath,
+    });
+
+    const refreshButtons = html.match(/<button\b[^>]*\bdata-action=["']refresh["'][^>]*>[\s\S]*?<\/button>/gi) ?? [];
+    assert.strictEqual(refreshButtons.length, 1, "Expected a dedicated Refresh button");
+    assert.match(refreshButtons[0], /\btype=["']button["']/i);
+    assert.strictEqual(refreshButtons[0].replace(/<[^>]+>/g, "").trim(), "Refresh");
+    assert.doesNotMatch(refreshButtons[0], /\bdata-action=["']fix-all["']/i);
+    assert.match(html, /vscode\.postMessage\(\s*{\s*type\s*:\s*["']refresh["']\s*}\s*\)/);
+  });
+
+  it("renders skeletons instead of an interactive result during the initial load", () => {
+    const html = renderMissingImportAuditHtml(report(), {
+      nonce: "test-nonce",
+      relativePath: (filePath) => filePath,
+      loading: true,
+    } as Parameters<typeof renderMissingImportAuditHtml>[1] & { loading: true });
+
+    assert.match(html, /\baria-busy=["']true["']/i);
+    assert.ok(skeletons(html).length >= 3, "Expected multiple skeleton placeholders during the initial load");
+    assert.deepStrictEqual(enabledInteractiveButtons(html), []);
+    assert.doesNotMatch(html, /No missing imports found/i);
+  });
+
+  it("replaces stale findings and actions with skeletons while refreshing", () => {
+    const staleFilePath = "/workspace/src/stale-host.html";
+    const html = renderMissingImportAuditHtml(
+      report({
+        totalIssues: 1,
+        files: [
+          {
+            filePath: staleFilePath,
+            templateType: "external",
+            diagnostics: [
+              {
+                severity: "warning",
+                message: "Stale missing import finding",
+                code: "missing-component-import:stale-card",
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } },
+              },
+            ],
+          },
+        ],
+      }),
+      {
+        nonce: "test-nonce",
+        relativePath: (filePath) => filePath,
+        loading: true,
+      } as Parameters<typeof renderMissingImportAuditHtml>[1] & { loading: true }
+    );
+
+    assert.match(html, /\baria-busy=["']true["']/i);
+    assert.ok(skeletons(html).length >= 3, "Expected multiple skeleton placeholders while refreshing");
+    assert.deepStrictEqual(enabledInteractiveButtons(html), []);
+    assert.doesNotMatch(html, /Stale missing import finding/i);
+    assert.doesNotMatch(html, /stale-host\.html/i);
   });
 
   it("never enables project-wide Fix All for incomplete or empty reports", () => {

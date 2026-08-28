@@ -58,6 +58,29 @@ const HOST = [
   "",
 ].join("\n");
 
+const BULK_ELEMENTS = [
+  "Alpha",
+  "Beta",
+  "Gamma",
+  "Delta",
+  "Epsilon",
+  "Zeta",
+  "Eta",
+  "Theta",
+  "Iota",
+  "Kappa",
+  "Lambda",
+  "Mu",
+  "Nu",
+  "Xi",
+  "Omicron",
+  "Pi",
+].map((label) => ({
+  className: `Bulk${label}Component`,
+  selector: `bulk-${label.toLowerCase()}`,
+  moduleName: `bulk-${label.toLowerCase()}.component`,
+}));
+
 describe("LSP protocol", function () {
   this.timeout(30000);
 
@@ -94,6 +117,21 @@ describe("LSP protocol", function () {
     templatePath = path.join(root, "src", "host.component.html");
     await fs.writeFile(hostPath, HOST, "utf8");
     await fs.writeFile(templatePath, "", "utf8");
+  }
+
+  async function openBulkFixAllScenario(): Promise<void> {
+    await Promise.all(
+      BULK_ELEMENTS.map(({ className, moduleName, selector }) =>
+        fs.writeFile(path.join(root, "src", `${moduleName}.ts`), component(className, selector), "utf8")
+      )
+    );
+    await harness.client.sendRequest(ReindexRequest, {});
+    const template = Array.from({ length: 50 }, (_, index) => {
+      const { selector } = BULK_ELEMENTS[index % BULK_ELEMENTS.length];
+      return `<${selector}></${selector}>`;
+    }).join("\n");
+    await harness.open(hostPath, HOST, "typescript");
+    await harness.open(templatePath, template, "html");
   }
 
   beforeEach(async () => {
@@ -291,6 +329,81 @@ describe("LSP protocol", function () {
   });
 
   describe("workspace edits", () => {
+    it("applies 16 distinct imports for 50 findings in one owning component", async () => {
+      await openBulkFixAllScenario();
+
+      const prepared = (await harness.client.sendRequest(
+        PrepareWorkspaceFixAllRequest,
+        {}
+      )) as unknown as PreparedFixAllResult;
+
+      if (!prepared.ready) {
+        assert.fail(`Expected all 50 findings to be fixable, got ${prepared.reason}`);
+      }
+      assert.strictEqual(prepared.totalIssues, 50);
+      assert.strictEqual(prepared.importsAdded, 16);
+      assert.strictEqual(prepared.filesChanged, 1);
+      assert.strictEqual(harness.appliedEdits.length, 0);
+
+      const result = await harness.client.sendRequest(ApplyWorkspaceFixAllRequest, {
+        transactionId: prepared.transactionId,
+      });
+
+      assert.strictEqual(result.applied, true);
+      assert.strictEqual(result.totalIssues, 50);
+      assert.strictEqual(result.importsAdded, 16);
+      assert.strictEqual(result.filesChanged, 1);
+      assert.strictEqual(harness.appliedEdits.length, 1, "Apply must submit exactly one workspace/applyEdit request");
+
+      const [{ edit }] = harness.appliedEdits as Array<{
+        edit: {
+          documentChanges: Array<{
+            textDocument: { uri: string; version: number | null };
+            edits: Array<{ range: CoreRange; newText: string }>;
+          }>;
+        };
+      }>;
+      assert.strictEqual(edit.documentChanges.length, 1);
+      assert.strictEqual(edit.documentChanges[0].textDocument.uri, harness.uri(hostPath));
+      const updatedOwner = applyTextEdits(HOST, edit.documentChanges[0].edits);
+      const componentImports = updatedOwner.match(/imports:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
+
+      for (const { className, moduleName } of BULK_ELEMENTS) {
+        assert.match(
+          updatedOwner,
+          new RegExp(`import\\s*\\{[^}]*\\b${className}\\b[^}]*\\}\\s*from\\s*["']\\./${moduleName}["']`)
+        );
+        assert.match(componentImports, new RegExp(`\\b${className}\\b`));
+      }
+    });
+
+    it("does not expose a transaction that is already stale when index generation changes during preparation", async () => {
+      await openBulkFixAllScenario();
+      const before = await harness.client.sendRequest(PerformanceMetricsRequest);
+      await fs.writeFile(
+        path.join(root, "src", "generation-bump.component.ts"),
+        component("GenerationBumpComponent", "generation-bump"),
+        "utf8"
+      );
+
+      const preparation = harness.client.sendRequest(PrepareWorkspaceFixAllRequest, {});
+      const reindexing = harness.client.sendRequest(ReindexRequest, {});
+      const [preparedResult, reindexed] = await Promise.all([preparation, reindexing]);
+      assert.ok(reindexed.projects[0].elementCount > before.projects[0].elementCount);
+
+      const prepared = preparedResult as unknown as PreparedFixAllResult;
+      if (!prepared.ready) {
+        assert.deepStrictEqual(prepared, { ready: false, reason: "unfixable" });
+        return;
+      }
+
+      const result = await harness.client.sendRequest(ApplyWorkspaceFixAllRequest, {
+        transactionId: prepared.transactionId,
+      });
+      assert.strictEqual(result.applied, true, "A confirmation-ready transaction must apply against the current index");
+      assert.notStrictEqual(result.reason, "stale", "Prepare must not return a transaction that is immediately stale");
+    });
+
     it("prepares a fresh audit before applying one versioned fix-all edit across owning components", async () => {
       const offersPath = path.join(root, "src", "offers.component.ts");
       const offersTemplatePath = path.join(root, "src", "offers.component.html");

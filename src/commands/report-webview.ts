@@ -4,6 +4,7 @@ import type { DiagnosticsReport, FileDiagnosticsReport, ReportedDiagnostic } fro
 export interface MissingImportAuditHtmlOptions {
   nonce: string;
   relativePath(filePath: string): string;
+  loading?: boolean;
 }
 
 /** Renders the project-wide missing-import audit without depending on the VS Code host. */
@@ -22,8 +23,27 @@ export function renderMissingImportAuditHtml(
     : `<div class="status incomplete">Incomplete scan: ${escapeHtml(report.incompleteReasons.join(", "))}</div>`;
   const fixAll =
     report.complete && report.totalIssues > 0
-      ? `<div class="actions"><button type="button" class="fix-all" data-action="fix-all" aria-label="Fix all ${report.totalIssues} missing imports project-wide">Fix All (${report.totalIssues})</button></div>`
+      ? `<button type="button" class="fix-all" data-action="fix-all" aria-label="Fix all ${report.totalIssues} findings project-wide">Fix All (${report.totalIssues} findings)</button>`
       : "";
+  const actions = `<div class="actions">${fixAll}<button type="button" class="refresh" data-action="refresh">Refresh</button></div>`;
+  const results = options.loading
+    ? `<main class="loading" aria-busy="true" aria-label="Loading audit results">
+    <div class="skeleton skeleton-summary"></div>
+    <div class="skeleton skeleton-status"></div>
+    <div class="skeleton skeleton-finding"></div>
+  </main>`
+    : `<main>
+  <div class="summary">
+    ${summaryItem("Scope", report.scope === "workspace" ? "Workspace" : "Active project")}
+    ${summaryItem("Projects scanned", String(report.projectsScanned))}
+    ${summaryItem("Templates scanned", String(report.templatesScanned))}
+    ${summaryItem("Findings", String(report.totalIssues) + (report.truncated ? "+" : ""))}
+    ${summaryItem("Generated", new Date(report.timestamp).toLocaleString())}
+  </div>
+  ${status}
+  ${actions}
+  ${files}
+  </main>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -66,7 +86,7 @@ export function renderMissingImportAuditHtml(
       border-color: var(--vscode-inputValidation-warningBorder);
     }
     .actions { display: flex; justify-content: flex-end; margin: 0 0 16px; }
-    .fix-all {
+    .fix-all, .refresh {
       background: var(--vscode-button-background);
       border: 1px solid transparent;
       color: var(--vscode-button-foreground);
@@ -74,9 +94,21 @@ export function renderMissingImportAuditHtml(
       font: inherit;
       padding: 6px 14px;
     }
-    .fix-all:hover { background: var(--vscode-button-hoverBackground); }
-    .fix-all:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+    .actions { gap: 8px; }
+    .fix-all:hover, .refresh:hover { background: var(--vscode-button-hoverBackground); }
+    .fix-all:focus-visible, .refresh:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
     .fix-all:disabled { cursor: wait; opacity: 0.65; }
+    .skeleton {
+      animation: pulse 1.4s ease-in-out infinite;
+      background: var(--vscode-editorWidget-background);
+      border-radius: 4px;
+      margin-bottom: 16px;
+      min-height: 44px;
+      opacity: 0.65;
+    }
+    .skeleton-summary { min-height: 82px; }
+    .skeleton-finding { min-height: 120px; }
+    @keyframes pulse { 50% { opacity: 0.35; } }
     .file-report {
       border: 1px solid var(--vscode-panel-border);
       border-radius: 4px;
@@ -124,21 +156,17 @@ export function renderMissingImportAuditHtml(
 <body>
   <h1>Project-wide Missing Import Audit</h1>
   <p class="subtitle">Selectors indexed from this project and its dependencies.</p>
-  <div class="summary">
-    ${summaryItem("Scope", report.scope === "workspace" ? "Workspace" : "Active project")}
-    ${summaryItem("Projects scanned", String(report.projectsScanned))}
-    ${summaryItem("Templates scanned", String(report.templatesScanned))}
-    ${summaryItem("Missing imports", String(report.totalIssues) + (report.truncated ? "+" : ""))}
-    ${summaryItem("Generated", new Date(report.timestamp).toLocaleString())}
-  </div>
-  ${status}
-  ${fixAll}
-  ${files}
+  ${results}
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     document.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      const refresh = target.closest("button[data-action='refresh']");
+      if (refresh instanceof HTMLButtonElement) {
+        vscode.postMessage({ type: "refresh" });
+        return;
+      }
       const fixAll = target.closest("button[data-action='fix-all']");
       if (fixAll instanceof HTMLButtonElement) {
         if (fixAll.disabled) return;
@@ -177,7 +205,7 @@ function renderFile(file: FileDiagnosticsReport, options: MissingImportAuditHtml
     <header class="file-header">
       <h2 class="file-path">${escapeHtml(relativePath)}</h2>
       <span class="badge">${templateType}</span>
-      <span class="badge">${file.diagnostics.length} issue(s)</span>
+      <span class="badge">${file.diagnostics.length} ${file.diagnostics.length === 1 ? "finding" : "findings"}</span>
     </header>
     <div class="diagnostics">${diagnostics}</div>
   </section>`;

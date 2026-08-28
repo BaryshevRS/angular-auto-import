@@ -1,12 +1,5 @@
 /**
- * Project-wide Fix All, through the real Extension Host command seam.
- *
- * VS Code's extension-test API exposes a webview as a tab, but it cannot click its DOM
- * or send a message into it. The audit webview therefore owns confirmation and then
- * delegates its action to the hidden, confirmation-gated production command. Since an
- * Extension Host test cannot accept that modal, Test extension mode registers an
- * already-confirmed sibling command that exercises the same client request path, real
- * language server, and one VS Code workspace edit without shipping a production bypass.
+ * Project-wide Fix All, through the same production command used by the audit panel.
  * @module
  */
 
@@ -27,7 +20,30 @@ const CASE_FILTER = process.env.AAI_E2E_CASE;
 const DIAGNOSTIC_SOURCE = "angular-auto-import";
 const NX_WORKSPACE = "v22-nx";
 const AUDIT_COMMAND = "angular-auto-import.generateDiagnosticsReport";
-const CONFIRMED_FIX_ALL_COMMAND = "angular-auto-import.test.fixAllProjectConfirmed";
+const PROJECT_FIX_ALL_COMMAND = "angular-auto-import.fixAllProject";
+const BULK_OWNER = {
+  componentPath: "apps/shop/src/app/project-wide-fix-all/bulk-owner.component.ts",
+  diagnosticPath: "apps/shop/src/app/project-wide-fix-all/bulk-owner.component.html",
+  templateFileName: "bulk-owner.component.html",
+};
+const BULK_CLASSES = [
+  "BulkAlphaComponent",
+  "BulkBetaComponent",
+  "BulkGammaComponent",
+  "BulkDeltaComponent",
+  "BulkEpsilonComponent",
+  "BulkZetaComponent",
+  "BulkEtaComponent",
+  "BulkThetaComponent",
+  "BulkIotaComponent",
+  "BulkKappaComponent",
+  "BulkLambdaComponent",
+  "BulkMuComponent",
+  "BulkNuComponent",
+  "BulkXiComponent",
+  "BulkOmicronComponent",
+  "BulkPiComponent",
+] as const;
 
 interface OwnerFixture {
   componentPath: string;
@@ -90,6 +106,12 @@ describe("Project-wide Fix All (v22-nx)", function () {
       }
       originals.set(componentPath, fs.readFileSync(componentPath, "utf-8"));
     }
+    const bulkComponentPath = path.join(workspaceRoot, BULK_OWNER.componentPath);
+    const bulkTemplatePath = path.join(workspaceRoot, BULK_OWNER.diagnosticPath);
+    if (!fs.existsSync(bulkComponentPath) || !fs.existsSync(bulkTemplatePath)) {
+      assert.fail(`Missing ${CASE} bulk fixture: ${bulkComponentPath} or ${bulkTemplatePath}`);
+    }
+    originals.set(bulkComponentPath, fs.readFileSync(bulkComponentPath, "utf-8"));
 
     active = true;
     await waitForExtensionActivation();
@@ -131,8 +153,7 @@ describe("Project-wide Fix All (v22-nx)", function () {
       }
     }
 
-    // Open the real audit first: the confirmed command is the seam its webview message
-    // handler delegates to after the user accepts the project-wide edit.
+    // Open the real audit first, then run the exact command used by its Fix All button.
     const initialAudit = await vscode.commands.executeCommand<{
       complete: boolean;
       totalIssues: number;
@@ -143,7 +164,7 @@ describe("Project-wide Fix All (v22-nx)", function () {
       { complete: true, totalIssues: 2 },
       `Initial project audit did not contain both owners: ${JSON.stringify(initialAudit)}`
     );
-    const outcome = await vscode.commands.executeCommand<AppliedFixAll>(CONFIRMED_FIX_ALL_COMMAND);
+    const outcome = await vscode.commands.executeCommand<AppliedFixAll>(PROJECT_FIX_ALL_COMMAND);
     assert.deepStrictEqual(
       outcome && {
         applied: outcome.applied,
@@ -201,6 +222,73 @@ describe("Project-wide Fix All (v22-nx)", function () {
         `Fresh diagnostics still report ${fixture.diagnosticPath}`
       );
     }
+  });
+
+  it("applies 16 unique imports for 50 findings to one v22 Nx owner", async () => {
+    for (const owner of OWNERS) {
+      const componentPath = path.join(workspaceRoot, owner.componentPath);
+      const original = originals.get(componentPath);
+      assert.ok(original, `Original fixture was not preserved for ${componentPath}`);
+      await replaceFileContent(vscode.Uri.file(componentPath), original);
+    }
+
+    const componentUri = vscode.Uri.file(path.join(workspaceRoot, BULK_OWNER.componentPath));
+    const templateUri = vscode.Uri.file(path.join(workspaceRoot, BULK_OWNER.diagnosticPath));
+    const original = originals.get(componentUri.fsPath);
+    assert.ok(original, `Original fixture was not preserved for ${componentUri.fsPath}`);
+    await replaceFileContent(componentUri, stripAngularImports(original, BULK_OWNER.templateFileName));
+    const template = await vscode.workspace.openTextDocument(templateUri);
+    await vscode.window.showTextDocument(template, { preview: false });
+    await waitForDiagnosticsToStabilize(templateUri, DIAGNOSTIC_SOURCE, 60000, 1000, 50);
+
+    const initialAudit = await vscode.commands.executeCommand<{
+      complete: boolean;
+      totalIssues: number;
+      files: unknown[];
+    }>(AUDIT_COMMAND);
+    assert.deepStrictEqual(
+      initialAudit && {
+        complete: initialAudit.complete,
+        totalIssues: initialAudit.totalIssues,
+        files: initialAudit.files.length,
+      },
+      { complete: true, totalIssues: 50, files: 1 },
+      `Bulk audit did not report exactly 50 findings in one owner: ${JSON.stringify(initialAudit)}`
+    );
+
+    const outcome = await vscode.commands.executeCommand<AppliedFixAll>(PROJECT_FIX_ALL_COMMAND);
+    assert.deepStrictEqual(
+      outcome && {
+        applied: outcome.applied,
+        totalIssues: outcome.totalIssues,
+        filesChanged: outcome.filesChanged,
+        importsAdded: outcome.importsAdded,
+        reason: outcome.reason,
+      },
+      { applied: true, totalIssues: 50, filesChanged: 1, importsAdded: 16, reason: undefined },
+      `Unexpected 50/16/1 transaction outcome: ${JSON.stringify(outcome)}`
+    );
+
+    const edited = await componentOnceItCarries(componentUri, BULK_CLASSES[BULK_CLASSES.length - 1]);
+    for (const className of BULK_CLASSES) {
+      const carried = verifyImportInComponent(edited, className, "@shop/ui-kit", BULK_OWNER.templateFileName);
+      assert.deepStrictEqual(carried, { hasImportStatement: true, hasInImportsArray: true }, className);
+    }
+
+    const cleanAudit = await vscode.commands.executeCommand<{
+      complete: boolean;
+      totalIssues: number;
+      files: unknown[];
+    }>(AUDIT_COMMAND);
+    assert.deepStrictEqual(
+      cleanAudit && {
+        complete: cleanAudit.complete,
+        totalIssues: cleanAudit.totalIssues,
+        files: cleanAudit.files,
+      },
+      { complete: true, totalIssues: 0, files: [] },
+      `Fresh bulk audit was not clean: ${JSON.stringify(cleanAudit)}`
+    );
   });
 });
 

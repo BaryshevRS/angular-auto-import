@@ -3,12 +3,7 @@ import type { AppliedWorkspaceFixAll, DiagnosticsReport, PreparedWorkspaceFixAll
 /** Formats the notification shown after the audit panel opens. */
 export function formatAuditCompletionMessage(report: DiagnosticsReport): string {
   const outcome = report.complete ? "complete" : "incomplete";
-  return `Missing import audit ${outcome}: ${report.totalIssues} issue(s) across ${report.templatesScanned} scanned template(s).`;
-}
-
-/** Uses the server's prepared edit counts, which can differ from raw diagnostics. */
-export function formatFixAllConfirmationMessage(prepared: Extract<PreparedWorkspaceFixAll, { ready: true }>): string {
-  return `Apply ${prepared.importsAdded} missing imports across ${prepared.filesChanged} files?`;
+  return `Missing import audit ${outcome}: ${count(report.totalIssues, "finding")} across ${count(report.templatesScanned, "scanned template")}.`;
 }
 
 /** Describes every terminal Fix All outcome without pretending a rejected edit succeeded. */
@@ -17,7 +12,7 @@ export function formatFixAllResultMessage(result: PreparedWorkspaceFixAll | Appl
     return "These findings could not be fixed safely. Run the audit again after resolving ambiguous owners.";
   }
   if (!("applied" in result) || result.applied) {
-    return `Applied ${result.importsAdded} missing imports across ${result.filesChanged} files.`;
+    return `Added ${count(result.importsAdded, "import")} to ${count(result.filesChanged, "file")}.`;
   }
   if (result.reason === "stale") {
     return "The prepared Fix All is stale because project files changed. Run the audit again.";
@@ -26,4 +21,8 @@ export function formatFixAllResultMessage(result: PreparedWorkspaceFixAll | Appl
     return "This Fix All was already used. Run the audit again.";
   }
   return "The project-wide Fix All was rejected by the editor; no files were changed.";
+}
+
+function count(value: number, singular: string): string {
+  return `${value} ${singular}${value === 1 ? "" : "s"}`;
 }

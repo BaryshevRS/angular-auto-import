@@ -10,12 +10,24 @@ export interface AuditFixAllMessage {
   type: "fixAll";
 }
 
+export interface AuditRefreshMessage {
+  type: "refresh";
+}
+
 /** Accepts only the capability-free message emitted by the trusted webview renderer. */
 export function decodeAuditFixAllMessage(value: unknown): AuditFixAllMessage | undefined {
   if (!isRecord(value) || Object.keys(value).length !== 1 || value.type !== "fixAll") {
     return undefined;
   }
   return { type: "fixAll" };
+}
+
+/** Accepts only the capability-free refresh message emitted by the trusted webview renderer. */
+export function decodeAuditRefreshMessage(value: unknown): AuditRefreshMessage | undefined {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || value.type !== "refresh") {
+    return undefined;
+  }
+  return { type: "refresh" };
 }
 
 export function decodeAuditLocationMessage(value: unknown): AuditLocation | undefined {

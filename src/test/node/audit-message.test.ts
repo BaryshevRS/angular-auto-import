@@ -1,9 +1,5 @@
 import * as assert from "node:assert";
-import {
-  formatAuditCompletionMessage,
-  formatFixAllConfirmationMessage,
-  formatFixAllResultMessage,
-} from "../../commands/audit-message";
+import { formatAuditCompletionMessage, formatFixAllResultMessage } from "../../commands/audit-message";
 import type { AppliedWorkspaceFixAll, DiagnosticsReport, PreparedWorkspaceFixAll } from "../../lsp/protocol";
 
 describe("Missing import audit completion message", () => {
@@ -21,7 +17,7 @@ describe("Missing import audit completion message", () => {
 
     const message = formatAuditCompletionMessage(report);
 
-    assert.strictEqual(message, "Missing import audit incomplete: 3 issue(s) across 7 scanned template(s).");
+    assert.strictEqual(message, "Missing import audit incomplete: 3 findings across 7 scanned templates.");
     assert.doesNotMatch(message, /\bcomplete\b/i);
   });
 });
@@ -35,19 +31,15 @@ describe("Project-wide Fix All messages", () => {
     importsAdded: 3,
   };
 
-  it("confirms the exact prepared import and file counts, not the diagnostic count", () => {
-    assert.strictEqual(formatFixAllConfirmationMessage(prepared), "Apply 3 missing imports across 2 files?");
-  });
-
   it("reports the exact counts that were applied", () => {
     const applied: AppliedWorkspaceFixAll = {
       applied: true,
-      totalIssues: 7,
-      filesChanged: 2,
-      importsAdded: 3,
+      totalIssues: 50,
+      filesChanged: 1,
+      importsAdded: 16,
     };
 
-    assert.strictEqual(formatFixAllResultMessage(applied), "Applied 3 missing imports across 2 files.");
+    assert.strictEqual(formatFixAllResultMessage(applied), "Added 16 imports to 1 file.");
   });
 
   it("distinguishes stale, rejected, and unfixable outcomes", () => {

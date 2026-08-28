@@ -1,4 +1,5 @@
 import * as assert from "node:assert";
+import * as reportNavigation from "../../commands/report-navigation";
 import { decodeAuditFixAllMessage, decodeAuditLocationMessage } from "../../commands/report-navigation";
 
 describe("Missing import audit navigation", () => {
@@ -46,6 +47,30 @@ describe("Missing import audit navigation", () => {
     ];
     for (const candidate of malformed) {
       assert.strictEqual(decodeAuditFixAllMessage(candidate), undefined);
+    }
+  });
+
+  it("decodes only the exact audit refresh message", () => {
+    const decoder = (reportNavigation as unknown as Record<string, unknown>).decodeAuditRefreshMessage;
+    assert.strictEqual(typeof decoder, "function", "Expected the audit refresh decoder to be exported");
+    if (typeof decoder !== "function") {
+      return;
+    }
+
+    assert.deepStrictEqual(decoder({ type: "refresh" }), { type: "refresh" });
+
+    const malformed: unknown[] = [
+      undefined,
+      null,
+      "refresh",
+      ["refresh"],
+      {},
+      { type: "Refresh" },
+      { type: "refresh", force: true },
+      { type: "refresh", transactionId: "from-the-webview" },
+    ];
+    for (const candidate of malformed) {
+      assert.strictEqual(decoder(candidate), undefined);
     }
   });
 });
