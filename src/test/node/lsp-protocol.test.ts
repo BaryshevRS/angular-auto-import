@@ -12,11 +12,28 @@ import {
 } from "vscode-languageserver-protocol";
 import type { CoreRange } from "../../core/language-types";
 import { APPLY_IMPORT_COMMAND } from "../../lsp/import-command";
-import { DiagnosticsReportRequest, FIX_ALL_KIND, PerformanceMetricsRequest, ReindexRequest } from "../../lsp/protocol";
+import {
+  ApplyWorkspaceFixAllRequest,
+  DiagnosticsReportRequest,
+  FIX_ALL_KIND,
+  PerformanceMetricsRequest,
+  PrepareWorkspaceFixAllRequest,
+  ReindexRequest,
+} from "../../lsp/protocol";
 import { FULL_CLIENT_CAPABILITIES, type Harness, startHarness } from "./harness/lsp-harness";
 import { applyTextEdits } from "./harness/text";
 
 const WHOLE_DOCUMENT = { start: { line: 0, character: 0 }, end: { line: 40, character: 0 } };
+
+interface FixAllCounts {
+  totalIssues: number;
+  filesChanged: number;
+  importsAdded: number;
+}
+
+type PreparedFixAllResult =
+  | (FixAllCounts & { ready: true; transactionId: string })
+  | { ready: false; reason: "unfixable" };
 
 function component(name: string, selector: string): string {
   return [
@@ -274,6 +291,214 @@ describe("LSP protocol", function () {
   });
 
   describe("workspace edits", () => {
+    it("prepares a fresh audit before applying one versioned fix-all edit across owning components", async () => {
+      const offersPath = path.join(root, "src", "offers.component.ts");
+      const offersTemplatePath = path.join(root, "src", "offers.component.html");
+      const offers = HOST.replace('selector: "app-host"', 'selector: "app-offers"')
+        .replace('templateUrl: "./host.component.html"', 'templateUrl: "./offers.component.html"')
+        .replace("HostComponent", "OffersComponent");
+      await fs.writeFile(offersPath, offers, "utf8");
+      await fs.writeFile(offersTemplatePath, "", "utf8");
+      await harness.client.sendRequest(ReindexRequest, {});
+
+      await harness.open(hostPath, HOST, "typescript");
+      await harness.open(offersPath, offers, "typescript");
+      await harness.open(templatePath, "<shop-card></shop-card><shop-badge></shop-badge>", "html");
+      await harness.open(offersTemplatePath, "<shop-card></shop-card>", "html");
+      await harness.changeSettings({ importModuleSpecifier: "non-relative" });
+
+      const prepared = (await harness.client.sendRequest(
+        PrepareWorkspaceFixAllRequest,
+        {}
+      )) as unknown as PreparedFixAllResult;
+
+      if (!prepared.ready) {
+        assert.fail(`Expected a ready Fix All, got ${prepared.reason}`);
+      }
+      assert.strictEqual(prepared.ready, true);
+      assert.ok(prepared.transactionId, "Preparation must return an opaque transaction to confirm");
+      assert.strictEqual(prepared.totalIssues, 3);
+      assert.strictEqual(prepared.filesChanged, 2);
+      assert.strictEqual(prepared.importsAdded, 3);
+      assert.strictEqual(harness.appliedEdits.length, 0, "Preparation only describes the edit awaiting confirmation");
+
+      const result = await harness.client.sendRequest(ApplyWorkspaceFixAllRequest, {
+        transactionId: prepared.transactionId,
+      });
+
+      assert.strictEqual(result.applied, true);
+      assert.strictEqual(result.totalIssues, 3);
+      assert.strictEqual(result.filesChanged, 2);
+      assert.strictEqual(result.importsAdded, 3);
+      assert.strictEqual(harness.appliedEdits.length, 1, "Fix All must be one atomic client operation");
+
+      const [{ edit }] = harness.appliedEdits as Array<{
+        edit: {
+          documentChanges: Array<{
+            textDocument: { uri: string; version: number | null };
+            edits: Array<{ range: CoreRange; newText: string }>;
+          }>;
+        };
+      }>;
+      assert.strictEqual(edit.documentChanges.length, 2);
+      assert.ok(
+        edit.documentChanges.every((change) => change.textDocument.version === 1),
+        "Every open owner must be guarded by the version that was audited"
+      );
+
+      const changesByUri = new Map(edit.documentChanges.map((change) => [change.textDocument.uri, change]));
+      const updatedHost = applyTextEdits(HOST, changesByUri.get(harness.uri(hostPath))?.edits ?? []);
+      const updatedOffers = applyTextEdits(offers, changesByUri.get(harness.uri(offersPath))?.edits ?? []);
+
+      assert.match(updatedHost, /from ["']~\/shop-card\.component["']/);
+      assert.match(updatedHost, /from ["']~\/shop-badge\.component["']/);
+      assert.match(updatedHost, /imports: \[[^\]]*ShopCardComponent/);
+      assert.match(updatedHost, /imports: \[[^\]]*ShopBadgeComponent/);
+      assert.match(updatedOffers, /from ["']~\/shop-card\.component["']/);
+      assert.match(updatedOffers, /imports: \[[^\]]*ShopCardComponent/);
+    });
+
+    it("applies an audited external template to its aliased owner outside the project root", async () => {
+      const aliasRoot = path.join(sandbox, "aliased-owner");
+      const aliasedHostPath = path.join(aliasRoot, "aliased-host.component.ts");
+      const aliasedTemplatePath = path.join(aliasRoot, "aliased-host.component.html");
+      const aliasedHost = HOST.replace('selector: "app-host"', 'selector: "app-aliased-host"')
+        .replace('templateUrl: "./host.component.html"', 'templateUrl: "./aliased-host.component.html"')
+        .replace("HostComponent", "AliasedHostComponent");
+      await fs.mkdir(aliasRoot, { recursive: true });
+      await fs.writeFile(aliasedHostPath, aliasedHost, "utf8");
+      await fs.writeFile(aliasedTemplatePath, "<shop-card></shop-card>", "utf8");
+      await fs.writeFile(
+        path.join(root, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            baseUrl: ".",
+            paths: { "~/*": ["src/*"], "@aliased-owner/*": ["../aliased-owner/*"] },
+          },
+        }),
+        "utf8"
+      );
+      await harness.client.sendRequest(ReindexRequest, {});
+      await harness.open(aliasedHostPath, aliasedHost, "typescript");
+      await harness.open(aliasedTemplatePath, "<shop-card></shop-card>", "html");
+
+      const prepared = (await harness.client.sendRequest(
+        PrepareWorkspaceFixAllRequest,
+        {}
+      )) as unknown as PreparedFixAllResult;
+
+      if (!prepared.ready) {
+        assert.fail(`Expected the aliased owner to be fixable, got ${prepared.reason}`);
+      }
+      assert.strictEqual(prepared.ready, true);
+      assert.strictEqual(prepared.totalIssues, 1);
+      assert.strictEqual(prepared.filesChanged, 1);
+      assert.strictEqual(prepared.importsAdded, 1);
+
+      const result = await harness.client.sendRequest(ApplyWorkspaceFixAllRequest, {
+        transactionId: prepared.transactionId,
+      });
+
+      assert.strictEqual(result.applied, true);
+      assert.strictEqual(harness.appliedEdits.length, 1);
+      const [{ edit }] = harness.appliedEdits as Array<{
+        edit: {
+          documentChanges: Array<{
+            textDocument: { uri: string; version: number | null };
+            edits: Array<{ range: CoreRange; newText: string }>;
+          }>;
+        };
+      }>;
+      assert.strictEqual(edit.documentChanges.length, 1);
+      assert.strictEqual(edit.documentChanges[0].textDocument.uri, harness.uri(aliasedHostPath));
+      assert.strictEqual(edit.documentChanges[0].textDocument.version, 1);
+      assert.match(applyTextEdits(aliasedHost, edit.documentChanges[0].edits), /imports: \[ShopCardComponent]/);
+    });
+
+    it("consumes a prepared fix-all without editing when its audited document changed", async () => {
+      await harness.open(hostPath, HOST, "typescript");
+      await harness.open(templatePath, "<shop-card></shop-card>", "html");
+      const prepared = (await harness.client.sendRequest(
+        PrepareWorkspaceFixAllRequest,
+        {}
+      )) as unknown as PreparedFixAllResult;
+      if (!prepared.ready) {
+        assert.fail(`Expected a ready Fix All, got ${prepared.reason}`);
+      }
+      assert.strictEqual(prepared.ready, true);
+
+      await harness.change(templatePath, "<shop-badge></shop-badge>");
+
+      const stale = (await harness.client.sendRequest(ApplyWorkspaceFixAllRequest, {
+        transactionId: prepared.transactionId,
+      })) as { applied: boolean; reason?: string };
+
+      assert.strictEqual(stale.applied, false);
+      assert.strictEqual(stale.reason, "stale");
+      assert.strictEqual(harness.appliedEdits.length, 0, "A stale snapshot must never reach workspace/applyEdit");
+
+      const consumed = await harness.client.sendRequest(ApplyWorkspaceFixAllRequest, {
+        transactionId: prepared.transactionId,
+      });
+
+      assert.strictEqual(consumed.applied, false, "A stale transaction must be consumed by its first apply attempt");
+      assert.strictEqual(harness.appliedEdits.length, 0);
+    });
+
+    it("refuses to prepare any fix-all when an owning component cannot be edited", async () => {
+      const unfixableHost = HOST.replace(
+        'import { Component } from "@angular/core";',
+        'import { Component } from "@angular/core";\n\nconst CURRENT_IMPORTS: never[] = [];'
+      ).replace("imports: []", "imports: CURRENT_IMPORTS");
+      await harness.open(hostPath, unfixableHost, "typescript");
+      await harness.open(templatePath, "<shop-card></shop-card>", "html");
+
+      const prepared = (await harness.client.sendRequest(
+        PrepareWorkspaceFixAllRequest,
+        {}
+      )) as unknown as PreparedFixAllResult;
+
+      if (prepared.ready) {
+        assert.fail("An unfixable plan must not expose a transaction");
+      }
+      assert.strictEqual(prepared.ready, false);
+      assert.strictEqual(prepared.reason, "unfixable");
+      assert.ok(!("transactionId" in prepared), "There must be no Apply step for a partial plan");
+      assert.strictEqual(harness.appliedEdits.length, 0);
+    });
+
+    it("refuses a bulk edit when the client cannot apply text changes transactionally", async () => {
+      const nonTransactional = await startHarness({
+        workspaceRoots: [root],
+        capabilities: {
+          ...FULL_CLIENT_CAPABILITIES,
+          workspace: { ...FULL_CLIENT_CAPABILITIES.workspace, workspaceEdit: undefined },
+        },
+      });
+      try {
+        await nonTransactional.waitForProjects();
+        await nonTransactional.open(templatePath, "<shop-card></shop-card>", "html");
+
+        const prepared = await nonTransactional.client.sendRequest(PrepareWorkspaceFixAllRequest, {});
+
+        assert.deepStrictEqual(prepared, { ready: false, reason: "unfixable" });
+        assert.strictEqual(nonTransactional.appliedEdits.length, 0);
+      } finally {
+        await nonTransactional.dispose();
+      }
+    });
+
+    it("refuses an owner file with more than one component decorator", async () => {
+      const ambiguous = `${HOST}\n${HOST.replace("HostComponent", "SecondHostComponent")}\n`;
+      await harness.open(hostPath, ambiguous, "typescript");
+      await harness.open(templatePath, "<shop-card></shop-card>", "html");
+
+      const prepared = await harness.client.sendRequest(PrepareWorkspaceFixAllRequest, {});
+
+      assert.deepStrictEqual(prepared, { ready: false, reason: "unfixable" });
+      assert.strictEqual(harness.appliedEdits.length, 0);
+    });
+
     it("applies an accepted completion's import to the component file", async () => {
       await harness.open(templatePath, "<shop-c", "html");
       const completions = (await harness.client.sendRequest(CompletionRequest.type, {

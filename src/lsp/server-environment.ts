@@ -31,6 +31,8 @@ export interface ClientSupport {
   diagnosticRefresh: boolean;
   /** The client fills in a code action's edit through `codeAction/resolve`. */
   codeActionResolve: boolean;
+  /** The client promises one multi-document text edit is all-or-nothing. */
+  transactionalWorkspaceEdit: boolean;
 }
 
 /** Everything one server instance needs from the handshake. */
@@ -79,6 +81,9 @@ export function resolveServerEnvironment(params: InitializeParams): ServerEnviro
       didChangeWatchedFiles: workspace?.didChangeWatchedFiles?.dynamicRegistration === true,
       diagnosticRefresh: workspace?.diagnostics?.refreshSupport === true,
       codeActionResolve: params.capabilities.textDocument?.codeAction?.resolveSupport !== undefined,
+      transactionalWorkspaceEdit:
+        workspace?.workspaceEdit?.failureHandling === "transactional" ||
+        workspace?.workspaceEdit?.failureHandling === "textOnlyTransactional",
     },
   };
 }

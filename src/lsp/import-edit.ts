@@ -10,13 +10,14 @@
  * @module
  */
 
+import { pathToFileURL } from "node:url";
 import { DEFAULT_IMPORT_FORMATTING, type ImportFormattingOptions, planImports } from "../core/import-planner";
 import { resolveElementImportPath } from "../core/import-resolution";
 import type { CoreRange } from "../core/language-types";
 import { type CoreLogger, silentLogger } from "../core/logging";
 import type { AngularElementData } from "../types";
 import type { OpenDocuments } from "./open-documents";
-import type { ProjectRouter } from "./project-router";
+import type { ProjectRouter, RoutedDocument } from "./project-router";
 
 /** Why an import could not be planned or applied. */
 export type ImportEditFailure = "unroutable" | "unreadable" | "stale" | "rejected";
@@ -34,7 +35,18 @@ export interface PlannedImportEdit {
   edit?: VersionedWorkspaceEdit;
   /** Identifiers added to the component's `imports: [...]`. */
   addedImports: string[];
+  /** Exact component input from which this edit was planned. */
+  snapshot?: ImportEditSnapshot;
   reason?: ImportEditFailure;
+}
+
+/** Component text and project state consumed by import planning. */
+export interface ImportEditSnapshot {
+  filePath: string;
+  text: string;
+  version: number | null;
+  runtime: RoutedDocument["runtime"];
+  runtimeGeneration: number;
 }
 
 export interface ImportEditPlannerOptions {
@@ -66,28 +78,50 @@ export class ImportEditPlanner {
       return this.fail("unroutable", `No Angular project owns ${uri}`);
     }
 
+    return this.planRoutedToUri(routed, uri, elements);
+  }
+
+  /** Plans against a route already established by a compiler-backed operation. */
+  async planRouted(routed: RoutedDocument, elements: AngularElementData[]): Promise<PlannedImportEdit> {
+    return this.planRoutedToUri(routed, pathToFileURL(routed.componentFilePath).toString(), elements);
+  }
+
+  private async planRoutedToUri(
+    routed: RoutedDocument,
+    uri: string,
+    elements: AngularElementData[]
+  ): Promise<PlannedImportEdit> {
+    const filePath = routed.componentFilePath;
+
     const formatting = this.options.resolveFormatting
-      ? await this.options.resolveFormatting(routed.filePath)
+      ? await this.options.resolveFormatting(filePath)
       : DEFAULT_IMPORT_FORMATTING;
 
     let text: string;
     let version: number | null;
     try {
-      ({ text, version } = this.options.documents.currentText(routed.filePath, this.options.readFile));
+      ({ text, version } = this.options.documents.currentText(filePath, this.options.readFile));
     } catch (error) {
-      return this.fail("unreadable", `Could not read ${routed.filePath}: ${String(error)}`);
+      return this.fail("unreadable", `Could not read ${filePath}: ${String(error)}`);
     }
 
     const { runtime } = routed;
     const generation = runtime.indexGeneration;
+    const snapshot: ImportEditSnapshot = {
+      filePath,
+      text,
+      version,
+      runtime,
+      runtimeGeneration: generation,
+    };
     const plan = await planImports({
-      filePath: routed.filePath,
+      filePath,
       text,
       version: version ?? 0,
       elements,
       project: runtime.indexer.project,
       resolveImportPath: (element) =>
-        resolveElementImportPath(element, routed.filePath, runtime.rootPath, (modulePath, fromFile) =>
+        resolveElementImportPath(element, filePath, runtime.rootPath, (modulePath, fromFile) =>
           runtime.resolveImportPath(modulePath, fromFile)
         ),
       formatting,
@@ -95,17 +129,18 @@ export class ImportEditPlanner {
     });
 
     if (plan.edits.length === 0) {
-      return { addedImports: plan.addedImports };
+      return { addedImports: plan.addedImports, snapshot };
     }
 
     // Resolving import paths awaited the project; if the file or the index moved while
     // it did, the planned text describes a file that no longer exists.
-    if (this.hasMovedOn(routed.filePath, version, runtime.indexGeneration, generation)) {
-      return this.fail("stale", `Discarded a stale import plan for ${routed.filePath}`);
+    if (this.hasMovedOn(filePath, version, runtime.indexGeneration, generation)) {
+      return this.fail("stale", `Discarded a stale import plan for ${filePath}`);
     }
 
     return {
       addedImports: plan.addedImports,
+      snapshot,
       edit: {
         documentChanges: [
           {

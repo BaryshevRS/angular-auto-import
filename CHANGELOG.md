@@ -9,10 +9,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Added
 - **Project-wide missing import audit**: the former debug report is now a public Command Palette feature that scans unopened inline templates and literal external `templateUrl` files across the active project, or all discovered workspace projects when no file editor is active
 - **Actionable audit results**: every finding opens its exact template range, and the report shows its scope, scanned project/template counts, and whether cancellation, read failures, or safety limits made the result incomplete
+- **Project-wide Fix All**: a complete audit can re-scan the same scope, confirm exact import/file counts, and repair app and path-mapped library owners in one transactional workspace edit
 
 ### Fixed
 - **Class-qualified selector matching**: Angular selectors containing static classes or `:not(.class)` now follow Angular's own matching rules for static classes, class bindings, references, and structural-directive templates
 - **External template ownership**: external templates are mapped from their component's actual literal `templateUrl` instead of assuming component and template basenames match; ownership is persisted and invalidated with the project index cache
+- **Bulk-edit safety**: stale, incomplete, ambiguous, or otherwise unfixable audits are rejected before any file is changed; prepared edits are opaque and one-shot
 
 ### Changed
 - **Honest detection boundary**: the audit reports only missing imports for selectors known to the project/dependency index; it does not claim to validate arbitrary unknown HTML attributes or event bindings

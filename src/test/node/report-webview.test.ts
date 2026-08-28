@@ -1,5 +1,28 @@
 import * as assert from "node:assert";
 import { renderMissingImportAuditHtml } from "../../commands/report-webview";
+import type { DiagnosticsReport } from "../../lsp/protocol";
+
+function report(overrides: Partial<DiagnosticsReport> = {}): DiagnosticsReport {
+  return {
+    scope: "project",
+    projectsScanned: 1,
+    templatesScanned: 1,
+    complete: true,
+    incompleteReasons: [],
+    totalIssues: 0,
+    timestamp: "2026-08-27T00:00:00.000Z",
+    files: [],
+    ...overrides,
+  };
+}
+
+function fixAllButtons(html: string): string[] {
+  return html.match(/<button\b[^>]*\bdata-action=["']fix-all["'][^>]*>[\s\S]*?<\/button>/gi) ?? [];
+}
+
+function enabledFixAllButtons(html: string): string[] {
+  return fixAllButtons(html).filter((button) => !/\sdisabled(?:\s|=|>)/i.test(button));
+}
 
 describe("Missing import audit webview", () => {
   it("does not claim a clean result when the scan is incomplete", () => {
@@ -81,5 +104,82 @@ describe("Missing import audit webview", () => {
     assert.match(html, /JSON\.parse\(/);
     assert.match(html, /vscode\.postMessage\(/);
     assert.match(html, /type\s*:\s*["']openLocation["']/);
+  });
+
+  it("offers one accessible project-wide Fix All for every finding in a complete report", () => {
+    const html = renderMissingImportAuditHtml(
+      report({
+        templatesScanned: 2,
+        totalIssues: 3,
+        files: [
+          {
+            filePath: "/workspace/src/host.html",
+            templateType: "external",
+            diagnostics: [
+              {
+                severity: "warning",
+                message: "Missing shop card import",
+                code: "missing-component-import:shop-card",
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 9 } },
+              },
+              {
+                severity: "warning",
+                message: "Missing shop badge import",
+                code: "missing-component-import:shop-badge",
+                range: { start: { line: 1, character: 0 }, end: { line: 1, character: 10 } },
+              },
+            ],
+          },
+          {
+            filePath: "/workspace/src/details.ts",
+            templateType: "inline",
+            diagnostics: [
+              {
+                severity: "warning",
+                message: "Missing shop price import",
+                code: "missing-component-import:shop-price",
+                range: { start: { line: 5, character: 12 }, end: { line: 5, character: 22 } },
+              },
+            ],
+          },
+        ],
+      }),
+      { nonce: "test-nonce", relativePath: (filePath) => filePath.replace("/workspace/", "") }
+    );
+
+    const buttons = enabledFixAllButtons(html);
+    assert.strictEqual(buttons.length, 1, "A complete report must have one enabled bulk action, not one per file");
+    assert.match(buttons[0], /\btype=["']button["']/i);
+    assert.match(buttons[0], /\bclass=["'][^"']*\bfix-all\b[^"']*["']/i);
+    assert.match(buttons[0], /\baria-label=["']Fix all 3 missing imports project-wide["']/i);
+    assert.strictEqual(buttons[0].replace(/<[^>]+>/g, "").trim(), "Fix All (3)");
+    assert.match(html, /vscode\.postMessage\(\s*{\s*type\s*:\s*["']fixAll["']\s*}\s*\)/);
+  });
+
+  it("never enables project-wide Fix All for incomplete or empty reports", () => {
+    const incomplete = renderMissingImportAuditHtml(
+      report({ complete: false, incompleteReasons: ["cancelled"], totalIssues: 3 }),
+      { nonce: "test-nonce", relativePath: (filePath) => filePath }
+    );
+    const empty = renderMissingImportAuditHtml(report(), {
+      nonce: "test-nonce",
+      relativePath: (filePath) => filePath,
+    });
+
+    assert.deepStrictEqual(enabledFixAllButtons(incomplete), []);
+    assert.deepStrictEqual(enabledFixAllButtons(empty), []);
+  });
+
+  it("keeps file headings compact and visually prominent", () => {
+    const html = renderMissingImportAuditHtml(report(), {
+      nonce: "test-nonce",
+      relativePath: (filePath) => filePath,
+    });
+    const rule = html.match(/\.file-path\s*{([^}]*)}/i);
+
+    assert.ok(rule, "Expected an explicit .file-path style rule");
+    assert.match(rule[1], /(?:^|;)\s*font-size\s*:\s*1em\s*(?:;|$)/i);
+    assert.match(rule[1], /(?:^|;)\s*line-height\s*:\s*1\.3\s*(?:;|$)/i);
+    assert.match(rule[1], /(?:^|;)\s*font-weight\s*:\s*600\s*(?:;|$)/i);
   });
 });

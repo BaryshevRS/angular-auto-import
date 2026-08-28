@@ -29,6 +29,7 @@ const fullClient: Partial<InitializeParams> = {
       workspaceFolders: true,
       didChangeWatchedFiles: { dynamicRegistration: true },
       diagnostics: { refreshSupport: true },
+      workspaceEdit: { failureHandling: "textOnlyTransactional" },
     },
     textDocument: { codeAction: { resolveSupport: { properties: ["edit"] } } },
   },
@@ -128,6 +129,7 @@ describe("LSP server environment", () => {
       didChangeWatchedFiles: true,
       diagnosticRefresh: true,
       codeActionResolve: true,
+      transactionalWorkspaceEdit: true,
     });
 
     assert.deepStrictEqual(resolveServerEnvironment(initializeParams()).client, {
@@ -136,6 +138,7 @@ describe("LSP server environment", () => {
       didChangeWatchedFiles: false,
       diagnosticRefresh: false,
       codeActionResolve: false,
+      transactionalWorkspaceEdit: false,
     });
   });
 

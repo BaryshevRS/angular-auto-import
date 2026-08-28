@@ -13,13 +13,21 @@ import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
-import { formatAuditCompletionMessage } from "../commands/audit-message";
-import { decodeAuditLocationMessage } from "../commands/report-navigation";
+import {
+  formatAuditCompletionMessage,
+  formatFixAllConfirmationMessage,
+  formatFixAllResultMessage,
+} from "../commands/audit-message";
+import { decodeAuditFixAllMessage, decodeAuditLocationMessage } from "../commands/report-navigation";
 import { renderDiagnosticsReportHtml } from "../commands/webviews";
 import { logger } from "../logger";
 import {
+  type AppliedWorkspaceFixAll,
+  ApplyWorkspaceFixAllRequest,
   DiagnosticsReportRequest,
   FIX_ALL_KIND,
+  type PreparedWorkspaceFixAll,
+  PrepareWorkspaceFixAllRequest,
   type ProjectOperationResult,
   type ProjectScope,
   ReindexRequest,
@@ -52,10 +60,24 @@ export function registerClientCommands(context: vscode.ExtensionContext, client:
     vscode.commands.registerCommand("angular-auto-import.reindex", () => reindex(client)),
     vscode.commands.registerCommand("angular-auto-import.showLogs", () => logger.showChannel()),
     vscode.commands.registerCommand("angular-auto-import.fix-all", () => fixAll()),
+    // Hidden from the palette, but still confirmation-gated: the audit webview delegates
+    // here and any external executeCommand caller gets the same modal.
+    vscode.commands.registerCommand("angular-auto-import.fixAllProject", (scope?: ProjectScope) =>
+      projectWideFixAll(client, scope ?? activeDocumentScope(), true)
+    ),
     vscode.commands.registerCommand("angular-auto-import.generateDiagnosticsReport", () =>
       generateDiagnosticsReport(context, client)
     )
   );
+  if (context.extensionMode === vscode.ExtensionMode.Test) {
+    context.subscriptions.push(
+      // VS Code exposes no API for accepting a modal in Extension Host tests. Keep the
+      // already-confirmed seam out of production while exercising the exact same core.
+      vscode.commands.registerCommand("angular-auto-import.test.fixAllProjectConfirmed", () =>
+        projectWideFixAll(client, activeDocumentScope(), false)
+      )
+    );
+  }
 }
 
 /**
@@ -90,22 +112,11 @@ async function reindex(client: LanguageClient): Promise<void> {
  * here, so the notification tracks real work rather than a spinner.
  * @internal
  */
-async function generateDiagnosticsReport(context: vscode.ExtensionContext, client: LanguageClient): Promise<void> {
+async function generateDiagnosticsReport(context: vscode.ExtensionContext, client: LanguageClient) {
   logger.info("Project-wide missing import audit invoked by user");
+  const scope = activeDocumentScope();
 
-  const report = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "Angular Auto Import: Auditing project-wide missing imports",
-      cancellable: true,
-    },
-    (_progress, token) =>
-      send(
-        () => client.sendRequest(DiagnosticsReportRequest, activeDocumentScope(), token),
-        DiagnosticsReportRequest.method,
-        token
-      )
-  );
+  const report = await requestDiagnosticsReport(client, scope);
   if (!report) {
     return;
   }
@@ -117,14 +128,89 @@ async function generateDiagnosticsReport(context: vscode.ExtensionContext, clien
     { enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [] }
   );
   context.subscriptions.push(panel);
-  panel.webview.html = renderDiagnosticsReportHtml(report, randomBytes(16).toString("base64"));
+  renderReport(panel, report);
   context.subscriptions.push(
-    panel.webview.onDidReceiveMessage((message: unknown) => {
-      void openAuditLocation(message);
+    panel.webview.onDidReceiveMessage(async (message: unknown) => {
+      if (decodeAuditFixAllMessage(message)) {
+        await vscode.commands.executeCommand("angular-auto-import.fixAllProject", scope);
+        const refreshed = await requestDiagnosticsReport(client, scope);
+        if (refreshed && panel.visible) {
+          renderReport(panel, refreshed);
+        }
+        return;
+      }
+      await openAuditLocation(message);
     })
   );
 
   vscode.window.showInformationMessage(formatAuditCompletionMessage(report));
+  return report;
+}
+
+function renderReport(panel: vscode.WebviewPanel, report: Awaited<ReturnType<typeof requestDiagnosticsReport>>): void {
+  if (report) {
+    panel.webview.html = renderDiagnosticsReportHtml(report, randomBytes(16).toString("base64"));
+  }
+}
+
+async function requestDiagnosticsReport(client: LanguageClient, scope: ProjectScope) {
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Angular Auto Import: Auditing project-wide missing imports",
+      cancellable: true,
+    },
+    (_progress, token) =>
+      send(() => client.sendRequest(DiagnosticsReportRequest, scope, token), DiagnosticsReportRequest.method, token)
+  );
+}
+
+/** Runs the server's prepare/apply transaction, optionally asking for UI confirmation. */
+async function projectWideFixAll(
+  client: LanguageClient,
+  scope: ProjectScope,
+  confirm: boolean
+): Promise<PreparedWorkspaceFixAll | AppliedWorkspaceFixAll | undefined> {
+  const prepared = await withProgress("Angular Auto Import: Preparing project-wide Fix All", (token) =>
+    send(
+      () => client.sendRequest(PrepareWorkspaceFixAllRequest, scope, token),
+      PrepareWorkspaceFixAllRequest.method,
+      token
+    )
+  );
+  if (!prepared) {
+    return undefined;
+  }
+  if (!prepared.ready) {
+    vscode.window.showWarningMessage(formatFixAllResultMessage(prepared));
+    return prepared;
+  }
+
+  if (confirm) {
+    const accepted = await vscode.window.showWarningMessage(
+      formatFixAllConfirmationMessage(prepared),
+      { modal: true },
+      "Fix All"
+    );
+    if (accepted !== "Fix All") {
+      return undefined;
+    }
+  }
+
+  const applied = await send(
+    () => client.sendRequest(ApplyWorkspaceFixAllRequest, { transactionId: prepared.transactionId }),
+    ApplyWorkspaceFixAllRequest.method
+  );
+  if (!applied) {
+    return undefined;
+  }
+  const message = formatFixAllResultMessage(applied);
+  if (applied.applied) {
+    vscode.window.showInformationMessage(message);
+  } else {
+    vscode.window.showWarningMessage(message);
+  }
+  return applied;
 }
 
 /** Opens a location emitted by the audit webview and selects the exact diagnostic range. */

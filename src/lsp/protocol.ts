@@ -165,3 +165,42 @@ export interface DiagnosticsReport {
 export const DiagnosticsReportRequest = new RequestType<ProjectScope, DiagnosticsReport, void>(
   "angularAutoImport/diagnosticsReport"
 );
+
+/** Counts shared by preparation and application of a workspace Fix All. */
+export interface FixAllSummary {
+  /** Missing-import diagnostics found by the fresh audit. */
+  totalIssues: number;
+  /** Owning component files with a planned edit. */
+  filesChanged: number;
+  /** Identifiers added across those component files. */
+  importsAdded: number;
+}
+
+/** Preparation succeeds only when every audited owner can be edited atomically. */
+export type PreparedWorkspaceFixAll =
+  | (FixAllSummary & {
+      ready: true;
+      /** The prepared edit stays server-side; only this opaque identifier crosses JSON-RPC. */
+      transactionId: string;
+    })
+  | {
+      ready: false;
+      reason: "unfixable";
+    };
+
+/** Outcome of submitting a prepared workspace edit to the client. */
+export interface AppliedWorkspaceFixAll extends FixAllSummary {
+  applied: boolean;
+  /** Why no edit was submitted or accepted. */
+  reason?: "stale" | "consumed" | "rejected";
+}
+
+/** Prepares, but does not apply, a fresh workspace-wide missing-import repair. */
+export const PrepareWorkspaceFixAllRequest = new RequestType<ProjectScope, PreparedWorkspaceFixAll, void>(
+  "angularAutoImport/prepareFixAll"
+);
+
+/** Applies exactly one previously prepared transaction. */
+export const ApplyWorkspaceFixAllRequest = new RequestType<{ transactionId: string }, AppliedWorkspaceFixAll, void>(
+  "angularAutoImport/applyFixAll"
+);

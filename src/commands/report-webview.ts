@@ -20,6 +20,10 @@ export function renderMissingImportAuditHtml(
   const status = report.complete
     ? '<div class="status complete">Complete scan</div>'
     : `<div class="status incomplete">Incomplete scan: ${escapeHtml(report.incompleteReasons.join(", "))}</div>`;
+  const fixAll =
+    report.complete && report.totalIssues > 0
+      ? `<div class="actions"><button type="button" class="fix-all" data-action="fix-all" aria-label="Fix all ${report.totalIssues} missing imports project-wide">Fix All (${report.totalIssues})</button></div>`
+      : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -61,6 +65,18 @@ export function renderMissingImportAuditHtml(
       background: var(--vscode-inputValidation-warningBackground);
       border-color: var(--vscode-inputValidation-warningBorder);
     }
+    .actions { display: flex; justify-content: flex-end; margin: 0 0 16px; }
+    .fix-all {
+      background: var(--vscode-button-background);
+      border: 1px solid transparent;
+      color: var(--vscode-button-foreground);
+      cursor: pointer;
+      font: inherit;
+      padding: 6px 14px;
+    }
+    .fix-all:hover { background: var(--vscode-button-hoverBackground); }
+    .fix-all:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+    .fix-all:disabled { cursor: wait; opacity: 0.65; }
     .file-report {
       border: 1px solid var(--vscode-panel-border);
       border-radius: 4px;
@@ -74,7 +90,7 @@ export function renderMissingImportAuditHtml(
       gap: 10px;
       padding: 10px 12px;
     }
-    .file-path { flex: 1; font-family: var(--vscode-editor-font-family); margin: 0; word-break: break-all; }
+    .file-path { flex: 1; font-family: var(--vscode-editor-font-family); font-size: 1em; line-height: 1.3; font-weight: 600; margin: 0; word-break: break-all; }
     .badge {
       background: var(--vscode-badge-background);
       border-radius: 10px;
@@ -116,12 +132,21 @@ export function renderMissingImportAuditHtml(
     ${summaryItem("Generated", new Date(report.timestamp).toLocaleString())}
   </div>
   ${status}
+  ${fixAll}
   ${files}
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     document.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      const fixAll = target.closest("button[data-action='fix-all']");
+      if (fixAll instanceof HTMLButtonElement) {
+        if (fixAll.disabled) return;
+        fixAll.disabled = true;
+        fixAll.setAttribute("aria-busy", "true");
+        vscode.postMessage({ type: "fixAll" });
+        return;
+      }
       const button = target.closest("button[data-location]");
       if (!(button instanceof HTMLButtonElement)) return;
       const encoded = button.dataset.location;

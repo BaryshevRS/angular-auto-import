@@ -20,7 +20,7 @@ Angular Auto-Import transforms how you work with Angular templates by eliminatin
 ### Key Highlights
 
 - **Project-Wide Missing Import Audit** - Find missing imports in inline and external templates even when those files were never opened in VS Code
-- **Fix All Missing Imports** - Import all missing Angular elements in your file with one command
+- **Project-Wide Fix All** - Confirm one atomic edit that repairs every fixable finding in the audited project or workspace
 - **Go to Definition** - Navigate to any unimported element's source with a single click (Material Design, Angular CDK, any npm package)
 - **Intelligent Quick Fixes** - Get instant import suggestions with enhanced accuracy and performance
 - **Works with External Libraries** - Auto-import from any Angular library in your node_modules
@@ -32,9 +32,9 @@ Angular Auto-Import transforms how you work with Angular templates by eliminatin
 
 Run `Angular Auto Import: Audit Project-Wide Missing Imports` from the Command Palette to inspect every template owned by the active Angular project. If no file editor is active, the audit covers every discovered project in the workspace.
 
-Unlike editor diagnostics that are requested only for open documents, the audit reads unopened inline templates and literal external `templateUrl` files too. It checks them against the component, directive, and pipe selectors indexed from your project, path-mapped libraries, and dependencies. Every finding is clickable and opens the exact template range; the report also states how many projects and templates were scanned and whether the scan completed.
+Unlike editor diagnostics that are requested only for open documents, the audit reads unopened inline templates and literal external `templateUrl` files too. It checks them against the component, directive, and pipe selectors indexed from your project, path-mapped libraries, and dependencies. Every finding is clickable and opens the exact template range; the report also states how many projects and templates were scanned and whether the scan completed. A complete non-empty report includes **Fix All**, which re-audits the same scope, shows the exact import/file counts for confirmation, and submits one transactional workspace edit.
 
-The audit is deliberately a missing-import detector, not a generic HTML validator. An element or attribute is reported only when it matches a known indexed Angular selector whose owner is not imported. Arbitrary unknown attributes and event bindings are outside its scope. Computed `templateUrl` expressions cannot be discovered; use a string literal. Multiple components sharing one external template, and multiple `@Component` declarations in one TypeScript file, are not audited independently yet. Fixes remain the normal per-file Quick Fix and **Fix all missing imports in current file** actions.
+The audit is deliberately a missing-import detector, not a generic HTML validator. An element or attribute is reported only when it matches a known indexed Angular selector whose owner is not imported. Arbitrary unknown attributes and event bindings are outside its scope. Computed `templateUrl` expressions cannot be discovered; use a string literal. Ambiguous or unfixable owners, incomplete scans, changed files, and editors without transactional workspace edits are rejected without applying a partial fix. Per-file Quick Fix and **Fix all missing imports in current file** remain available.
 
 ### 🚀 Fix All Missing Imports
 

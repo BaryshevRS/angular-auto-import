@@ -1,5 +1,5 @@
 import * as assert from "node:assert";
-import { decodeAuditLocationMessage } from "../../commands/report-navigation";
+import { decodeAuditFixAllMessage, decodeAuditLocationMessage } from "../../commands/report-navigation";
 
 describe("Missing import audit navigation", () => {
   it("decodes only well-formed absolute openLocation messages", () => {
@@ -28,6 +28,24 @@ describe("Missing import audit navigation", () => {
     ];
     for (const candidate of malformed) {
       assert.strictEqual(decodeAuditLocationMessage(candidate), undefined);
+    }
+  });
+
+  it("decodes only the exact project-wide Fix All message", () => {
+    assert.deepStrictEqual(decodeAuditFixAllMessage({ type: "fixAll" }), { type: "fixAll" });
+
+    const malformed: unknown[] = [
+      undefined,
+      null,
+      "fixAll",
+      ["fixAll"],
+      {},
+      { type: "fix-all" },
+      { type: "fixAll", transactionId: "from-the-webview" },
+      { type: "fixAll", filePath: "/workspace/src/host.html" },
+    ];
+    for (const candidate of malformed) {
+      assert.strictEqual(decodeAuditFixAllMessage(candidate), undefined);
     }
   });
 });

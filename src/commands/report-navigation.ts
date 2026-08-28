@@ -6,6 +6,18 @@ export interface AuditLocation {
   range: CoreRange;
 }
 
+export interface AuditFixAllMessage {
+  type: "fixAll";
+}
+
+/** Accepts only the capability-free message emitted by the trusted webview renderer. */
+export function decodeAuditFixAllMessage(value: unknown): AuditFixAllMessage | undefined {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || value.type !== "fixAll") {
+    return undefined;
+  }
+  return { type: "fixAll" };
+}
+
 export function decodeAuditLocationMessage(value: unknown): AuditLocation | undefined {
   if (!isRecord(value) || value.type !== "openLocation") {
     return undefined;

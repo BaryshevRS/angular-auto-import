@@ -133,7 +133,8 @@ export class CodeActionHandler {
       // behaviour its author was after — Angular applies whichever is imported.
       const elements = await this.resolveElements(group, routed);
       for (const [rank, element] of elements.entries()) {
-        const offered = actions.get(element.name);
+        const identity = angularElementIdentity(element);
+        const offered = actions.get(identity);
         if (offered) {
           // Already offered as an alternative for another token, which this one prefers:
           // without this the token whose best fix that is would have no preferred action,
@@ -143,7 +144,7 @@ export class CodeActionHandler {
         }
 
         actions.set(
-          element.name,
+          identity,
           await this.buildAction({
             title: `⟐ Import ${element.name} from '${await this.specifierOf(element, routed)}'`,
             kind: CodeActionKind.QuickFix,
@@ -179,6 +180,33 @@ export class CodeActionHandler {
     documentUri: string,
     cancellation: CancellationSignal
   ): Promise<CodeAction | undefined> {
+    const selected = await this.selectFixAllElements(candidates, routed, cancellation);
+    if (!selected || selected.length === 0) {
+      return undefined;
+    }
+
+    return this.buildAction({
+      title: `⟐ Import ${selected.length} missing Angular element${selected.length === 1 ? "" : "s"}`,
+      kind: FIX_ALL_KIND,
+      elements: selected,
+      routed,
+      documentUri,
+      diagnostics: candidates.map(toLspDiagnostic),
+    });
+  }
+
+  /**
+   * Selects the elements a Fix All must import from compiler-backed diagnostics.
+   *
+   * Shared with workspace Fix All so both scopes make exactly the same decision about
+   * alternatives (same demands) and independent directives (different demands).
+   * A cancelled selection returns `undefined`; applying a partial Fix All is forbidden.
+   */
+  async selectFixAllElements(
+    candidates: MissingImportDiagnostic[],
+    routed: RoutedDocument,
+    cancellation: CancellationSignal = neverCancelled
+  ): Promise<AngularElementData[] | undefined> {
     const elements = new Map<string, AngularElementData>();
     for (const group of groupByToken(candidates)) {
       if (cancellation.isCancelled) {
@@ -191,22 +219,12 @@ export class CodeActionHandler {
       // importing only the first leaves the other two missing, and the diagnostics a
       // fix-all promised to clear come straight back.
       for (const element of await this.resolveIndependentElements(group, routed)) {
-        elements.set(element.name, element);
+        elements.set(angularElementIdentity(element), element);
       }
     }
 
-    if (elements.size === 0) {
-      return undefined;
-    }
-
-    return this.buildAction({
-      title: `⟐ Import ${elements.size} missing Angular element${elements.size === 1 ? "" : "s"}`,
-      kind: FIX_ALL_KIND,
-      elements: Array.from(elements.values()),
-      routed,
-      documentUri,
-      diagnostics: candidates.map(toLspDiagnostic),
-    });
+    const selected = Array.from(elements.values());
+    return hasConflictingLocalNames(selected) ? undefined : selected;
   }
 
   /**
@@ -360,6 +378,15 @@ export class CodeActionHandler {
       return [];
     }
   }
+}
+
+function angularElementIdentity(element: AngularElementData): string {
+  return [element.name, element.path, element.absolutePath ?? "", element.exportingModuleName ?? ""].join("\0");
+}
+
+/** The import planner does not invent aliases, so two exports with one local name cannot be fixed together safely. */
+function hasConflictingLocalNames(elements: readonly AngularElementData[]): boolean {
+  return new Set(elements.map((element) => element.name)).size !== elements.length;
 }
 
 /**

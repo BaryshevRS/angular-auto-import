@@ -43,9 +43,11 @@ import { ProjectRouter } from "./project-router";
 import { ProjectRuntimeHost } from "./project-runtime-host";
 import { describeProjectsStatus } from "./projects-status";
 import {
+  ApplyWorkspaceFixAllRequest,
   CRASH_NOTIFICATION,
   DiagnosticsReportRequest,
   PerformanceMetricsRequest,
+  PrepareWorkspaceFixAllRequest,
   ProjectsStatusNotification,
   ReindexRequest,
 } from "./protocol";
@@ -60,6 +62,7 @@ import {
 import { ServerLogging } from "./server-logging";
 import { ServerProjects } from "./server-projects";
 import { WatchedFiles } from "./watched-files";
+import { WorkspaceFixAll } from "./workspace-fix-all";
 
 const SERVER_NAME = "Angular Auto Import LSP Spike";
 const CONFIGURATION_SECTION = "angular-auto-import";
@@ -127,6 +130,7 @@ interface ServerHandlers {
   importCommand: ImportCommandHandler;
   operations: ServerOperations;
   reporter: DiagnosticsReporter;
+  workspaceFixAll: WorkspaceFixAll;
 }
 
 /**
@@ -182,6 +186,29 @@ function createContext(connection: Connection): ServerContext {
     resolveFormatting: (filePath) => resolveImportFormatting(filePath, logger),
     logger,
   });
+  const reporter = new DiagnosticsReporter({
+    diagnostics,
+    analysisReady: () => state.compiler !== undefined,
+    readDocument: async (filePath) => openDocuments.currentText(filePath, (path) => readFileSync(path, "utf-8")),
+    logger,
+  });
+  const codeActions = new CodeActionHandler({
+    router,
+    diagnostics,
+    planner,
+    resolvesActions: () => state.environment?.client.codeActionResolve === true,
+    logger,
+  });
+  const workspaceFixAll = new WorkspaceFixAll({
+    reporter,
+    runtimes: () => state.runtimes?.all() ?? [],
+    codeActions,
+    planner,
+    currentDocument: (filePath) => openDocuments.currentText(filePath, (path) => readFileSync(path, "utf-8")),
+    canApplyAtomically: () => state.environment?.client.transactionalWorkspaceEdit === true,
+    applyEdit: async (edit) => (await connection.workspace.applyEdit(edit)).applied,
+    logger,
+  });
 
   const context: ServerContext = {
     connection,
@@ -193,11 +220,7 @@ function createContext(connection: Connection): ServerContext {
       diagnostics,
       completions: new CompletionHandler({ router, documents: openDocuments, config, planner, logger }),
       definitions: new DefinitionHandler({ router, diagnostics, logger }),
-      reporter: new DiagnosticsReporter({
-        diagnostics,
-        analysisReady: () => state.compiler !== undefined,
-        logger,
-      }),
+      reporter,
       operations: new ServerOperations({
         router,
         runtimes: () => state.runtimes?.all() ?? [],
@@ -211,13 +234,8 @@ function createContext(connection: Connection): ServerContext {
         resolveFormatting: (filePath) => resolveImportFormatting(filePath, logger),
         logger,
       }),
-      codeActions: new CodeActionHandler({
-        router,
-        diagnostics,
-        planner,
-        resolvesActions: () => state.environment?.client.codeActionResolve === true,
-        logger,
-      }),
+      codeActions,
+      workspaceFixAll,
     },
     requestDiagnosticRefresh: () => requestDiagnosticRefresh(context),
     requestProjectsStatusReport: () => requestProjectsStatusReport(context),
@@ -286,6 +304,7 @@ function registerLifecycle(context: ServerContext): void {
     state.runtimes = undefined;
     state.watchedFiles?.dispose();
     state.watchedFiles = undefined;
+    context.handlers.workspaceFixAll.dispose();
   });
 }
 
@@ -603,6 +622,15 @@ function registerOperations(context: ServerContext): void {
   });
 
   connection.onRequest(PerformanceMetricsRequest, () => handlers.operations.metrics());
+
+  connection.onRequest(PrepareWorkspaceFixAllRequest, (scope, token) => {
+    const auditScope = handlers.operations.resolveAuditScope(scope);
+    return handlers.workspaceFixAll.prepare(auditScope.runtimes, auditScope.kind, toCancellationSignal(token));
+  });
+
+  connection.onRequest(ApplyWorkspaceFixAllRequest, ({ transactionId }) =>
+    handlers.workspaceFixAll.apply(transactionId)
+  );
 
   connection.onRequest(DiagnosticsReportRequest, (scope, token) => {
     const progress = scope.workDoneToken ? connection.window.attachWorkDoneProgress(scope.workDoneToken) : undefined;

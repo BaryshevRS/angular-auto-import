@@ -198,6 +198,27 @@ describe("LSP code actions", function () {
     );
   });
 
+  it("withholds Fix All when two exports need the same local import name", async () => {
+    await fs.writeFile(path.join(root, "src", "one.component.ts"), component("SharedComponent", "one-shared"), "utf8");
+    await fs.writeFile(path.join(root, "src", "two.component.ts"), component("SharedComponent", "two-shared"), "utf8");
+    await runtime.reindex();
+    const { actions } = handlerFor();
+    const document = documentAt(templatePath, "<one-shared></one-shared><two-shared></two-shared>", "html");
+
+    const offered = await actions.provide(document, WHOLE_DOCUMENT);
+
+    assert.strictEqual(
+      offered.filter((action) => action.kind === CodeActionKind.QuickFix).length,
+      2,
+      "Each element remains individually fixable"
+    );
+    assert.strictEqual(
+      offered.some((action) => action.kind === FIX_ALL_KIND),
+      false,
+      "The planner cannot alias colliding local names, so a combined edit would be invalid"
+    );
+  });
+
   it("offers the directives whose selectors say more than the token does", async () => {
     // The token is `shopSlot` and its diagnostic records the selector one of them
     // matched under; the others demand a tag, a value, a second attribute. All of them

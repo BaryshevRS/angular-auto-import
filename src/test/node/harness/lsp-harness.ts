@@ -44,6 +44,7 @@ export const FULL_CLIENT_CAPABILITIES: ClientCapabilities = {
     configuration: true,
     workspaceFolders: true,
     applyEdit: true,
+    workspaceEdit: { failureHandling: "textOnlyTransactional" },
     didChangeWatchedFiles: { dynamicRegistration: true },
     diagnostics: { refreshSupport: true },
   },

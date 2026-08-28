@@ -39,14 +39,65 @@ type AuditCandidate = RoutedDocument;
 interface AnalyzedFile {
   report: FileDiagnosticsReport;
   diagnosticLimitReached: boolean;
+  /** Compiler-backed findings retained for callers that need to act on the audit. */
+  candidates: MissingImportDiagnostic[];
+  routed: RoutedDocument;
+  snapshots: AuditedDocumentSnapshot[];
 }
 
 type FileAnalysisResult = AnalyzedFile | "read-error" | undefined;
+
+/** The report DTO together with the semantic findings that produced it. */
+export interface DiagnosticsAudit {
+  report: DiagnosticsReport;
+  files: AnalyzedFile[];
+  /** Every template input the audit successfully analyzed, including clean templates. */
+  snapshots: AuditedDocumentSnapshot[];
+}
+
+/** Exact input used to analyze one template. */
+export interface AuditedDocumentSnapshot {
+  routed: RoutedDocument;
+  text: string;
+  version: number | null;
+  runtimeGeneration: number;
+}
 
 function markIncomplete(report: DiagnosticsReport, reason: AuditIncompleteReason): void {
   report.complete = false;
   if (!report.incompleteReasons.includes(reason)) {
     report.incompleteReasons.push(reason);
+  }
+}
+
+function emptyAudit(scope: "project" | "workspace", projectsScanned: number): DiagnosticsAudit {
+  return {
+    report: {
+      totalIssues: 0,
+      files: [],
+      timestamp: new Date().toISOString(),
+      scope,
+      projectsScanned,
+      templatesScanned: 0,
+      complete: true,
+      incompleteReasons: [],
+    },
+    files: [],
+    snapshots: [],
+  };
+}
+
+function stopForCancellation(report: DiagnosticsReport, cancellation: CancellationSignal): boolean {
+  if (!cancellation.isCancelled) {
+    return false;
+  }
+  markIncomplete(report, "cancelled");
+  return true;
+}
+
+async function yieldAfterBatch(index: number): Promise<void> {
+  if ((index + 1) % BATCH_SIZE === 0) {
+    await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
@@ -65,16 +116,20 @@ export interface DiagnosticsReporterOptions {
   analysisReady?(): boolean;
   /** Reads a file's text; injected so the reporter can be tested without disk. */
   readFile?(filePath: string): Promise<string>;
+  /** Reads the editor-visible text and version when the document is open. */
+  readDocument?(filePath: string): Promise<{ text: string; version: number | null }>;
   logger?: CoreLogger;
 }
 
 /** Scans whole projects for missing imports. */
 export class DiagnosticsReporter {
-  private readonly readFile: (filePath: string) => Promise<string>;
+  private readonly readDocument: (filePath: string) => Promise<{ text: string; version: number | null }>;
   private readonly logger: CoreLogger;
 
   constructor(private readonly options: DiagnosticsReporterOptions) {
-    this.readFile = options.readFile ?? ((filePath) => fs.readFile(filePath, "utf-8"));
+    const readFile = options.readFile ?? ((filePath: string) => fs.readFile(filePath, "utf-8"));
+    this.readDocument =
+      options.readDocument ?? (async (filePath) => ({ text: await readFile(filePath), version: null }));
     this.logger = options.logger ?? silentLogger;
   }
 
@@ -90,55 +145,69 @@ export class DiagnosticsReporter {
     cancellation: CancellationSignal = neverCancelled,
     scope: "project" | "workspace" = runtimes.length === 1 ? "project" : "workspace"
   ): Promise<DiagnosticsReport> {
-    const report: DiagnosticsReport = {
-      totalIssues: 0,
-      files: [],
-      timestamp: new Date().toISOString(),
-      scope,
-      projectsScanned: runtimes.length,
-      templatesScanned: 0,
-      complete: true,
-      incompleteReasons: [],
-    };
+    return (await this.audit(runtimes, progress, cancellation, scope)).report;
+  }
+
+  /**
+   * Runs the same audit while retaining its compiler-backed findings for server-side
+   * operations such as workspace Fix All. The semantic data never crosses JSON-RPC.
+   */
+  async audit(
+    runtimes: readonly ProjectRuntime[],
+    progress?: ReportProgress,
+    cancellation: CancellationSignal = neverCancelled,
+    scope: "project" | "workspace" = runtimes.length === 1 ? "project" : "workspace"
+  ): Promise<DiagnosticsAudit> {
+    const audit = emptyAudit(scope, runtimes.length);
 
     if (cancellation.isCancelled) {
-      report.projectsScanned = 0;
-      markIncomplete(report, "cancelled");
-      return report;
+      audit.report.projectsScanned = 0;
+      markIncomplete(audit.report, "cancelled");
+      return audit;
     }
 
     if (this.options.analysisReady?.() === false) {
-      markIncomplete(report, "analysis-not-ready");
-      return report;
+      markIncomplete(audit.report, "analysis-not-ready");
+      return audit;
     }
 
     const candidates = await this.collectTemplates(runtimes);
     this.logger.info(`[Report] Scanning ${candidates.length} template(s) across ${runtimes.length} project(s)`);
+    await this.scanCandidates(candidates, audit, progress, cancellation);
+    return audit;
+  }
 
+  private async scanCandidates(
+    candidates: readonly AuditCandidate[],
+    audit: DiagnosticsAudit,
+    progress: ReportProgress | undefined,
+    cancellation: CancellationSignal
+  ): Promise<void> {
     for (const [index, candidate] of candidates.entries()) {
-      if (cancellation.isCancelled) {
-        markIncomplete(report, "cancelled");
-        break;
-      }
-
-      if (this.applyLimits(report)) {
+      if (stopForCancellation(audit.report, cancellation) || this.applyLimits(audit.report)) {
         break;
       }
 
       progress?.report(shortName(candidate.filePath), Math.round((index / Math.max(candidates.length, 1)) * 100));
-      this.recordAnalysis(report, await this.analyzeFile(candidate, cancellation));
-      if (cancellation.isCancelled) {
-        markIncomplete(report, "cancelled");
+      const analysis = await this.analyzeFile(candidate, cancellation);
+      this.recordAuditResult(audit, analysis);
+      if (stopForCancellation(audit.report, cancellation)) {
         break;
       }
 
-      // Yield between batches: the connection has to keep answering while this runs.
-      if ((index + 1) % BATCH_SIZE === 0) {
-        await new Promise((resolve) => setImmediate(resolve));
-      }
+      await yieldAfterBatch(index);
     }
+  }
 
-    return report;
+  private recordAuditResult(audit: DiagnosticsAudit, analysis: FileAnalysisResult): void {
+    this.recordAnalysis(audit.report, analysis);
+    if (!analysis || analysis === "read-error") {
+      return;
+    }
+    audit.snapshots.push(...analysis.snapshots);
+    if (analysis.report.diagnostics.length > 0) {
+      audit.files.push(analysis);
+    }
   }
 
   /** Incorporates one candidate's outcome into the report. */
@@ -193,8 +262,9 @@ export class DiagnosticsReporter {
   private async analyzeFile(candidate: AuditCandidate, cancellation: CancellationSignal): Promise<FileAnalysisResult> {
     const { filePath } = candidate;
     let text: string;
+    let version: number | null;
     try {
-      text = await this.readFile(filePath);
+      ({ text, version } = await this.readDocument(filePath));
     } catch (error) {
       this.logger.debug(`[Report] Could not read ${filePath}: ${String(error)}`);
       return "read-error";
@@ -203,6 +273,7 @@ export class DiagnosticsReporter {
     const external = filePath.endsWith(".html");
     const document = diskDocument(filePath, text, external);
     const routedAnalysis = this.options.diagnostics.analyzeRouted;
+    const runtimeGeneration = candidate.runtime.indexGeneration;
     const result = routedAnalysis
       ? routedAnalysis.call(this.options.diagnostics, document, candidate, cancellation)
       : this.options.diagnostics.analyze(document, cancellation);
@@ -210,12 +281,38 @@ export class DiagnosticsReporter {
       return undefined;
     }
 
+    let owner: { text: string; version: number | null } | undefined;
+    if (external && !cancellation.isCancelled) {
+      try {
+        owner = await this.readDocument(candidate.componentFilePath);
+      } catch (error) {
+        this.logger.debug(`[Report] Could not read ${candidate.componentFilePath}: ${String(error)}`);
+        return "read-error";
+      }
+    }
+
+    const candidates = result.candidates.slice(0, MAX_DIAGNOSTICS_PER_FILE);
     return {
       diagnosticLimitReached: result.candidates.length > MAX_DIAGNOSTICS_PER_FILE,
+      candidates,
+      routed: candidate,
+      snapshots: [
+        { routed: candidate, text, version, runtimeGeneration },
+        ...(owner
+          ? [
+              {
+                routed: { ...candidate, filePath: candidate.componentFilePath, externalTemplate: false },
+                text: owner.text,
+                version: owner.version,
+                runtimeGeneration,
+              },
+            ]
+          : []),
+      ],
       report: {
         filePath,
         templateType: external ? "external" : "inline",
-        diagnostics: result.candidates.slice(0, MAX_DIAGNOSTICS_PER_FILE).map(toReportedDiagnostic),
+        diagnostics: candidates.map(toReportedDiagnostic),
       },
     };
   }
