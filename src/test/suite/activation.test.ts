@@ -10,6 +10,7 @@
 
 import * as assert from "node:assert";
 import * as vscode from "vscode";
+import { createMcpServerDefinition } from "../../lsp/client-mcp";
 
 const FIX_ALL_COMMAND = "angular-auto-import.fix-all";
 
@@ -41,6 +42,26 @@ describe("Extension activation", function () {
 
     const missing = CONTRIBUTED_COMMANDS.filter((command) => !registered.has(command));
     assert.deepStrictEqual(missing, [], "A contributed command nobody registered fails when the user runs it");
+  });
+
+  it("starts one MCP server inside every folder of a multi-root workspace", () => {
+    const folders: vscode.WorkspaceFolder[] = [
+      { index: 0, name: "shop", uri: vscode.Uri.file("/workspace/shop") },
+      { index: 1, name: "admin", uri: vscode.Uri.file("/workspace/admin") },
+    ];
+    const definition = createMcpServerDefinition("/extension/dist/server.js", folders, "3.2.0");
+
+    assert.strictEqual(definition.command, process.execPath);
+    assert.strictEqual(definition.cwd?.fsPath, folders[0].uri.fsPath);
+    assert.strictEqual(definition.version, "3.2.0");
+    assert.deepStrictEqual(definition.args, [
+      "/extension/dist/server.js",
+      "mcp",
+      "--workspace-root",
+      folders[0].uri.fsPath,
+      "--workspace-root",
+      folders[1].uri.fsPath,
+    ]);
   });
 
   it("keeps the command IDs the palette and any keybinding already use", async () => {

@@ -50,3 +50,12 @@ jobs:
 
       - name: Node test suites
         run: pnpm run test:node
+
+      # Includes a dependency-free protocol smoke project on every platform. The richer
+      # Angular 22 corpus runs too when its separately managed node_modules is present.
+      - name: MCP protocol suite
+        run: pnpm run test:mcp
+
+      - name: MCP npm package contents
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm run mcp:package

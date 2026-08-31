@@ -12,6 +12,7 @@
 import * as path from "node:path";
 import { type AngularCompilerApi, adoptAngularCompiler } from "../core/angular-compiler";
 import { AngularProjectDiscovery, nodeManifestReader } from "../core/project-discovery";
+import { findDeepestContainingProjectRoot } from "../core/project-registry";
 import { ProjectRuntime } from "../lsp/project-runtime";
 import { countImporters, packageOf } from "./library-usage";
 
@@ -41,7 +42,11 @@ export class Workspace {
   private readonly projects = new Map<string, Promise<IndexedProject>>();
   private compiler: Promise<AngularCompilerApi> | undefined;
 
-  constructor(private readonly searchBoundary: string = process.cwd()) {}
+  private readonly searchBoundaries: string[];
+
+  constructor(searchBoundaries: Iterable<string> = [process.cwd()]) {
+    this.searchBoundaries = [...new Set(Array.from(searchBoundaries, (root) => path.resolve(root)))];
+  }
 
   /**
    * The indexed project that owns one file.
@@ -76,7 +81,8 @@ export class Workspace {
     const directory = path.dirname(filePath);
     let found = this.roots.get(directory);
     if (!found) {
-      found = this.discovery.findRoot(filePath, this.searchBoundary);
+      const boundary = findDeepestContainingProjectRoot(filePath, this.searchBoundaries);
+      found = boundary ? this.discovery.findRoot(filePath, boundary) : Promise.resolve(undefined);
       this.roots.set(directory, found);
     }
     return found;

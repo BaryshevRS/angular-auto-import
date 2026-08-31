@@ -1,9 +1,9 @@
 {
   "name": "angular-auto-import",
   "displayName": "Angular Auto Import",
-  "description": "Intelligent auto-import for Angular standalone components, directives & pipes. Fix all missing imports with one command. Works with templates, external libraries & monorepos.",
+  "description": "Intelligent auto-import and MCP tools for Angular components, directives and pipes. Works with templates, external libraries and monorepos.",
   "publisher": "baryshevrs",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "icon": "img/icon.png",
   "galleryBanner": {
     "color": "#0f172a",
@@ -44,7 +44,9 @@
     "angular 19",
     "angular 20",
     "angular 21",
-    "angular 22"
+    "angular 22",
+    "mcp",
+    "ai agent"
   ],
   "activationEvents": [
     "workspaceContains:angular.json",
@@ -53,9 +55,6 @@
     "onLanguage:typescript"
   ],
   "main": "./dist/extension.js",
-  "bin": {
-    "angular-auto-import-mcp": "./dist/mcp.js"
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/BaryshevRS/angular-auto-import.git"
@@ -258,6 +257,8 @@
     "coverage:sonar": "pnpm run coverage:generate && node scripts/sonar-scan.js",
     "vsce:package": "vsce package --no-dependencies",
     "vsce:inspect": "node scripts/inspect-vsix.mjs",
+    "mcp:package": "pnpm run package && node scripts/inspect-mcp-package.mjs",
+    "mcp:publish": "pnpm run mcp:package && npm publish ./packages/mcp",
     "benchmark": "pnpm run compile-tests && node scripts/benchmark.mjs",
     "host-cost": "pnpm run package && pnpm run compile-tests && vscode-test --label host-cost",
     "vsce:publish": "vsce publish --no-dependencies",

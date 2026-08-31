@@ -13,6 +13,11 @@
     },
     {
       "kind": "cognitive-complexity",
+      "file": "src/lsp/client-commands.ts",
+      "symbol": "generateDiagnosticsReport"
+    },
+    {
+      "kind": "cognitive-complexity",
       "file": "src/extension.ts",
       "symbol": "initializeProjects"
     },

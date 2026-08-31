@@ -8,11 +8,12 @@
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { workspaceRootsFromArguments } from "../core/mcp-workspace-roots";
 import { createMcpServer } from "./server";
 import { Workspace } from "./workspace";
 
 async function main(): Promise<void> {
-  const workspace = new Workspace();
+  const workspace = new Workspace(workspaceRootsFromArguments(process.argv.slice(2), process.cwd()));
   const server = createMcpServer(workspace);
 
   const stop = () => {

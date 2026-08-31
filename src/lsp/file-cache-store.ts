@@ -38,7 +38,7 @@ import { type CoreLogger, silentLogger } from "../core/logging";
  * owners whose component and template basenames differ without rescanning sources.
  *
  * 7: an element carries the inputs, outputs, content selectors and host directives its
- * declaration gives it. A version-5 cache is not wrong about them, it is silent — and
+ * declaration gives it. An older cache is not wrong about them, it is silent — and
  * silence is indistinguishable from an element that declares none, so it is discarded
  * rather than reused and quietly believed.
  */

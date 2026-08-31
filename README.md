@@ -23,10 +23,46 @@ Angular Auto-Import transforms how you work with Angular templates by eliminatin
 - **Project-Wide Fix All** - Confirm one atomic edit that repairs every fixable finding in the audited project or workspace
 - **Go to Definition** - Navigate to any unimported element's source with a single click (Material Design, Angular CDK, any npm package)
 - **Intelligent Quick Fixes** - Get instant import suggestions with enhanced accuracy and performance
+- **MCP for Coding Agents** - Let agents inspect the real components, bindings, libraries, and import paths in this workspace
 - **Works with External Libraries** - Auto-import from any Angular library in your node_modules
 - **Monorepo Ready** - Seamless support for Nx and multi-project workspaces 
 
 ## Features
+
+### Angular Auto-Import MCP
+
+The extension registers a project-aware MCP server with VS Code automatically. Coding
+agents can ask what Angular elements the workspace actually contains instead of guessing
+component APIs or import paths from training data. Multi-root workspaces are passed to the
+same server explicitly, and each request is routed to the project that owns its file.
+
+The server offers four tools:
+
+- `angular_project_overview` reports the Angular version, standalone/NgModule balance,
+  path aliases, and which component libraries the project actually uses.
+- `angular_find_element` finds components, directives, and pipes by purpose or name,
+  ranked by local project usage.
+- `angular_element_api` returns exact inputs, required bindings, outputs, content slots,
+  host directives, and the import specifier for an element.
+- `verify_angular_template` checks a proposed template and returns both the missing imports
+  and an updated component file.
+
+For Claude Code, Cursor, and other MCP hosts outside VS Code, use the standalone npm package:
+
+```json
+{
+  "mcpServers": {
+    "angular-auto-import": {
+      "command": "npx",
+      "args": ["-y", "angular-auto-import-mcp"]
+    }
+  }
+}
+```
+
+Start the command from the Angular workspace root. If the host uses another working
+directory, append `"--workspace-root", "/absolute/path/to/workspace"` to `args`. Repeat
+the option for a multi-root workspace.
 
 ### 🔎 Project-Wide Missing Import Audit
 

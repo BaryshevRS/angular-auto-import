@@ -35,12 +35,6 @@ const EXPECTATIONS = [
     ],
   },
   {
-    file: "extension/dist/mcp.js",
-    label: "MCP launcher",
-    required: [{ pattern: 'require("./server.js")', why: "the launcher starts the server rather than being one" }],
-    forbidden: [{ pattern: "parseTemplate", why: "a launcher that carries the compiler is a second copy of it" }],
-  },
-  {
     file: "extension/dist/extension.js",
     label: "extension bundle",
     forbidden: [
@@ -126,4 +120,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`\n${path.basename(archive)} carries the server, the client and nothing they do not need.`);
+console.log(`\n${path.basename(archive)} carries the shared server, the client and nothing they do not need.`);

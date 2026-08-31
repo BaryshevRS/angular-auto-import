@@ -63,7 +63,7 @@ async function main() {
 			sourcemap: !production,
 			sourcesContent: false,
 			platform: "node",
-			target: "node22",
+			target: "node20",
 			outfile: "dist/server.js",
 			logLevel: "silent",
 			external: ["*.node"],
@@ -71,26 +71,30 @@ async function main() {
 		}),
 	]);
 
-	// The `bin` npm installs: a launcher rather than a second copy of the server, which
-	// would be the same seven megabytes under another name.
-	fs.writeFileSync(
-		"dist/mcp.js",
-		[
-			"#!/usr/bin/env node",
-			'// Starts the server in its agent-facing shape. See src/main.ts.',
-			'process.argv.push("mcp");',
-			'require("./server.js");',
-			"",
-		].join("\n"),
-		{ mode: 0o755 }
-	);
-
 	if (watch) {
 		await Promise.all(contexts.map((context) => context.watch()));
 		console.log("[watch] watching for changes...");
 	} else {
 		await Promise.all(contexts.map((context) => context.rebuild()));
 		await Promise.all(contexts.map((context) => context.dispose()));
+
+		// The npm package is a second distribution of the same built server. Copying the
+		// bundle keeps the VSIX identity separate without compiling the seven-megabyte
+		// engine twice.
+		const mcpDist = "packages/mcp/dist";
+		fs.mkdirSync(mcpDist, { recursive: true });
+		fs.copyFileSync("dist/server.js", `${mcpDist}/server.js`);
+		fs.writeFileSync(
+			`${mcpDist}/mcp.js`,
+			[
+				"#!/usr/bin/env node",
+				'// Starts the server in its agent-facing shape. See src/main.ts.',
+				'process.argv.push("mcp");',
+				'require("./server.js");',
+				"",
+			].join("\n"),
+			{ mode: 0o755 }
+		);
 	}
 }
 

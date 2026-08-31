@@ -1,0 +1,35 @@
+{
+  "name": "angular-auto-import-mcp",
+  "version": "3.2.0",
+  "description": "Project-aware MCP tools for Angular templates, components, directives, pipes and imports.",
+  "license": "MIT",
+  "bin": {
+    "angular-auto-import-mcp": "dist/mcp.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BaryshevRS/angular-auto-import.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/BaryshevRS/angular-auto-import/issues"
+  },
+  "homepage": "https://github.com/BaryshevRS/angular-auto-import#angular-auto-import-mcp",
+  "keywords": [
+    "angular",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "components",
+    "auto-import"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

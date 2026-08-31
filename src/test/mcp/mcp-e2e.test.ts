@@ -15,6 +15,7 @@
 
 import * as assert from "node:assert";
 import { existsSync } from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -52,7 +53,12 @@ describe("The MCP server, end to end", function () {
 
     client = new Client({ name: "angular-auto-import-e2e", version: "1.0.0" });
     await client.connect(
-      new StdioClientTransport({ command: process.execPath, args: [SERVER, "mcp"], stderr: "ignore" })
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [SERVER, "mcp", "--workspace-root", FIXTURE],
+        cwd: os.tmpdir(),
+        stderr: "ignore",
+      })
     );
   });
 

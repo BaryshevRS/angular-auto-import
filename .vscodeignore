@@ -37,11 +37,11 @@ sonar-project.properties
 coverage/
 .scannerwork/
 scripts/
+packages/
 FIX_COMPLETION.md
 IDEA_INPUTS.md
 .github/
 BUG_CSS_CLASS.md
 MCP.md
-# `dist/mcp.js` stays: it is the launcher npm's `bin` points at, a hundred and thirty
-# bytes, and the editor starts `dist/server.js mcp` directly rather than through it.
+dist/mcp.js
 dist/mcp.js.map

@@ -22,6 +22,8 @@ import { searchElements } from "./search";
 import { verifyTemplate } from "./verify-template";
 import { Workspace } from "./workspace";
 
+const SERVER_VERSION = (require("../../package.json") as { version: string }).version;
+
 /** What a tool answers with when the request names no Angular project. */
 function noProject(componentPath: string): { content: Array<{ type: "text"; text: string }>; isError: true } {
   return {
@@ -45,7 +47,7 @@ function answer(payload: unknown): { content: Array<{ type: "text"; text: string
  * @param workspace The projects to answer from; one per process by default.
  */
 export function createMcpServer(workspace: Workspace = new Workspace()): McpServer {
-  const server = new McpServer({ name: "angular-auto-import", version: "3.0.0" });
+  const server = new McpServer({ name: "angular-auto-import", version: SERVER_VERSION });
 
   server.registerTool(
     "verify_angular_template",
