@@ -10,6 +10,7 @@
  */
 
 import * as path from "node:path";
+import { NodeFileWatchers } from "../adapters/node/file-watching";
 import { type AngularCompilerApi, adoptAngularCompiler } from "../core/angular-compiler";
 import { AngularProjectDiscovery, nodeManifestReader } from "../core/project-discovery";
 import { findDeepestContainingProjectRoot } from "../core/project-registry";
@@ -23,8 +24,8 @@ export interface IndexedProject {
   /**
    * How many of the project's files import from each installed package.
    *
-   * Counted on the first question that needs it and kept, because it reads every source
-   * file in the workspace and the answer does not change while nobody edits one.
+   * Counted on the first question that needs it and reused until the live index changes,
+   * because it reads every source file in the workspace.
    */
   libraryUsage(): Promise<ReadonlyMap<string, number>>;
 }
@@ -38,6 +39,7 @@ export interface IndexedProject {
  */
 export class Workspace {
   private readonly discovery = new AngularProjectDiscovery({ files: nodeManifestReader });
+  private readonly fileWatchers = new NodeFileWatchers();
   private readonly roots = new Map<string, Promise<string | undefined>>();
   private readonly projects = new Map<string, Promise<IndexedProject>>();
   private compiler: Promise<AngularCompilerApi> | undefined;
@@ -64,7 +66,9 @@ export class Workspace {
       project = this.load(root);
       this.projects.set(root, project);
     }
-    return project;
+    const indexed = await project;
+    await this.fileWatchers.synchronize();
+    return indexed;
   }
 
   /** Releases every indexed project. */
@@ -74,6 +78,7 @@ export class Workspace {
     }
     this.projects.clear();
     this.roots.clear();
+    this.fileWatchers.dispose();
   }
 
   /** @internal */
@@ -90,15 +95,19 @@ export class Workspace {
 
   /** @internal */
   private async load(root: string): Promise<IndexedProject> {
-    const runtime = new ProjectRuntime(root);
+    const runtime = new ProjectRuntime(root, { fileWatchers: this.fileWatchers });
     await runtime.load();
 
     let usage: Promise<ReadonlyMap<string, number>> | undefined;
+    let usageGeneration = -1;
     return {
       runtime,
       compiler: await this.angularCompiler(),
       libraryUsage: () => {
-        usage ??= countImporters(runtime, installedPackages(runtime));
+        if (!usage || usageGeneration !== runtime.indexGeneration) {
+          usageGeneration = runtime.indexGeneration;
+          usage = countImporters(runtime, installedPackages(runtime));
+        }
         return usage;
       },
     };

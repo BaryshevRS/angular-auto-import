@@ -17,6 +17,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Richer project index**: project and library elements now retain inputs, outputs, content selectors, host directives, and inherited bindings for editor and agent features alike
 - **MCP release checks**: CI drives the built stdio server through the official MCP client on Windows and Linux and verifies the standalone npm package contents
 
+### Fixed
+- **Live MCP index**: the standalone server now follows component, directive, and pipe files created, changed, renamed, or deleted during an agent session without a restart or manual reindex
+
 ## [3.1.0] – 2026-08-27
 
 ### Added

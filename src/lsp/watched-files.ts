@@ -126,7 +126,9 @@ export class WatchedFiles implements FileWatcherFactory {
    */
   private deliver(subscription: Subscription, change: FileChange): void {
     try {
-      subscription.onChange(change);
+      void Promise.resolve(subscription.onChange(change)).catch((error) => {
+        this.logger.error(`A watched-file listener failed for ${change.filePath}`, error as Error);
+      });
     } catch (error) {
       this.logger.error(`A watched-file listener failed for ${change.filePath}`, error as Error);
     }

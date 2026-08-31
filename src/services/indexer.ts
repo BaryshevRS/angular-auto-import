@@ -499,9 +499,9 @@ export class AngularIndexer {
     // anything under the root, and an index that only followed the root would go stale
     // exactly where the user cannot see it happening.
     const watchers = [this.projectRootPath, ...this.scope.aliasRoots].map((root) =>
-      this.fileWatchers.watch({ root, recursive: true, extensions: [".ts"] }, (change) => {
-        void this.handleSourceChange(change);
-      })
+      this.fileWatchers.watch({ root, recursive: true, extensions: [".ts"] }, (change) =>
+        this.handleSourceChange(change)
+      )
     );
     this.fileWatcher = {
       dispose: () => {
