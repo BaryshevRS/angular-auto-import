@@ -79,8 +79,8 @@ importers:
         specifier: ^1.14.1
         version: 1.14.1(typescript@5.9.3)
       stopslop:
-        specifier: ^0.1.2
-        version: 0.1.2(@angular/compiler@22.0.1)
+        specifier: ^1.0.0
+        version: 1.0.0(@angular/compiler@22.0.1)
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
@@ -3005,8 +3005,8 @@ packages:
     resolution: {integrity: sha512-eLoXW/DHyl62zxY4SCaIgnRhuMr6ri4juEYARS8E6sCEqzKpOiE521Ucofdx+KnDZl5xmvGYaaKCk5FEOxJCoQ==}
     engines: {node: '>= 0.4'}
 
-  stopslop@0.1.2:
-    resolution: {integrity: sha512-9OxnL1C3gut9RyukfwtL4iX7BJJsD8upkT9v1iSwyRdoZS/40imU1HsUBAqgJ+IDkuJZRbyQdFg9kBLcyAupXw==}
+  stopslop@1.0.0:
+    resolution: {integrity: sha512-1uDbPwu8GtAIDcmwTNpXsEdfgfE+ssQG5iO/Mpr8Jail0UzgGZ7JwxqC9RoDaqaPLsI8cFMfJpMh8DF2zPzqSQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
@@ -6529,7 +6529,7 @@ snapshots:
       es-errors: 1.3.0
       internal-slot: 1.1.0
 
-  stopslop@0.1.2(@angular/compiler@22.0.1):
+  stopslop@1.0.0(@angular/compiler@22.0.1):
     dependencies:
       clone-alert: 1.1.4(@angular/compiler@22.0.1)
       knip: 6.31.0

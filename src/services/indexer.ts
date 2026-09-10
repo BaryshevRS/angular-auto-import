@@ -7,13 +7,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  type ArrayLiteralExpression,
   type ClassDeclaration,
   type Decorator,
   type LiteralTypeNode,
   type ObjectLiteralExpression,
   Project,
-  type PropertyAssignment,
   type SourceFile,
   SyntaxKind,
   type TypeChecker,
@@ -33,7 +31,6 @@ import {
   type ModuleExportOrigin,
   type ModuleImportOrigin,
   moduleEntryKey,
-  moduleFitScore,
 } from "../core/element-index";
 import type { Disposable } from "../core/events";
 import { Emitter, type EventSource } from "../core/events";
@@ -55,6 +52,15 @@ import { isStandalone, parseAngularSelector } from "../utils/angular";
 import { debounce } from "../utils/debounce";
 import { findAngularDependencies, getLibraryEntryPoints } from "../utils/package-json";
 import { isPathInside, normalizePath } from "../utils/path";
+import {
+  buildComponentToModuleMap,
+  collectClassDeclarations,
+  indexProjectModules,
+  type LibraryModuleMap,
+  processProjectModuleFile,
+  projectModulePath,
+  withValidSourceFile,
+} from "./ngmodule-index";
 
 /**
  * Glob (relative to the project root) matching dependency manifests and lock files.
@@ -119,114 +125,6 @@ function logNoCacheFound(projectRootPath: string, logger: CoreLogger): void {
 }
 
 /**
- * Helper function to safely execute code that accesses a SourceFile.
- * Returns false if the SourceFile node is forgotten.
- *
- * @param sourceFile - The SourceFile to check
- * @param callback - The callback to execute if the SourceFile is valid
- * @param context - Context string for logging
- * @param logger - The logger to report a forgotten node through
- * @returns true if the callback was executed, false if the node was forgotten
- */
-function withValidSourceFile<T>(
-  sourceFile: SourceFile,
-  callback: () => T,
-  context: string,
-  logger: CoreLogger
-): { success: boolean; result?: T } {
-  try {
-    sourceFile.getFilePath(); // This will throw if the node is forgotten
-    const result = callback();
-    return { success: true, result };
-  } catch {
-    logger.warn(`[Indexer] SourceFile node forgotten during ${context}, skipping`);
-    return { success: false };
-  }
-}
-
-/**
- * Helper function to parse ɵmod property from Angular module classes
- * @param classDecl - The class declaration to parse
- * @returns The exports tuple if found, null otherwise
- */
-function parseModDefinition(classDecl: ClassDeclaration): import("ts-morph").TupleTypeNode | null {
-  const modDef = classDecl.getStaticProperty("ɵmod");
-  if (!modDef?.isKind(SyntaxKind.PropertyDeclaration)) {
-    return null;
-  }
-
-  const typeNode = modDef.getTypeNode();
-  if (!typeNode?.isKind(SyntaxKind.TypeReference)) {
-    return null;
-  }
-
-  const typeRef = typeNode as TypeReferenceNode;
-  const typeArgs = typeRef.getTypeArguments();
-
-  if (typeArgs.length <= 3 || !typeArgs[3].isKind(SyntaxKind.TupleType)) {
-    return null;
-  }
-
-  return typeArgs[3].asKindOrThrow(SyntaxKind.TupleType);
-}
-
-/**
- * What a module's `exports` actually name, and where its file got them.
- *
- * Two things are read here, and both are about identity rather than text. An entry in
- * `exports: [...]` is a local name — after `import { SharedModule as LocalShared }` the
- * array says `LocalShared`, while every other file, and the index, call it
- * `SharedModule`; the index has to be told the declared name or it finds nothing. And a
- * name that is another module does not say *which* module of that name, so the specifier
- * its file imported it from is kept beside it. Only the specifier, never a resolved path:
- * this runs for every NgModule in the project, and resolving one makes TypeScript load
- * the file it names.
- * @param sourceFile The file declaring the module.
- * @param exportedNames The identifiers listed in the module's `exports`, as written.
- * @internal
- */
-function readModuleExports(
-  sourceFile: SourceFile,
-  exportedNames: string[]
-): { names: string[]; origins: Map<string, ModuleExportOrigin[]> | undefined } {
-  const wanted = new Set(exportedNames);
-  const imported = new Map<string, { importedName: string; specifier: string }>();
-
-  for (const declaration of sourceFile.getImportDeclarations()) {
-    const specifier = declaration.getModuleSpecifierValue();
-    for (const namedImport of declaration.getNamedImports()) {
-      const localName = (namedImport.getAliasNode() ?? namedImport.getNameNode()).getText();
-      if (wanted.has(localName)) {
-        imported.set(localName, { importedName: namedImport.getName(), specifier });
-      }
-    }
-  }
-
-  const names: string[] = [];
-  const origins = new Map<string, ModuleExportOrigin[]>();
-
-  for (const localName of exportedNames) {
-    const binding = imported.get(localName);
-    // A name the file does not import is declared in it, and is already its own.
-    names.push(binding?.importedName ?? localName);
-    if (!binding) {
-      continue;
-    }
-
-    // `exports: [LeftShared, RightShared]` after two imports of `SharedModule` is one
-    // name and two modules. Both are kept: dropping either would silently take a module
-    // out of what this one exports.
-    const forName = origins.get(binding.importedName) ?? [];
-    if (!forName.some((origin) => origin.specifier === binding.specifier)) {
-      forName.push({ specifier: binding.specifier });
-    }
-    origins.set(binding.importedName, forName);
-  }
-
-  return { names, origins: origins.size > 0 ? origins : undefined };
-}
-
-/**
  * A module's declarations as they are persisted: one per path the module is imported
  * from, each with the exports its own file lists. What those expand to is not stored,
  * because expansion depends on every other module and is redone when the cache loads.
@@ -269,21 +167,6 @@ function readStoredModuleExports(stored: StoredModuleExports): ModuleExportEntry
     external: entry.external,
   }));
 }
-
-/** One entry point of a library: the specifier it is imported by, and the file it is. */
-interface LibraryEntryPoint {
-  importPath: string;
-  filePath: string;
-}
-
-/**
- * The best module to import each element from, for the library being indexed.
- *
- * Not the index's own map: this one is built and thrown away inside a single library
- * pass, and only feeds each element's `exportingModuleName` as it is indexed.
- * @internal
- */
-type LibraryModuleMap = Map<string, ModuleExportInfo>;
 
 /** Ports one indexer reads and writes through. */
 export interface AngularIndexerOptions {
@@ -969,12 +852,17 @@ export class AngularIndexer {
     // What the file's modules said about the elements they export goes with them, or a
     // quick fix keeps offering a module that no longer exports the element — or no
     // longer exists.
-    const retractedElements = this.index.removeComponentModulesFrom(this.projectModulePath(filePath));
+    const retractedElements = this.index.removeComponentModulesFrom(projectModulePath(this.projectRootPath, filePath));
 
     // A deleted file is only retracted: its ts-morph node may still be loaded, and
     // reading it again would index the modules the file no longer has.
     const sourceFile = options.reread === false ? undefined : this.project.getSourceFile(filePath);
-    const reindexed = sourceFile ? this._processProjectModuleFile(sourceFile) : false;
+    const reindexed = sourceFile
+      ? processProjectModuleFile(
+          { project: this.project, index: this.index, logger: this.logger, projectRootPath: this.projectRootPath },
+          sourceFile
+        )
+      : false;
 
     if (!retracted && !retractedElements && !reindexed) {
       return false;
@@ -1296,7 +1184,7 @@ export class AngularIndexer {
 
     // A deleted file's NgModules and bundles go with it, whether or not it also declared
     // elements.
-    const hadBundles = this.index.removeBundlesDeclaredIn(this.projectModulePath(filePath));
+    const hadBundles = this.index.removeBundlesDeclaredIn(projectModulePath(this.projectRootPath, filePath));
     const hadModules = await this.reindexModulesDeclaredIn(filePath, { reread: false });
 
     // Remove from ts-morph project with error handling
@@ -1364,7 +1252,10 @@ export class AngularIndexer {
       );
 
       progress?.report({ message: "Indexing project modules..." });
-      await this.indexProjectModules(moduleFiles);
+      await indexProjectModules(
+        { project: this.project, index: this.index, logger: this.logger, projectRootPath: this.projectRootPath },
+        moduleFiles
+      );
 
       progress?.report({ message: "Indexing project components..." });
       const batchSize = 20; // Process in batches
@@ -2149,7 +2040,7 @@ export class AngularIndexer {
   private buildLibraryComponentToModuleMap(
     libraryFiles: Array<{ importPath: string; sourceFile: SourceFile }>,
     allLibraryClasses: Map<string, ClassDeclaration>,
-    typeChecker: import("ts-morph").TypeChecker
+    typeChecker: TypeChecker
   ): LibraryModuleMap {
     const componentToModuleMap: LibraryModuleMap = new Map();
 
@@ -2157,7 +2048,14 @@ export class AngularIndexer {
       withValidSourceFile(
         sourceFile,
         () =>
-          this._buildComponentToModuleMap(sourceFile, importPath, componentToModuleMap, allLibraryClasses, typeChecker),
+          buildComponentToModuleMap(
+            { index: this.index, logger: this.logger, rescanned: this.rescanned },
+            sourceFile,
+            importPath,
+            componentToModuleMap,
+            allLibraryClasses,
+            typeChecker
+          ),
         `module mapping for ${importPath}`,
         this.logger
       );
@@ -2178,551 +2076,6 @@ export class AngularIndexer {
         this.logger
       ).result;
     }
-  }
-
-  /**
-   * Indexes all NgModules in the project.
-   * @param moduleFilePaths An array of absolute module file paths to index.
-   * @internal
-   */
-  private async indexProjectModules(moduleFilePaths: string[]): Promise<void> {
-    if (!this.projectRootPath) {
-      return;
-    }
-    this.logger.debug(`[Indexer] Indexing ${moduleFilePaths.length} project NgModules for ${this.projectRootPath}...`);
-    this.index.componentModules.clear();
-
-    for (const file of moduleFilePaths) {
-      try {
-        const sourceFile = this.project.addSourceFileAtPath(file);
-        // Check if the sourceFile is still valid before processing
-        sourceFile.getFilePath(); // This will throw if the node is forgotten
-        this._processProjectModuleFile(sourceFile);
-      } catch (error) {
-        this.logger.warn(`[Indexer] Could not process project module file ${file}: ${(error as Error).message}`);
-      }
-    }
-
-    // Process already opened files that might be modules
-    for (const sourceFile of this.project.getSourceFiles()) {
-      const result = withValidSourceFile(
-        sourceFile,
-        () => sourceFile.getFilePath(),
-        "project module processing",
-        this.logger
-      );
-      if (result.success && result.result) {
-        const filePath = result.result;
-        if (filePath.endsWith(".module.ts") && !moduleFilePaths.includes(filePath)) {
-          this._processProjectModuleFile(sourceFile);
-        }
-      }
-    }
-    this.logger.debug(`[Indexer] Found ${this.index.componentModules.size} component-to-module mappings in project.`);
-  }
-
-  /**
-   * Processes a single project module file.
-   * @param sourceFile The source file to process.
-   * @returns Whether the file declared an NgModule whose exports were indexed.
-   * @internal
-   */
-  private _processProjectModuleFile(sourceFile: SourceFile): boolean {
-    if (!this.isSourceFileValid(sourceFile)) {
-      return false;
-    }
-
-    let indexed = false;
-    const classDeclarations = sourceFile.getClasses();
-    for (const classDecl of classDeclarations) {
-      indexed = this.processNgModuleClass(classDecl, sourceFile) || indexed;
-    }
-    return indexed;
-  }
-
-  /**
-   * Checks if a source file is valid.
-   */
-  private isSourceFileValid(sourceFile: SourceFile): boolean {
-    try {
-      sourceFile.getFilePath();
-      return true;
-    } catch {
-      this.logger.warn(`[Indexer] SourceFile node forgotten in _processProjectModuleFile, skipping`);
-      return false;
-    }
-  }
-
-  /**
-   * Processes a single NgModule class.
-   * @returns Whether the class was an NgModule whose exports were indexed.
-   */
-  private processNgModuleClass(classDecl: ClassDeclaration, sourceFile: SourceFile): boolean {
-    const ngModuleDecorator = classDecl.getDecorator("NgModule");
-    if (!ngModuleDecorator) {
-      return false;
-    }
-
-    const moduleName = classDecl.getName();
-    if (!moduleName) {
-      return false;
-    }
-
-    const objectLiteral = this.getNgModuleObjectLiteral(ngModuleDecorator);
-    if (!objectLiteral) {
-      return false;
-    }
-
-    const exportsProp = objectLiteral.getProperty("exports");
-    if (!exportsProp) {
-      return false;
-    }
-
-    return this.processModuleExports(exportsProp as PropertyAssignment, moduleName, sourceFile);
-  }
-
-  /**
-   * Gets the NgModule decorator's object literal.
-   */
-  private getNgModuleObjectLiteral(ngModuleDecorator: Decorator): ObjectLiteralExpression | null {
-    const decoratorArg = ngModuleDecorator.getArguments()[0];
-    if (!decoratorArg?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-      return null;
-    }
-    return decoratorArg as ObjectLiteralExpression;
-  }
-
-  /**
-   * Processes module exports.
-   */
-  private processModuleExports(exportsProp: PropertyAssignment, moduleName: string, sourceFile: SourceFile): boolean {
-    const listed = this._getIdentifierNamesFromArrayProp(exportsProp);
-
-    if (listed.length === 0) {
-      return false;
-    }
-
-    const { names, origins } = readModuleExports(sourceFile, listed);
-    this.storeModuleExports(moduleName, names, origins, sourceFile);
-    this.updateProjectModuleMap(names, moduleName, sourceFile);
-    return true;
-  }
-
-  /**
-   * Stores module exports in the index.
-   * @param moduleName The NgModule's class name.
-   * @param exportedNames The names its `exports` refer to, as they are declared.
-   * @param origins Where the file imported each of those names from.
-   * @param sourceFile The file declaring the module, which is what identifies this
-   * declaration among others of the same name.
-   */
-  private storeModuleExports(
-    moduleName: string,
-    exportedNames: string[],
-    origins: Map<string, ModuleExportOrigin[]> | undefined,
-    sourceFile: SourceFile
-  ): void {
-    this.index.addModuleExports(moduleName, {
-      importPath: this.projectModulePath(sourceFile),
-      absolutePath: sourceFile.getFilePath(),
-      declarationPath: sourceFile.getFilePath(),
-      exports: new Set(exportedNames),
-      origins,
-    });
-    this.logger.debug(
-      `[ProjectModules] Indexed module ${moduleName} with ${exportedNames.length} exports: ${exportedNames.join(", ")}`
-    );
-  }
-
-  /**
-   * The path a project module is indexed under: its file, relative to the project root.
-   * @internal
-   */
-  private projectModulePath(file: SourceFile | string): string {
-    const filePath = typeof file === "string" ? file : file.getFilePath();
-    return path.relative(this.projectRootPath, filePath).replace(/\\/g, "/");
-  }
-
-  /**
-   * Records this module as one way to import each element it exports.
-   *
-   * Which of several modules is the one to suggest is decided when the question is asked,
-   * not here: a module that stops exporting an element must leave the others standing.
-   */
-  private updateProjectModuleMap(exportedNames: string[], moduleName: string, sourceFile: SourceFile): void {
-    const importPath = this.projectModulePath(sourceFile);
-    const exportCount = exportedNames.length;
-
-    for (const componentName of exportedNames) {
-      this.index.addComponentModule(componentName, { moduleName, importPath, exportCount });
-    }
-  }
-
-  /**
-   * Gets the names of identifiers in an array property.
-   * @param prop The property assignment to get the identifiers from.
-   * @returns An array of identifier names.
-   * @internal
-   */
-  private _getIdentifierNamesFromArrayProp(prop: PropertyAssignment | undefined): string[] {
-    if (!prop) {
-      return [];
-    }
-    const initializer = prop.getInitializer();
-
-    // Handle direct array literals
-    if (initializer?.isKind(SyntaxKind.ArrayLiteralExpression)) {
-      const arr = initializer as ArrayLiteralExpression;
-      return arr.getElements().map((el) => el.getText());
-    }
-
-    // Handle variable references (like EXPORTED_DECLARATIONS)
-    if (initializer?.isKind(SyntaxKind.Identifier)) {
-      const varName = initializer.getText();
-      const sourceFile = prop.getSourceFile();
-
-      // Find the variable declaration
-      const variableDeclaration = sourceFile.getVariableDeclaration(varName);
-      if (variableDeclaration) {
-        const varInitializer = variableDeclaration.getInitializer();
-        if (varInitializer?.isKind(SyntaxKind.ArrayLiteralExpression)) {
-          const arr = varInitializer as ArrayLiteralExpression;
-          return arr.getElements().map((el) => el.getText());
-        }
-      }
-    }
-
-    return [];
-  }
-
-  /**
-   * Builds a map of components to the modules that export them.
-   * @param sourceFile The source file to process.
-   * @param importPath The import path of the source file.
-   * @param componentToModuleMap The map to store the component-to-module mappings.
-   * @param allLibraryClasses A map of all classes in the library.
-   * @param typeChecker The type checker to use.
-   * @internal
-   */
-  private _buildComponentToModuleMap(
-    sourceFile: SourceFile,
-    importPath: string,
-    componentToModuleMap: LibraryModuleMap,
-    allLibraryClasses: Map<string, ClassDeclaration>,
-    typeChecker: TypeChecker
-  ) {
-    try {
-      const classDeclarations = this._collectClassDeclarations(sourceFile);
-      this._processNgModuleClasses(
-        classDeclarations,
-        { importPath, filePath: sourceFile.getFilePath() },
-        componentToModuleMap,
-        allLibraryClasses,
-        typeChecker
-      );
-    } catch (error) {
-      try {
-        this.logger.error(
-          `Error building module map for file ${sourceFile.getFilePath()}: ${(error as Error).message}`
-        );
-      } catch {
-        this.logger.error(`Error building module map for forgotten SourceFile node: ${(error as Error).message}`);
-      }
-    }
-  }
-
-  /**
-   * Processes all NgModule classes and maps their exports.
-   * @param classDeclarations Map of class declarations to process.
-   * @param entryPoint The entry point these classes were read from.
-   * @param componentToModuleMap The map to store the component-to-module mappings.
-   * @param allLibraryClasses A map of all classes in the library.
-   * @param typeChecker The type checker to use.
-   * @internal
-   */
-  private _processNgModuleClasses(
-    classDeclarations: Map<string, ClassDeclaration>,
-    entryPoint: LibraryEntryPoint,
-    componentToModuleMap: LibraryModuleMap,
-    allLibraryClasses: Map<string, ClassDeclaration>,
-    typeChecker: TypeChecker
-  ) {
-    // Find all NgModules among the correctly found classes and map their exports
-    for (const classDecl of classDeclarations.values()) {
-      const className = classDecl.getName();
-      // Skip unnamed or internal Angular modules
-      if (!className || className.startsWith("ɵ")) {
-        continue;
-      }
-
-      this._processNgModuleClass(
-        classDecl,
-        className,
-        entryPoint,
-        componentToModuleMap,
-        allLibraryClasses,
-        typeChecker
-      );
-    }
-  }
-
-  /**
-   * Processes a single NgModule class and maps its exports.
-   * @param classDecl The class declaration to process.
-   * @param className The name of the class.
-   * @param entryPoint The entry point the class was read from.
-   * @param componentToModuleMap The map to store the component-to-module mappings.
-   * @param allLibraryClasses A map of all classes in the library.
-   * @param typeChecker The type checker to use.
-   * @internal
-   */
-  private _processNgModuleClass(
-    classDecl: ClassDeclaration,
-    className: string,
-    entryPoint: LibraryEntryPoint,
-    componentToModuleMap: LibraryModuleMap,
-    allLibraryClasses: Map<string, ClassDeclaration>,
-    typeChecker: TypeChecker
-  ) {
-    const exportsTuple = parseModDefinition(classDecl);
-    if (!exportsTuple) {
-      return;
-    }
-    const moduleExports = new Set<string>();
-
-    this._processModuleExports(
-      exportsTuple,
-      className,
-      entryPoint.importPath,
-      componentToModuleMap,
-      allLibraryClasses,
-      typeChecker,
-      moduleExports
-    );
-
-    // Store the accumulated exports in the external modules index. The entry is keyed by
-    // the entry point it is imported from, which is what tells two libraries' modules of
-    // the same name apart. No `absolutePath` is recorded: a library module is named in a
-    // component by that same specifier, so the path fallback never applies to it.
-    if (moduleExports.size > 0) {
-      this.index.addModuleExports(className, {
-        importPath: entryPoint.importPath,
-        // The entry point's own file, so an import written through a tsconfig alias — a
-        // string that matches no key — still resolves to this declaration.
-        absolutePath: entryPoint.filePath,
-        // And the file the class lives in, which is what makes the same module reached
-        // through `@lib`, `@lib/components` and `@lib/components/svg` one module.
-        declarationPath: classDecl.getSourceFile().getFilePath(),
-        exports: moduleExports,
-        external: true,
-      });
-      this.rescanned?.modules.add(moduleEntryKey(className, entryPoint.importPath));
-      this.logger.debug(
-        `[ExternalModules] Indexed module ${className} with ${moduleExports.size} exports: ${Array.from(moduleExports).join(", ")}`
-      );
-    }
-  }
-
-  /**
-   * Processes the exports of a module.
-   * @param exportsTuple The tuple of exported elements.
-   * @param moduleName The name of the module.
-   * @param importPath The import path of the module.
-   * @param componentToModuleMap The map to store the component-to-module mappings.
-   * @param allLibraryClasses A map of all classes in the library.
-   * @param typeChecker The type checker to use.
-   * @param moduleExports Optional Set to accumulate all exports for the module.
-   * @internal
-   */
-  private _processModuleExports(
-    exportsTuple: import("ts-morph").TupleTypeNode,
-    moduleName: string,
-    importPath: string,
-    componentToModuleMap: LibraryModuleMap,
-    allLibraryClasses: Map<string, ClassDeclaration>,
-    typeChecker: TypeChecker,
-    moduleExports?: Set<string>
-  ) {
-    for (const element of exportsTuple.getElements()) {
-      const exportedClassName = this._resolveExportedClassName(element, typeChecker);
-      if (!exportedClassName) {
-        this.logger.debug(
-          `[ExternalModules] ${moduleName}: could not resolve export name from tuple entry '${element.getText()}' (skipped)`
-        );
-        continue;
-      }
-
-      const exportedClassDecl = allLibraryClasses.get(exportedClassName);
-      if (!exportedClassDecl) {
-        this.logger.debug(
-          `[ExternalModules] ${moduleName}: export '${exportedClassName}' not found in collected library classes (skipped)`
-        );
-        continue;
-      }
-
-      if (this._isReexportedModule(exportedClassDecl)) {
-        // Add the re-exported module name to parent's exports (for transitive expansion)
-        moduleExports?.add(exportedClassName);
-        this.logger.debug(
-          `[ExternalModules] ${moduleName} re-exports module ${exportedClassName} (will be expanded transitively)`
-        );
-
-        // Still process the module's contents recursively (for componentToModuleMap, etc)
-        this._processReexportedModule(
-          exportedClassDecl,
-          moduleName,
-          importPath,
-          componentToModuleMap,
-          allLibraryClasses,
-          typeChecker,
-          moduleExports
-        );
-      } else {
-        this._mapComponentToModule(exportedClassName, moduleName, importPath, componentToModuleMap, moduleExports);
-      }
-    }
-  }
-
-  /**
-   * Resolves the exported class name from an NgModule `ɵmod` exports tuple element.
-   *
-   * Tuple elements look like `typeof i1.TranslatePipe` (TypeQuery) or `TranslatePipe`
-   * (TypeReference). Resolution prefers the TypeChecker (which follows re-export
-   * aliases), but falls back to the syntactic name when symbol resolution yields
-   * nothing. The fallback matters for environments where cross-file symbol
-   * resolution is unreliable (e.g. WSL/Windows mounts with symlinked or
-   * case-mismatched `node_modules`): without it, a module's exports are silently
-   * dropped, producing false-positive "not imported" diagnostics for pipes/directives
-   * that are actually provided via an imported NgModule (e.g. `TranslateModule`).
-   * The syntactic name (`TranslatePipe`) matches the keys in `allLibraryClasses`,
-   * which are collected without the TypeChecker and therefore stay available.
-   *
-   * @param element The tuple element to resolve.
-   * @param typeChecker The type checker to use.
-   * @returns The exported class name or undefined.
-   * @internal
-   */
-  private _resolveExportedClassName(
-    element: import("ts-morph").TypeNode,
-    typeChecker: TypeChecker
-  ): string | undefined {
-    let exprName: import("ts-morph").EntityName;
-    if (element.isKind(SyntaxKind.TypeQuery)) {
-      exprName = element.getExprName();
-    } else if (element.isKind(SyntaxKind.TypeReference)) {
-      exprName = element.getTypeName();
-    } else {
-      return undefined;
-    }
-
-    // Syntactic name: the right-most identifier of the (possibly qualified) name,
-    // e.g. `i1.TranslatePipe` -> `TranslatePipe`. Used as a TypeChecker-independent fallback.
-    const syntacticName = exprName.isKind(SyntaxKind.QualifiedName)
-      ? exprName.getRight().getText()
-      : exprName.getText();
-
-    const type = typeChecker.getTypeAtLocation(exprName);
-    const symbol = type.getSymbol() ?? type.getAliasSymbol();
-    const resolvedName = symbol ? (symbol.getAliasedSymbol() ?? symbol).getName() : undefined;
-
-    if (!resolvedName && syntacticName) {
-      // TypeChecker could not resolve the symbol (e.g. WSL/Windows mounts with
-      // symlinked or case-mismatched node_modules). The syntactic fallback below
-      // recovers the export that would otherwise be silently dropped.
-      this.logger.debug(
-        `[ExternalModules] TypeChecker could not resolve export '${exprName.getText()}', using syntactic name '${syntacticName}'`
-      );
-    }
-
-    return resolvedName ?? syntacticName ?? undefined;
-  }
-
-  /**
-   * Checks if the exported class declaration is a re-exported NgModule.
-   * @param exportedClassDecl The class declaration to check.
-   * @returns True if it's a re-exported module.
-   * @internal
-   */
-  private _isReexportedModule(exportedClassDecl: ClassDeclaration): boolean {
-    return !!exportedClassDecl.getStaticProperty("ɵmod");
-  }
-
-  /**
-   * Processes a re-exported module by recursively processing its exports.
-   * @param exportedClassDecl The re-exported module class declaration.
-   * @param moduleName The current module name.
-   * @param importPath The import path.
-   * @param componentToModuleMap The component-to-module mapping.
-   * @param allLibraryClasses Map of all class declarations.
-   * @param typeChecker The type checker.
-   * @param moduleExports Optional set to accumulate exports.
-   * @internal
-   */
-  private _processReexportedModule(
-    exportedClassDecl: ClassDeclaration,
-    moduleName: string,
-    importPath: string,
-    componentToModuleMap: LibraryModuleMap,
-    allLibraryClasses: Map<string, ClassDeclaration>,
-    typeChecker: TypeChecker,
-    moduleExports?: Set<string>
-  ) {
-    const innerExportsTuple = parseModDefinition(exportedClassDecl);
-    if (innerExportsTuple) {
-      this._processModuleExports(
-        innerExportsTuple,
-        moduleName,
-        importPath,
-        componentToModuleMap,
-        allLibraryClasses,
-        typeChecker,
-        moduleExports
-      );
-    }
-  }
-
-  /**
-   * Maps a component/directive/pipe to its module.
-   * @param exportedClassName The name of the exported class.
-   * @param moduleName The module name.
-   * @param importPath The import path.
-   * @param componentToModuleMap The mapping to update.
-   * @param moduleExports Optional set to add exports to.
-   * @internal
-   */
-  private _mapComponentToModule(
-    exportedClassName: string,
-    moduleName: string,
-    importPath: string,
-    componentToModuleMap: LibraryModuleMap,
-    moduleExports?: Set<string>
-  ) {
-    // This function is only called during library indexing where we build the module exports on the fly.
-    // If moduleExports is not present, we can't perform scoring, so we can't add the mapping.
-    if (!moduleExports) {
-      return;
-    }
-
-    const exportCount = moduleExports.size;
-    const existing = componentToModuleMap.get(exportedClassName);
-
-    const newCandidate = { moduleName, importPath, exportCount };
-
-    if (existing) {
-      const newScore = moduleFitScore(exportedClassName, newCandidate);
-      const existingScore = moduleFitScore(exportedClassName, existing);
-
-      // If new one is better, update the map.
-      if (newScore > existingScore) {
-        componentToModuleMap.set(exportedClassName, newCandidate);
-      }
-    } else {
-      // If it doesn't exist, add it.
-      componentToModuleMap.set(exportedClassName, newCandidate);
-    }
-
-    // This is for accumulating all unique exports for the top-level module being processed.
-    moduleExports.add(exportedClassName);
   }
 
   private _isStandaloneFromTypeReference(
@@ -2749,38 +2102,6 @@ export class AngularIndexer {
     }
 
     return false;
-  }
-
-  /**
-   * Collects all class declarations from a source file.
-   * @param sourceFile The source file to collect classes from.
-   * @returns A map of class names to their declarations.
-   * @internal
-   */
-  private _collectClassDeclarations(sourceFile: SourceFile): Map<string, ClassDeclaration> {
-    const classDeclarations = new Map<string, ClassDeclaration>();
-
-    // This logic is duplicated from _buildComponentToModuleMap to ensure we have all class definitions.
-    // For entry-point indexing we only want classes that are publicly re-exported from this entry point.
-    // This filters out private aliases such as `export { Foo as ɵFoo }`, which are not importable API.
-    const exportedDeclarations = sourceFile.getExportedDeclarations();
-    for (const [exportName, declarations] of exportedDeclarations.entries()) {
-      if (exportName.startsWith("ɵ")) {
-        continue;
-      }
-
-      for (const declaration of declarations) {
-        if (declaration.isKind(SyntaxKind.ClassDeclaration)) {
-          const classDecl = declaration as ClassDeclaration;
-          const name = classDecl.getName();
-          if (name && !classDeclarations.has(name)) {
-            classDeclarations.set(name, classDecl);
-          }
-        }
-      }
-    }
-
-    return classDeclarations;
   }
 
   /**
@@ -3005,7 +2326,7 @@ export class AngularIndexer {
    * @internal
    */
   private indexBundlesDeclaredIn(filePath: string): void {
-    const importPath = this.projectModulePath(filePath);
+    const importPath = projectModulePath(this.projectRootPath, filePath);
     // Whatever the file used to declare goes first: a bundle that was renamed, or that
     // stopped being one, must not answer for the file any more.
     this.index.removeBundlesDeclaredIn(importPath);
@@ -3115,7 +2436,7 @@ export class AngularIndexer {
   ) {
     try {
       this.indexBundles(sourceFile, importPath);
-      const classDeclarations = this._collectClassDeclarations(sourceFile);
+      const classDeclarations = collectClassDeclarations(sourceFile);
 
       // Find all Components, Directives, and Pipes
       for (const classDecl of classDeclarations.values()) {

@@ -21,6 +21,7 @@ import { type InstrumentedLogger, silentLogger, withInstrumentation } from "../.
 import type { ProgressHost } from "../../core/progress";
 import { silentProgressHost } from "../../core/progress";
 import { AngularIndexer } from "../../services";
+import { resolveExportedClassName } from "../../services/ngmodule-index";
 import { AngularElementData, type FileElementsInfo } from "../../types";
 
 /**
@@ -1375,8 +1376,8 @@ export class UikitHostComponent {}
 
   describe("NgModule export name resolution", () => {
     /**
-     * Builds the first element of a tuple type so it can be fed to the private
-     * `_resolveExportedClassName`, mirroring an `ɵmod` exports tuple entry.
+     * Builds the first element of a tuple type so it can be fed to
+     * `resolveExportedClassName`, mirroring an `ɵmod` exports tuple entry.
      */
     function firstTupleElement(sourceText: string) {
       const project = new Project({ useInMemoryFileSystem: true });
@@ -1391,7 +1392,7 @@ export class UikitHostComponent {}
         "declare class TranslatePipe {}\ntype Exports = [typeof TranslatePipe];"
       );
 
-      const resolved = (indexer as any)._resolveExportedClassName(element, typeChecker);
+      const resolved = resolveExportedClassName(element, typeChecker, silentLogger);
       assert.strictEqual(resolved, "TranslatePipe");
     });
 
@@ -1403,7 +1404,7 @@ export class UikitHostComponent {}
       // "not imported" diagnostics for pipes provided via an NgModule.
       const { element, typeChecker } = firstTupleElement("type Exports = [typeof i1.TranslatePipe];");
 
-      const resolved = (indexer as any)._resolveExportedClassName(element, typeChecker);
+      const resolved = resolveExportedClassName(element, typeChecker, silentLogger);
       assert.strictEqual(resolved, "TranslatePipe");
     });
   });
