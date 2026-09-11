@@ -62,7 +62,7 @@ currently answers it. The first and third are what a planned import answers.
 
 Ranked by the strength of the evidence that it is needed, not by how obvious the tool is.
 
-**1. `element_api` — what a template may write on one element.** *Built.* Inputs with
+**1. `describe_element` — what a template may write on one element.** *Built.* Inputs with
 their aliases and whether each is required, outputs, the selectors it projects content
 into, the host directives that come with it. Attacks the most-cited failure directly.
 
@@ -76,7 +76,7 @@ counterpart to `devserver.wait_for_build`: 3 ms against a build, and the answer 
 class and the specifier, which a build log never does. Returns the component file
 rewritten rather than a patch, because an agent writes files.
 
-**3. `orient` — what kind of project this is.** *Built.* Angular version, standalone or
+**3. `describe_project` — what kind of project this is.** *Built.* Angular version, standalone or
 NgModule, which UI libraries are actually used and how heavily, the path aliases, how many
 elements are indexed. One call at the start of a session. Stops a model writing Material in
 an ng-zorro workspace.
@@ -87,7 +87,7 @@ workspace's files import ng-zorro and eight import Material. Availability would 
 the wrong library. Imports are read with `ts.preProcessFile`, the compiler's own scanner
 for a file's module specifiers, which finds them without parsing the file.
 
-**4. `search` — find an element by what it does.** *Built.* Ranked by what this workspace
+**4. `find_element` — find an element by what it does.** *Built.* Ranked by what this workspace
 already writes: on the v22 fixture, "date picker" answers with Material's before
 ng-zorro's, because eight of its files import Material and three import ng-zorro, and the
 workspace's own elements outrank both.
@@ -124,7 +124,7 @@ a list gives a reader no way to tell one from an answer.
 ## Why the work cannot be wasted
 
 The MCP is a second consumer of the index the extension already runs on. The input
-surface added for `element_api` improves the editor's own suggestions; reading a project's
+surface added for `describe_element` improves the editor's own suggestions; reading a project's
 sources improves both. If the agent-facing half finds no audience, the half that is
 already shipping got better anyway.
 

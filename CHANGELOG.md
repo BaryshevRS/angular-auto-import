@@ -7,9 +7,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [3.2.0] – 2026-08-31
 
 ### Added
-- **Project-aware MCP server**: coding agents can inspect the Angular version, project conventions, path aliases, used UI libraries, and indexed workspace/library elements through `angular_project_overview` and `angular_find_element`
-- **Real element APIs for agents**: `angular_element_api` reports exact inputs and aliases, required signal inputs, outputs, content slots, host directives, and import specifiers from the project index
-- **Template verification for agents**: `verify_angular_template` checks a proposed template against the owning component and returns the imports and rewritten component source that make it compile
+- **Project-aware MCP server**: coding agents can inspect the Angular version, project conventions, path aliases, used UI libraries, and indexed workspace/library elements through `describe_project` and `find_element`
+- **Real element APIs for agents**: `describe_element` reports exact inputs and aliases, required signal inputs, outputs, content slots, host directives, and import specifiers from the project index
+- **Template verification for agents**: `verify_template` checks a proposed template against the owning component and returns the imports and rewritten component source that make it compile
 - **Automatic VS Code registration**: the extension contributes the MCP server directly to VS Code, including explicit routing across multi-root workspaces; no separate setup is required in the editor
 - **Standalone MCP package**: non-VS Code clients can run the same server through the `angular-auto-import-mcp` npm package
 

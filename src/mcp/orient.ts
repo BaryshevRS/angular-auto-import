@@ -44,7 +44,7 @@ export interface LibraryUse {
   elements: number;
 }
 
-/** What `orient` answers. */
+/** What `describe_project` answers. */
 export interface Orientation {
   root: string;
   /** The installed `@angular/core`, or what the manifest asks for when it is not installed. */

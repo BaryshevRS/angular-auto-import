@@ -51,27 +51,27 @@ describe("The MCP server smoke project", function () {
   it("serves all four tools from a root passed independently of cwd", async () => {
     const listed = await client.listTools();
     assert.deepStrictEqual(listed.tools.map((tool) => tool.name).sort(), [
-      "angular_element_api",
-      "angular_find_element",
-      "angular_project_overview",
-      "verify_angular_template",
+      "describe_element",
+      "describe_project",
+      "find_element",
+      "verify_template",
     ]);
 
-    const overview = (await call("angular_project_overview", { fromFile: component })) as {
+    const overview = (await call("describe_project", { fromFile: component })) as {
       angular: string;
       own: { standalone: number };
     };
     assert.strictEqual(overview.angular, "^22.0.0");
     assert.strictEqual(overview.own.standalone, 2);
 
-    const api = (await call("angular_element_api", { fromFile: component, query: "workspace-card" })) as {
+    const api = (await call("describe_element", { fromFile: component, query: "workspace-card" })) as {
       matches: Array<{ name: string; inputs: Array<{ name: string; required?: true }>; outputs: string[] }>;
     };
     assert.strictEqual(api.matches[0]?.name, "WorkspaceCardComponent");
     assert.deepStrictEqual(api.matches[0]?.inputs, [{ name: "cardTitle", required: true, signal: true }]);
     assert.deepStrictEqual(api.matches[0]?.outputs, ["dismissed"]);
 
-    const verdict = (await call("verify_angular_template", {
+    const verdict = (await call("verify_template", {
       component,
       template: '<workspace-card cardTitle="Hello"><button actions>Close</button></workspace-card>',
     })) as { addedImports: string[]; updatedComponent?: string };
@@ -80,7 +80,7 @@ describe("The MCP server smoke project", function () {
   });
 
   it("tracks a standalone component created, changed and deleted after indexing", async () => {
-    const initialApi = (await call("angular_element_api", {
+    const initialApi = (await call("describe_element", {
       fromFile: component,
       query: "workspace-card",
     })) as { matches: Array<{ name: string }> };
@@ -100,7 +100,7 @@ export class LiveStatusComponent {}
 `
     );
 
-    const response = (await call("angular_element_api", {
+    const response = (await call("describe_element", {
       fromFile: component,
       query: "live-status",
     })) as { matches: Array<{ name: string }> };
@@ -122,7 +122,7 @@ export class LiveHealthComponent {}
 `
     );
 
-    const staleResponse = (await call("angular_element_api", {
+    const staleResponse = (await call("describe_element", {
       fromFile: component,
       query: "live-status",
     })) as { matches: Array<{ name: string }> };
@@ -131,7 +131,7 @@ export class LiveHealthComponent {}
       []
     );
 
-    const renamedResponse = (await call("angular_element_api", {
+    const renamedResponse = (await call("describe_element", {
       fromFile: component,
       query: "live-health",
     })) as { matches: Array<{ name: string }> };
@@ -142,7 +142,7 @@ export class LiveHealthComponent {}
 
     await rm(liveComponent);
 
-    const deletedResponse = (await call("angular_element_api", {
+    const deletedResponse = (await call("describe_element", {
       fromFile: component,
       query: "live-health",
     })) as { matches: Array<{ name: string }> };

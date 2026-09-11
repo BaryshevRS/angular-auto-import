@@ -52,12 +52,12 @@ export interface SearchHit {
    * Only the inputs a template must bind.
    *
    * What decides whether a component fits is what it demands; the twenty optional ones
-   * are `angular_element_api`'s answer, and noise while choosing.
+   * are `describe_element`'s answer, and noise while choosing.
    */
   requiredInputs?: string[];
 }
 
-/** What `search` answers. */
+/** What `find_element` answers. */
 export interface SearchAnswer {
   /** The best matches, described in full. */
   hits: SearchHit[];
@@ -65,7 +65,7 @@ export interface SearchAnswer {
    * Everything else that matched, as `name · selector · library`.
    *
    * Named rather than dropped, so that a ranking this tool got wrong is still recoverable:
-   * ask `angular_element_api` for any of these by name.
+   * ask `describe_element` for any of these by name.
    */
   others?: string[];
   /** How many matched beyond even those named. */
@@ -116,7 +116,7 @@ export async function searchElements(request: SearchRequest): Promise<SearchAnsw
       more: 0,
       advice:
         "Nothing matched every word. Try one word rather than several, or a different word for the same thing; " +
-        "angular_project_overview names the libraries this workspace uses, which says where to look.",
+        "describe_project names the libraries this workspace uses, which says where to look.",
     };
   }
 

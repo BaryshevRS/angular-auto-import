@@ -48,7 +48,7 @@ export interface ElementSummary {
   hostDirectives?: Array<{ name: string; exposes?: string[] }>;
 }
 
-/** What `element_api` answers. */
+/** What `describe_element` answers. */
 export interface ElementApiAnswer {
   matches: ElementSummary[];
   /** Everything else the query named, as `name · selector`; ask again by one of these. */

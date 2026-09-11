@@ -30,8 +30,8 @@ If the MCP host does not start commands in the workspace, pass one or more roots
 }
 ```
 
-The server provides `angular_project_overview`, `angular_find_element`,
-`angular_element_api`, and `verify_angular_template`.
+The server provides `describe_project`, `find_element`, `describe_element` and
+`verify_template`.
 
 VS Code users can install the Angular Auto Import extension instead. It registers this
 same server with the editor automatically and passes every folder in a multi-root workspace.

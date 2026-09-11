@@ -38,13 +38,13 @@ same server explicitly, and each request is routed to the project that owns its 
 
 The server offers four tools:
 
-- `angular_project_overview` reports the Angular version, standalone/NgModule balance,
+- `describe_project` reports the Angular version, standalone/NgModule balance,
   path aliases, and which component libraries the project actually uses.
-- `angular_find_element` finds components, directives, and pipes by purpose or name,
+- `find_element` finds components, directives, and pipes by purpose or name,
   ranked by local project usage.
-- `angular_element_api` returns exact inputs, required bindings, outputs, content slots,
+- `describe_element` returns exact inputs, required bindings, outputs, content slots,
   host directives, and the import specifier for an element.
-- `verify_angular_template` checks a proposed template and returns both the missing imports
+- `verify_template` checks a proposed template and returns both the missing imports
   and an updated component file.
 
 For Claude Code, Cursor, and other MCP hosts outside VS Code, use the standalone npm package:

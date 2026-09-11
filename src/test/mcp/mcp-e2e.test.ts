@@ -71,7 +71,7 @@ describe("The MCP server, end to end", function () {
 
     assert.deepStrictEqual(
       tools.map((tool) => tool.name).sort(),
-      ["angular_element_api", "angular_find_element", "angular_project_overview", "verify_angular_template"],
+      ["describe_element", "describe_project", "find_element", "verify_template"],
       "the names a model reads before deciding to call one"
     );
     for (const tool of tools) {
@@ -81,7 +81,7 @@ describe("The MCP server, end to end", function () {
   });
 
   it("says what kind of workspace this is", async () => {
-    const overview = (await call("angular_project_overview", { fromFile: COMPONENT })) as {
+    const overview = (await call("describe_project", { fromFile: COMPONENT })) as {
       angular: string;
       own: { standalone: number; nonStandalone: number };
       libraries: Array<{ name: string; importedBy: number; elements: number }>;
@@ -105,7 +105,7 @@ describe("The MCP server, end to end", function () {
     // `@ngx-translate/core` ships another. Alphabetically the library's comes first, so
     // this fails the moment ranking stops being about use — which a Material-against-
     // ng-zorro case would not catch, `Mat` sorting before `Nz` either way.
-    const found = (await call("angular_find_element", {
+    const found = (await call("find_element", {
       fromFile: COMPONENT,
       query: "translate",
       type: "pipe",
@@ -126,7 +126,7 @@ describe("The MCP server, end to end", function () {
   });
 
   it("describes an element's real surface, aliases and all", async () => {
-    const described = (await call("angular_element_api", { fromFile: COMPONENT, query: "nz-check-list" })) as {
+    const described = (await call("describe_element", { fromFile: COMPONENT, query: "nz-check-list" })) as {
       matches: Array<{
         name: string;
         importFrom: string;
@@ -147,7 +147,7 @@ describe("The MCP server, end to end", function () {
   });
 
   it("checks a template and hands back the component that would compile", async () => {
-    const verdict = (await call("verify_angular_template", {
+    const verdict = (await call("verify_template", {
       component: COMPONENT,
       template: "<nz-check-list></nz-check-list>\n<button nz-button>ok</button>\n<router-outlet></router-outlet>",
     })) as {
@@ -173,7 +173,7 @@ describe("The MCP server, end to end", function () {
   });
 
   it("says nothing about a template whose elements are all imported", async () => {
-    const verdict = (await call("verify_angular_template", {
+    const verdict = (await call("verify_template", {
       component: COMPONENT,
       template: "<router-outlet></router-outlet>",
     })) as { problems: unknown[]; addedImports: string[]; updatedComponent?: string };
@@ -184,14 +184,14 @@ describe("The MCP server, end to end", function () {
   });
 
   it("fails a request that names no project without pretending otherwise", async () => {
-    const answer = await call("angular_project_overview", { fromFile: path.join(REPOSITORY_ROOT, "README.md") });
+    const answer = await call("describe_project", { fromFile: path.join(REPOSITORY_ROOT, "README.md") });
 
     assert.match(String(answer.error), /No Angular project/, "and says what a project is");
   });
 
   it("answers again without paying for the index a second time", async () => {
     const started = Date.now();
-    await call("angular_element_api", { fromFile: COMPONENT, query: "nz-table" });
+    await call("describe_element", { fromFile: COMPONENT, query: "nz-table" });
     const elapsed = Date.now() - started;
 
     // The first call in this suite indexed the fixture; every one after it reads memory.

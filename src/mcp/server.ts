@@ -50,7 +50,7 @@ export function createMcpServer(workspace: Workspace = new Workspace()): McpServ
   const server = new McpServer({ name: "angular-auto-import", version: SERVER_VERSION });
 
   server.registerTool(
-    "verify_angular_template",
+    "verify_template",
     {
       title: "Verify an Angular template",
       description: [
@@ -108,7 +108,7 @@ export function createMcpServer(workspace: Workspace = new Workspace()): McpServ
   );
 
   server.registerTool(
-    "angular_element_api",
+    "describe_element",
     {
       title: "What a template may write on an Angular element",
       description: [
@@ -144,7 +144,7 @@ export function createMcpServer(workspace: Workspace = new Workspace()): McpServ
   );
 
   server.registerTool(
-    "angular_project_overview",
+    "describe_project",
     {
       title: "What kind of Angular project this is",
       description: [
@@ -172,7 +172,7 @@ export function createMcpServer(workspace: Workspace = new Workspace()): McpServ
   );
 
   server.registerTool(
-    "angular_find_element",
+    "find_element",
     {
       title: "Find an Angular element by what it is for",
       description: [
@@ -181,7 +181,7 @@ export function createMcpServer(workspace: Workspace = new Workspace()): McpServ
         "",
         "Results are ranked by what this repository actually writes, not by what it has installed,",
         "so the first hit is the one that belongs here. Each carries the specifier to import it from",
-        "and the inputs it requires; ask angular_element_api for the rest of its surface.",
+        "and the inputs it requires; ask describe_element for the rest of its surface.",
         "",
         "Every word must match. An empty answer means try another word for the same thing —",
         "it does not mean the workspace has nothing of the kind.",
