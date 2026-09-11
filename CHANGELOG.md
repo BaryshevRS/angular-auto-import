@@ -4,6 +4,42 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.2.0](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.0...3.2.0) (2026-09-11)
+
+
+### Features
+
+* Add comprehensive documentation for Angular Auto Import extension ([15f537e](https://github.com/BaryshevRS/angular-auto-import/commit/15f537e39beaeaa3da8cbb907d6cb8eb9be61fa9))
+* add project-wide Fix All ([680e57d](https://github.com/BaryshevRS/angular-auto-import/commit/680e57d215e9ba4efba9e63fcd58c46007b50bbf))
+* add project-wide missing import audit ([7aff27f](https://github.com/BaryshevRS/angular-auto-import/commit/7aff27f2c491011570b4f35d66e43f0d49a2d10f))
+* add template context Fix All action ([51e0e51](https://github.com/BaryshevRS/angular-auto-import/commit/51e0e517812d8c3196e3e17f6a508fcb28fccbcd))
+* Add TSDoc annotations to source files ([c67cb71](https://github.com/BaryshevRS/angular-auto-import/commit/c67cb7141a72e3e2dd3cfd9a123b2cb6a843364e))
+* angular auto import extention add ([ed41778](https://github.com/BaryshevRS/angular-auto-import/commit/ed417781ad95495e964ce54601d86b1bd90d2406))
+* enhance project root determination with configuration support and add tests ([52b5349](https://github.com/BaryshevRS/angular-auto-import/commit/52b5349fed3b9ddc1dc2e1412c40a49099a74ea4))
+* migrate extension to the Language Server Protocol ([484fc6c](https://github.com/BaryshevRS/angular-auto-import/commit/484fc6cb3b894c379e8731a5ce96765142753eca))
+
+
+### Bug Fixes
+
+* avoid barrel self-imports ([e2591b3](https://github.com/BaryshevRS/angular-auto-import/commit/e2591b3f7d817602a7a5a6586f3edf1a89aca218))
+* barrel path fix ([26b1d24](https://github.com/BaryshevRS/angular-auto-import/commit/26b1d24b78b234f1b9c28c6095a801d8ce05c63f))
+* bound indexer file reads ([d95af0b](https://github.com/BaryshevRS/angular-auto-import/commit/d95af0b1adfa818064b6fe27fc477b3b03238d7b))
+* cut indexer and discovery work in inactive workspaces ([a867929](https://github.com/BaryshevRS/angular-auto-import/commit/a867929c89eca50a2772cfaae0397e12c2bcfd40))
+* decide what a class in a selector means where Angular decides it ([dba90d8](https://github.com/BaryshevRS/angular-auto-import/commit/dba90d866fa5982290c01dc88b25b5d190d4e62a))
+* discard stale index cache referencing missing files ([be8bf4c](https://github.com/BaryshevRS/angular-auto-import/commit/be8bf4c69524093002d58916cc7dd65744652abd))
+* enhance error handling for forgotten SourceFile nodes in AngularIndexer ([16fe33c](https://github.com/BaryshevRS/angular-auto-import/commit/16fe33c1de8d0aae2ce55db1b92d71430664dd78))
+* improve DiagnosticProvider stability and correctness ([f19ea80](https://github.com/BaryshevRS/angular-auto-import/commit/f19ea80c0e51e50ab0c31f0d32e46f5bf1efd26b))
+* make project-wide Fix All apply and refresh ([27ef4f7](https://github.com/BaryshevRS/angular-auto-import/commit/27ef4f73427536cd4ee9a55796454894cb749c5f))
+* normalize path separators in resolveRelativePath for Windows compatibility ([e681ac4](https://github.com/BaryshevRS/angular-auto-import/commit/e681ac4fcca654bb3058d115b9f3c586f7f947b5))
+* refresh source control diagnostics ([339e9b7](https://github.com/BaryshevRS/angular-auto-import/commit/339e9b7cb22a70d80c891aacc4c4530c625a026a))
+* repair the owners project-wide Fix All can, not none of them ([4ff3636](https://github.com/BaryshevRS/angular-auto-import/commit/4ff3636b0494dda561be140ce39185bcef16ad40))
+* update project root determination logic in Angular Auto-Import ([0f88e0e](https://github.com/BaryshevRS/angular-auto-import/commit/0f88e0e3a65a4cebbf1ce38ad48fe34a7c4f3e6f))
+
+
+### Performance Improvements
+
+* release library AST from ts-morph after indexing to cap memory ([6b66ddf](https://github.com/BaryshevRS/angular-auto-import/commit/6b66ddf7db6d16f0fdcc1d9a8668bc05d019648b))
+
 ## [3.1.0] – 2026-09-11
 
 ### Added
