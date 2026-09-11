@@ -29,6 +29,7 @@ describe("Project-wide Fix All messages", () => {
     totalIssues: 7,
     filesChanged: 2,
     importsAdded: 3,
+    skippedIssues: 0,
   };
 
   it("reports the exact counts that were applied", () => {
@@ -37,9 +38,27 @@ describe("Project-wide Fix All messages", () => {
       totalIssues: 50,
       filesChanged: 1,
       importsAdded: 16,
+      skippedIssues: 0,
     };
 
     assert.strictEqual(formatFixAllResultMessage(applied), "Added 16 imports to 1 file.");
+  });
+
+  it("says what a partial Fix All left behind, rather than reporting only the wins", () => {
+    const partial: AppliedWorkspaceFixAll = {
+      applied: true,
+      totalIssues: 9,
+      filesChanged: 1,
+      importsAdded: 1,
+      skippedIssues: 8,
+    };
+
+    const message = formatFixAllResultMessage(partial);
+
+    assert.strictEqual(
+      message,
+      "Added 1 import to 1 file. Left 8 findings unfixed: the owning component could not be edited automatically."
+    );
   });
 
   it("distinguishes stale, rejected, and unfixable outcomes", () => {
@@ -54,7 +73,7 @@ describe("Project-wide Fix All messages", () => {
     assert.match(staleMessage, /stale/i);
     assert.match(staleMessage, /run the audit again/i);
     assert.match(rejectedMessage, /rejected/i);
-    assert.match(unfixableMessage, /could not be fixed safely/i);
+    assert.match(unfixableMessage, /none of these findings could be fixed/i);
     assert.strictEqual(new Set([staleMessage, rejectedMessage, unfixableMessage]).size, 3);
   });
 });

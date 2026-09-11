@@ -9,10 +9,15 @@ export function formatAuditCompletionMessage(report: DiagnosticsReport): string 
 /** Describes every terminal Fix All outcome without pretending a rejected edit succeeded. */
 export function formatFixAllResultMessage(result: PreparedWorkspaceFixAll | AppliedWorkspaceFixAll): string {
   if ("ready" in result && !result.ready) {
-    return "These findings could not be fixed safely. Run the audit again after resolving ambiguous owners.";
+    return "None of these findings could be fixed automatically; no files were changed.";
   }
   if (!("applied" in result) || result.applied) {
-    return `Added ${count(result.importsAdded, "import")} to ${count(result.filesChanged, "file")}.`;
+    const added = `Added ${count(result.importsAdded, "import")} to ${count(result.filesChanged, "file")}.`;
+    // What was skipped is the half a reader cannot see: the panel refreshes to a shorter
+    // list, and without this the leftovers read as a Fix All that quietly missed them.
+    return result.skippedIssues > 0
+      ? `${added} Left ${count(result.skippedIssues, "finding")} unfixed: the owning component could not be edited automatically.`
+      : added;
   }
   if (result.reason === "stale") {
     return "The prepared Fix All is stale because project files changed. Run the audit again.";

@@ -4,7 +4,7 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [3.1.0] – 2026-08-27
+## [3.1.0] – 2026-09-11
 
 ### Added
 - **Project-wide missing import audit**: the former debug report is now a public Command Palette feature that scans unopened inline templates and literal external `templateUrl` files across the active project, or all discovered workspace projects when no file editor is active
@@ -15,7 +15,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - **Class-qualified selector matching**: Angular selectors containing static classes or `:not(.class)` now follow Angular's own matching rules for static classes, class bindings, references, and structural-directive templates
 - **External template ownership**: external templates are mapped from their component's actual literal `templateUrl` instead of assuming component and template basenames match; ownership is persisted and invalidated with the project index cache
-- **Bulk-edit safety**: stale, incomplete, ambiguous, or otherwise unfixable audits are rejected before any file is changed; prepared edits are opaque and one-shot
+- **Bulk-edit safety**: stale or incomplete audits are rejected before any file is changed; prepared edits are opaque and one-shot
+- **Partial project-wide Fix All**: a single owner the planner cannot edit — an ambiguous decorator, an import name already taken — no longer cancels the repair of every other owner. Those findings are skipped, counted, and named in the result message instead
 
 ### Changed
 - **Honest detection boundary**: the audit reports only missing imports for selectors known to the project/dependency index; it does not claim to validate arbitrary unknown HTML attributes or event bindings

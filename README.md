@@ -1,6 +1,6 @@
 # Angular Auto-Import for VS Code
 
-[![AI slop](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BaryshevRS/stopslop/main/stopslop-badge.json)](https://github.com/BaryshevRS/stopslop)
+[![StopSlop](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BaryshevRS/stopslop/main/stopslop-badge.json)](https://github.com/BaryshevRS/stopslop)
 [![Clone Alert: 0 clones](https://img.shields.io/badge/Clone%20Alert-0%20clones-brightgreen?style=flat-square)](https://www.npmjs.com/package/clone-alert)
 
 [![Install in VS Code](https://img.shields.io/badge/Install%20in-VS%20Code-007ACC?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=baryshevrs.angular-auto-import)
@@ -34,7 +34,7 @@ Run `Angular Auto Import: Audit Project-Wide Missing Imports` from the Command P
 
 Unlike editor diagnostics that are requested only for open documents, the audit reads unopened inline templates and literal external `templateUrl` files too. It checks them against the component, directive, and pipe selectors indexed from your project, path-mapped libraries, and dependencies. Every finding is clickable and opens the exact template range; the report also states how many projects and templates were scanned and whether the scan completed. A complete non-empty report includes **Fix All**, which re-audits the same scope, shows the exact import/file counts for confirmation, and submits one transactional workspace edit.
 
-The audit is deliberately a missing-import detector, not a generic HTML validator. An element or attribute is reported only when it matches a known indexed Angular selector whose owner is not imported. Arbitrary unknown attributes and event bindings are outside its scope. Computed `templateUrl` expressions cannot be discovered; use a string literal. Ambiguous or unfixable owners, incomplete scans, changed files, and editors without transactional workspace edits are rejected without applying a partial fix. Per-file Quick Fix and **Fix all missing imports in current file** remain available.
+The audit is deliberately a missing-import detector, not a generic HTML validator. An element or attribute is reported only when it matches a known indexed Angular selector whose owner is not imported. Arbitrary unknown attributes and event bindings are outside its scope. Computed `templateUrl` expressions cannot be discovered; use a string literal. An owner Fix All cannot edit — an ambiguous decorator, or an import name the file already uses for something else — is skipped and counted rather than cancelling the repair of the owners beside it; the result message says how many findings were left. Incomplete scans, changed files, and editors without transactional workspace edits are still rejected outright, without applying anything. Per-file Quick Fix and **Fix all missing imports in current file** remain available.
 
 ### 🚀 Fix All Missing Imports
 

@@ -174,9 +174,15 @@ export interface FixAllSummary {
   filesChanged: number;
   /** Identifiers added across those component files. */
   importsAdded: number;
+  /** Findings left untouched because their owning component could not be planned. */
+  skippedIssues: number;
 }
 
-/** Preparation succeeds only when every audited owner can be edited atomically. */
+/**
+ * Preparation succeeds when at least one audited owner can be planned. An owner that cannot
+ * be — an ambiguous decorator, a name the planner cannot add — is skipped and counted in
+ * `skippedIssues` rather than sinking the owners beside it.
+ */
 export type PreparedWorkspaceFixAll =
   | (FixAllSummary & {
       ready: true;

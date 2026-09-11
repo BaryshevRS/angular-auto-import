@@ -3,7 +3,13 @@
  *
  * Preparation performs a fresh compiler-backed audit, selects elements with the same
  * rules as document Fix All, and plans every owning component through the shared import
- * planner. The resulting versioned workspace edit stays server-side behind an opaque
+ * planner. An owner the planner cannot handle is skipped and counted, not allowed to sink
+ * the owners beside it: a project holding one genuinely unfixable finding would otherwise
+ * offer a Fix All that repairs nothing. The hazards that do abort the whole preparation are
+ * the ones that make any edit untrustworthy — a client that cannot apply atomically, an
+ * incomplete audit, a snapshot that disagrees with itself, and cancellation.
+ *
+ * The resulting versioned workspace edit stays server-side behind an opaque
  * transaction id. Application submits that exact edit once and never replans it.
  * @module
  */
@@ -44,6 +50,8 @@ interface FixAllOwner {
 interface PlannedWorkspaceFixAll {
   edit: VersionedWorkspaceEdit;
   importsAdded: number;
+  /** Findings whose owner could not be planned, and which the edit therefore leaves alone. */
+  skippedIssues: number;
 }
 
 export interface WorkspaceFixAllOptions {
@@ -106,6 +114,7 @@ export class WorkspaceFixAll {
       totalIssues: audit.report.totalIssues,
       filesChanged: planned.edit.documentChanges.length,
       importsAdded: planned.importsAdded,
+      skippedIssues: planned.skippedIssues,
     };
     if (summary.filesChanged === 0 || summary.importsAdded === 0) {
       return unfixable();
@@ -131,16 +140,24 @@ export class WorkspaceFixAll {
   ): Promise<PlannedWorkspaceFixAll | undefined> {
     const edit: VersionedWorkspaceEdit = { documentChanges: [] };
     let importsAdded = 0;
+    let skippedIssues = 0;
 
     for (const [componentFilePath, owner] of owners) {
       const componentSnapshot = snapshots.get(componentFilePath);
       if (!componentSnapshot || !hasExactlyOneComponentDecorator(componentSnapshot.text)) {
         this.logger.warn(`[WorkspaceFixAll] Ambiguous component owner in ${componentFilePath}`);
-        return undefined;
+        skippedIssues += owner.candidates.length;
+        continue;
       }
       const planned = await this.planOwner(componentFilePath, owner, cancellation);
-      if (!planned || !this.isPreparationCurrent(epoch, cancellation)) {
+      // Order matters: a stale epoch or a cancelled scan abandons everything, while an
+      // owner that merely would not plan is left for the user to handle by hand.
+      if (!this.isPreparationCurrent(epoch, cancellation)) {
         return undefined;
+      }
+      if (!planned) {
+        skippedIssues += owner.candidates.length;
+        continue;
       }
       if (planned.edit) {
         edit.documentChanges.push(...planned.edit.documentChanges);
@@ -151,7 +168,7 @@ export class WorkspaceFixAll {
       }
     }
 
-    return { edit, importsAdded };
+    return { edit, importsAdded, skippedIssues };
   }
 
   private async planOwner(componentFilePath: string, owner: FixAllOwner, cancellation: CancellationSignal) {
@@ -196,7 +213,7 @@ export class WorkspaceFixAll {
     const transaction = this.transactions.get(transactionId);
     this.transactions.delete(transactionId);
     if (!transaction) {
-      return { applied: false, reason: "consumed", totalIssues: 0, filesChanged: 0, importsAdded: 0 };
+      return { applied: false, reason: "consumed", totalIssues: 0, filesChanged: 0, importsAdded: 0, skippedIssues: 0 };
     }
     if (!transaction.edit) {
       return { applied: false, ...transaction.summary };
