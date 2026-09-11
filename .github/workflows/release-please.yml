@@ -1,0 +1,112 @@
+# Version, changelog, and both marketplaces, from conventional commits.
+#
+# Two jobs, and the second one almost never runs. release-please watches main and keeps a
+# release pull request open, rewriting the version and the changelog from the commits that
+# have landed since the last release. Nothing is published while that PR sits there.
+# Merging it is the release: release-please then tags, cuts the GitHub release, and only
+# then does `publish` have something to do.
+#
+# The gate runs here rather than being inherited from CI. A tag is not a second opinion —
+# release-please cuts it from whatever is on main, so the archive about to reach two
+# registries is checked on its own terms, including `vsce:inspect` on the exact file that
+# gets uploaded. The E2E suites are still absent for the reason ci.yml gives: they need an
+# editor, a display, and fixture dependencies this repository does not track. Run
+# `pnpm run test:e2e:v22:parallel` locally before merging the release PR.
+#
+# Neither registry is given a stored token. Both exchange this workflow's OIDC identity for
+# a credential that lives a few minutes, against a policy each registry holds naming this
+# repository and this file. That is why `id-token: write` is here, and why renaming this
+# file breaks publishing until the policies are updated to match. It also sidesteps the
+# retirement of Azure DevOps global PATs on 1 December 2026, which is what a
+# `vsce`-compatible Marketplace token used to have to be.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Releases must not overlap, and a queued one must not be thrown away: cancelling here
+# would abandon a run that had already published to one registry and not the other.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release PR
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    name: Publish
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the VSIX to the release release-please just cut
+      id-token: write # the OIDC identity both registries exchange for a short-lived token
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `check`, not `check:fix`: a release reports formatting, it does not rewrite it.
+      - name: Formatting and lint
+        run: pnpm run check
+
+      - name: Types
+        run: pnpm run check-types
+
+      - name: Node test suites
+        run: pnpm run test:node
+
+      - name: Package
+        run: pnpm run vsce:package
+
+      # On the archive itself, not the source tree: both bundles present, and nothing the
+      # server would have to resolve at runtime.
+      - name: Inspect the VSIX
+        run: pnpm run vsce:inspect
+
+      - name: Resolve the packaged file
+        id: vsix
+        run: echo "path=$(ls angular-auto-import-*.vsix)" >> "$GITHUB_OUTPUT"
+
+      # `--skip-duplicate` on both, so re-running a run that failed halfway through
+      # republishes the registry that missed out and leaves the other one alone.
+      #
+      # `--oidc` does not fall back to a token if the exchange fails: a misconfigured
+      # policy is a failed release, not a silent one.
+      - name: Publish to the VS Code Marketplace
+        run: pnpm exec vsce publish --oidc --packagePath "${{ steps.vsix.outputs.path }}" --skip-duplicate
+
+      # Open VSX would use trusted publishing on its own once an ID token is available;
+      # asking for it explicitly makes a missing one fail here rather than fall through to
+      # a token that is not there.
+      - name: Publish to Open VSX
+        run: pnpm exec ovsx publish --trusted-publishing --packagePath "${{ steps.vsix.outputs.path }}" --skip-duplicate
+
+      - name: Attach the VSIX to the release
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" "${{ steps.vsix.outputs.path }}" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
