@@ -20,17 +20,27 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Fixed
 - **Live MCP index**: the standalone server now follows component, directive, and pipe files created, changed, renamed, or deleted during an agent session without a restart or manual reindex
 
-## [3.1.0] – 2026-08-27
+
+## [3.1.1](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.0...3.1.1) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* verify the release pipeline end to end ([992ea5f](https://github.com/BaryshevRS/angular-auto-import/commit/992ea5ffed4a5195db5c7af9265ae2f58c11fb7b))
+
+## [3.1.0] – 2026-09-11
 
 ### Added
 - **Project-wide missing import audit**: the former debug report is now a public Command Palette feature that scans unopened inline templates and literal external `templateUrl` files across the active project, or all discovered workspace projects when no file editor is active
 - **Actionable audit results**: every finding opens its exact template range, and the report shows its scope, scanned project/template counts, and whether cancellation, read failures, or safety limits made the result incomplete
 - **Project-wide Fix All**: a complete audit can re-scan the same scope, confirm exact import/file counts, and repair app and path-mapped library owners in one transactional workspace edit
+- **Fix All in the editor context menu**: `Fix all missing imports in current file` is offered directly in the context menu of HTML files, alongside the Command Palette entry
 
 ### Fixed
 - **Class-qualified selector matching**: Angular selectors containing static classes or `:not(.class)` now follow Angular's own matching rules for static classes, class bindings, references, and structural-directive templates
 - **External template ownership**: external templates are mapped from their component's actual literal `templateUrl` instead of assuming component and template basenames match; ownership is persisted and invalidated with the project index cache
-- **Bulk-edit safety**: stale, incomplete, ambiguous, or otherwise unfixable audits are rejected before any file is changed; prepared edits are opaque and one-shot
+- **Bulk-edit safety**: stale or incomplete audits are rejected before any file is changed; prepared edits are opaque and one-shot
+- **Partial project-wide Fix All**: a single owner the planner cannot edit — an ambiguous decorator, an import name already taken — no longer cancels the repair of every other owner. Those findings are skipped, counted, and named in the result message instead
 
 ### Changed
 - **Honest detection boundary**: the audit reports only missing imports for selectors known to the project/dependency index; it does not claim to validate arbitrary unknown HTML attributes or event bindings

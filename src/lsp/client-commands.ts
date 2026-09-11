@@ -113,78 +113,118 @@ async function generateDiagnosticsReport(context: vscode.ExtensionContext, clien
     { enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [] }
   );
   context.subscriptions.push(panel);
-  let disposed = false;
-  let currentReport = emptyDiagnosticsReport(scope);
+  const session: AuditSession = {
+    panel,
+    client,
+    scope,
+    report: emptyDiagnosticsReport(scope),
+    disposed: false,
+  };
   context.subscriptions.push(
     panel.onDidDispose(() => {
-      disposed = true;
+      session.disposed = true;
     })
   );
-  renderReport(panel, currentReport, true);
+  renderSession(session, true);
 
   const report = await requestDiagnosticsReport(client, scope);
   if (!report) {
     panel.dispose();
     return;
   }
-  currentReport = report;
-  if (disposed) {
+  session.report = report;
+  if (session.disposed) {
     return report;
   }
-  renderReport(panel, report);
-
-  const refreshPanel = async (): Promise<typeof report | undefined> => {
-    if (!disposed) {
-      renderReport(panel, currentReport, true);
-    }
-    const refreshed = await requestDiagnosticsReport(client, scope);
-    if (refreshed) {
-      currentReport = refreshed;
-    }
-    if (!disposed) {
-      renderReport(panel, currentReport);
-    }
-    return refreshed;
-  };
+  renderSession(session);
 
   context.subscriptions.push(
-    panel.webview.onDidReceiveMessage(async (message: unknown) => {
-      if (decodeAuditRefreshMessage(message)) {
-        await refreshPanel();
-        return;
-      }
-      if (decodeAuditFixAllMessage(message)) {
-        let renderedFreshReport = false;
-        await runAuditPanelFixAll({
-          setLoading: (loading) => {
-            if (disposed) {
-              return;
-            }
-            if (loading) {
-              renderedFreshReport = false;
-              renderReport(panel, currentReport, true);
-            } else if (!renderedFreshReport) {
-              renderReport(panel, currentReport);
-            }
-          },
-          apply: async () => vscode.commands.executeCommand("angular-auto-import.fixAllProject", scope),
-          refresh: () => requestDiagnosticsReport(client, scope),
-          render: (refreshed) => {
-            if (refreshed && !disposed) {
-              currentReport = refreshed;
-              renderedFreshReport = true;
-              renderReport(panel, refreshed);
-            }
-          },
-        });
-        return;
-      }
-      await openAuditLocation(message);
-    })
+    panel.webview.onDidReceiveMessage((message: unknown) => handleAuditMessage(session, message))
   );
 
   vscode.window.showInformationMessage(formatAuditCompletionMessage(report));
   return report;
+}
+
+/**
+ * The state one open audit panel carries between the messages it sends.
+ *
+ * A panel outlives every request it makes: the report it is showing and whether it is
+ * still open have to be readable from the refresh path and from the Fix All path alike.
+ * Holding them here rather than in closures is what keeps each handler a function you
+ * can read on its own.
+ * @internal
+ */
+interface AuditSession {
+  readonly panel: vscode.WebviewPanel;
+  readonly client: LanguageClient;
+  readonly scope: ProjectScope;
+  report: DiagnosticsReport;
+  disposed: boolean;
+}
+
+/** Draws the session's current report, unless the user has already closed the panel. */
+function renderSession(session: AuditSession, loading = false): void {
+  if (!session.disposed) {
+    renderReport(session.panel, session.report, loading);
+  }
+}
+
+/** Re-runs the audit over the panel's original scope and shows whatever comes back. */
+async function refreshSession(session: AuditSession): Promise<void> {
+  renderSession(session, true);
+  const refreshed = await requestDiagnosticsReport(session.client, session.scope);
+  if (refreshed) {
+    session.report = refreshed;
+  }
+  renderSession(session);
+}
+
+/**
+ * Runs the panel's Fix All button and leaves the report that the repair produced.
+ *
+ * `renderedFreshReport` is why the loading state is not simply toggled off at the end:
+ * once a fresh report has been drawn, drawing the stale one again on the way out would
+ * show the user the findings that were just fixed.
+ * @internal
+ */
+async function fixAllFromSession(session: AuditSession): Promise<void> {
+  let renderedFreshReport = false;
+  await runAuditPanelFixAll({
+    setLoading: (loading) => {
+      if (session.disposed) {
+        return;
+      }
+      if (loading) {
+        renderedFreshReport = false;
+        renderSession(session, true);
+      } else if (!renderedFreshReport) {
+        renderSession(session);
+      }
+    },
+    apply: async () => vscode.commands.executeCommand("angular-auto-import.fixAllProject", session.scope),
+    refresh: () => requestDiagnosticsReport(session.client, session.scope),
+    render: (refreshed) => {
+      if (refreshed && !session.disposed) {
+        session.report = refreshed;
+        renderedFreshReport = true;
+        renderSession(session);
+      }
+    },
+  });
+}
+
+/** Routes one message from the audit webview to the handler that owns it. */
+async function handleAuditMessage(session: AuditSession, message: unknown): Promise<void> {
+  if (decodeAuditRefreshMessage(message)) {
+    await refreshSession(session);
+    return;
+  }
+  if (decodeAuditFixAllMessage(message)) {
+    await fixAllFromSession(session);
+    return;
+  }
+  await openAuditLocation(message);
 }
 
 function renderReport(

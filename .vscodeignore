@@ -45,3 +45,6 @@ BUG_CSS_CLASS.md
 MCP.md
 dist/mcp.js
 dist/mcp.js.map
+release-please-config.json
+.release-please-manifest.json
+commitlint.config.mjs

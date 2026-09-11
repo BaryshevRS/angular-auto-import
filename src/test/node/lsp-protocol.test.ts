@@ -29,6 +29,7 @@ interface FixAllCounts {
   totalIssues: number;
   filesChanged: number;
   importsAdded: number;
+  skippedIssues: number;
 }
 
 type PreparedFixAllResult =
@@ -55,6 +56,21 @@ const HOST = [
   "  imports: [],",
   "})",
   "export class HostComponent {}",
+  "",
+].join("\n");
+
+/**
+ * An owner the planner must refuse: the shared import planner targets one decorator, so a
+ * file carrying two is ambiguous. Its inline template still reports a real missing import.
+ */
+const AMBIGUOUS_OWNER = [
+  'import { Component } from "@angular/core";',
+  "",
+  '@Component({ selector: "app-first", standalone: true, template: "<shop-badge></shop-badge>" })',
+  "export class FirstComponent {}",
+  "",
+  '@Component({ selector: "app-second", standalone: true, template: "" })',
+  "export class SecondComponent {}",
   "",
 ].join("\n");
 
@@ -375,6 +391,47 @@ describe("LSP protocol", function () {
         );
         assert.match(componentImports, new RegExp(`\\b${className}\\b`));
       }
+    });
+
+    it("fixes the owners it can and counts the one it cannot, rather than refusing everything", async () => {
+      const ambiguousPath = path.join(root, "src", "ambiguous-owner.component.ts");
+      await fs.writeFile(ambiguousPath, AMBIGUOUS_OWNER, "utf8");
+      await harness.client.sendRequest(ReindexRequest, {});
+      await harness.open(hostPath, HOST, "typescript");
+      await harness.open(templatePath, "<shop-card></shop-card>", "html");
+
+      const prepared = (await harness.client.sendRequest(
+        PrepareWorkspaceFixAllRequest,
+        {}
+      )) as unknown as PreparedFixAllResult;
+
+      if (!prepared.ready) {
+        assert.fail(`One unplannable owner sank the whole transaction: ${prepared.reason}`);
+      }
+      assert.deepStrictEqual(
+        { totalIssues: prepared.totalIssues, filesChanged: prepared.filesChanged },
+        { totalIssues: 2, filesChanged: 1 },
+        "The audit must see both owners and plan an edit for exactly the fixable one"
+      );
+      assert.strictEqual(prepared.importsAdded, 1);
+      assert.strictEqual(prepared.skippedIssues, 1);
+
+      const result = await harness.client.sendRequest(ApplyWorkspaceFixAllRequest, {
+        transactionId: prepared.transactionId,
+      });
+
+      assert.strictEqual(result.applied, true);
+      assert.strictEqual(result.skippedIssues, 1);
+      assert.strictEqual(harness.appliedEdits.length, 1);
+
+      const [{ edit }] = harness.appliedEdits as Array<{
+        edit: { documentChanges: Array<{ textDocument: { uri: string }; edits: Array<{ newText: string }> }> };
+      }>;
+      assert.deepStrictEqual(
+        edit.documentChanges.map((change) => change.textDocument.uri),
+        [harness.uri(hostPath)],
+        "The ambiguous owner must be left untouched, not edited on a guess"
+      );
     });
 
     it("does not expose a transaction that is already stale when index generation changes during preparation", async () => {

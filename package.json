@@ -3,7 +3,7 @@
   "displayName": "Angular Auto Import",
   "description": "Intelligent auto-import and MCP tools for Angular components, directives and pipes. Works with templates, external libraries and monorepos.",
   "publisher": "baryshevrs",
-  "version": "3.2.0",
+  "version": "3.1.1",
   "icon": "img/icon.png",
   "galleryBanner": {
     "color": "#0f172a",
@@ -262,13 +262,19 @@
     "benchmark": "pnpm run compile-tests && node scripts/benchmark.mjs",
     "host-cost": "pnpm run package && pnpm run compile-tests && vscode-test --label host-cost",
     "vsce:publish": "vsce publish --no-dependencies",
+    "prepare": "simple-git-hooks",
     "release": "pnpm run vsce:package && pnpm run vsce:publish",
     "docs:build": "rm -rf docs && typedoc",
     "stopslop:badge": "stopslop . --format shields > stopslop-badge.json",
     "context:bundle": "repomix --style markdown --output extension-context.md --include \"src/**/*.ts,package.json,CLAUDE.md,tsconfig*.json,biome.json,stopslop.json,esbuild.js\" --ignore \"src/test/**,node_modules/**,dist/**,out/**,.git/**,**/*.test.ts,**/.DS_Store\""
   },
+  "simple-git-hooks": {
+    "commit-msg": "pnpm exec commitlint --edit \"$1\""
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "~20.19.43",
     "@types/vscode": "^1.105.0",
@@ -281,9 +287,11 @@
     "mocha": "^10.8.2",
     "monocart-coverage-reports": "^2.12.12",
     "npm-run-all": "^4.1.5",
+    "ovsx": "^1.2.0",
     "prettier": "^3.8.4",
     "repomix": "^1.14.1",
-    "stopslop": "^0.1.2",
+    "simple-git-hooks": "^2.14.0",
+    "stopslop": "^1.0.0",
     "tsx": "^4.22.4",
     "typedoc": "^0.28.19",
     "typedoc-plugin-markdown": "^4.12.0",

@@ -58,6 +58,7 @@ interface AppliedFixAll {
   totalIssues: number;
   filesChanged: number;
   importsAdded: number;
+  skippedIssues: number;
   reason?: string;
 }
 
@@ -171,9 +172,10 @@ describe("Project-wide Fix All (v22-nx)", function () {
         totalIssues: outcome.totalIssues,
         filesChanged: outcome.filesChanged,
         importsAdded: outcome.importsAdded,
+        skippedIssues: outcome.skippedIssues,
         reason: outcome.reason,
       },
-      { applied: true, totalIssues: 2, filesChanged: 2, importsAdded: 2, reason: undefined },
+      { applied: true, totalIssues: 2, filesChanged: 2, importsAdded: 2, skippedIssues: 0, reason: undefined },
       `Unexpected project-wide transaction outcome: ${JSON.stringify(outcome)}`
     );
 
@@ -263,9 +265,10 @@ describe("Project-wide Fix All (v22-nx)", function () {
         totalIssues: outcome.totalIssues,
         filesChanged: outcome.filesChanged,
         importsAdded: outcome.importsAdded,
+        skippedIssues: outcome.skippedIssues,
         reason: outcome.reason,
       },
-      { applied: true, totalIssues: 50, filesChanged: 1, importsAdded: 16, reason: undefined },
+      { applied: true, totalIssues: 50, filesChanged: 1, importsAdded: 16, skippedIssues: 0, reason: undefined },
       `Unexpected 50/16/1 transaction outcome: ${JSON.stringify(outcome)}`
     );
 
