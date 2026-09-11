@@ -24,6 +24,10 @@ name: Release
 on:
   push:
     branches: [main]
+  # Releases are otherwise only reachable by pushing to main, which is the wrong tool
+  # when the last run needs repeating — a failed publish, or a release-please pass that
+  # ran before a missing tag was in place.
+  workflow_dispatch:
 
 permissions:
   contents: write
