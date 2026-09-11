@@ -22,14 +22,23 @@
 #               open-vsx.org still runs v1.1.2, so there is no policy to register yet.
 #               Watch `curl https://open-vsx.org/api/version`. Once it reports 1.2.0 or
 #               later, register a publisher at /user-settings/trusted-publishers for this
-#               repository and this workflow file, drop OVSX_PAT, add `id-token: write`,
-#               and pass `--trusted-publishing`.
+#               repository and this workflow file, drop OVSX_PAT, and pass
+#               `--trusted-publishing`. `id-token: write` is granted below already.
 #   Marketplace - unreleased (microsoft/vscode-vsce#1275). It also rejects the
 #               organization-scoped tokens that would have outlived the global ones
 #               (microsoft/vsmarketplace#2121), so VSCE_PAT has to be a global Azure
 #               DevOps PAT — exactly the kind retired on 1 December 2026. That date is a
 #               hard deadline for this workflow: something has to replace this secret
 #               before it, and `vsce publish --oidc` is what it will be.
+#
+# npm is the exception: it has accepted OIDC trusted publishing since July 2025, so
+# NPM_TOKEN is the one secret here that can go away today rather than on a deadline. It
+# cannot go away *first*, because a trusted publisher is configured per package on
+# npmjs.com and there is no package to configure until one version exists. So: this
+# workflow publishes 3.2.0 with the token, and after it lands, register the publisher for
+# angular-auto-import-mcp against this repository and this workflow file, then drop
+# NPM_TOKEN and the `env:` block below. `id-token: write` is already granted — provenance
+# needs it either way — so nothing else changes.
 name: Release
 
 on:
@@ -72,6 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # attach the VSIX to the release release-please just cut
+      id-token: write # sign the npm package's provenance attestation
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +91,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          # Writes the .npmrc that reads NODE_AUTH_TOKEN. Harmless for `pnpm install`,
+          # which resolves against this registry anyway.
+          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
 
@@ -102,6 +115,11 @@ jobs:
       - name: Inspect the VSIX
         run: pnpm run vsce:inspect
 
+      # The same server bundle, copied into packages/mcp by the production esbuild run
+      # that `vsce:package` already triggered. Inspected rather than rebuilt, like the VSIX.
+      - name: Inspect the npm package
+        run: pnpm run mcp:inspect
+
       - name: Resolve the packaged file
         id: vsix
         run: echo "path=$(ls angular-auto-import-*.vsix)" >> "$GITHUB_OUTPUT"
@@ -117,6 +135,20 @@ jobs:
         run: pnpm exec ovsx publish --packagePath "${{ steps.vsix.outputs.path }}" --skip-duplicate
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      # npm has no `--skip-duplicate`, so the property the other two publishes get from a
+      # flag is spelled out: a re-run of a partly failed release must not fail on the
+      # registry that already has this version.
+      - name: Publish to npm
+        run: |
+          version=$(node -p "require('./packages/mcp/package.json').version")
+          if npm view "angular-auto-import-mcp@$version" version >/dev/null 2>&1; then
+            echo "angular-auto-import-mcp@$version is already published; leaving it alone."
+            exit 0
+          fi
+          npm publish ./packages/mcp --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Attach the VSIX to the release
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" "${{ steps.vsix.outputs.path }}" --clobber

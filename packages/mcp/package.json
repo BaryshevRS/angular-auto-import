@@ -1,6 +1,6 @@
 {
   "name": "angular-auto-import-mcp",
-  "version": "3.2.0",
+  "version": "3.1.1",
   "description": "Project-aware MCP tools for Angular templates, components, directives, pipes and imports.",
   "license": "MIT",
   "bin": {
