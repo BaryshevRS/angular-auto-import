@@ -13,12 +13,23 @@
 # editor, a display, and fixture dependencies this repository does not track. Run
 # `pnpm run test:e2e:v22:parallel` locally before merging the release PR.
 #
-# Neither registry is given a stored token. Both exchange this workflow's OIDC identity for
-# a credential that lives a few minutes, against a policy each registry holds naming this
-# repository and this file. That is why `id-token: write` is here, and why renaming this
-# file breaks publishing until the policies are updated to match. It also sidesteps the
-# retirement of Azure DevOps global PATs on 1 December 2026, which is what a
-# `vsce`-compatible Marketplace token used to have to be.
+# Both registries authenticate with a stored token, because as of September 2026 neither
+# accepts anything better yet. Both publishing CLIs already carry the flags for trusted
+# publishing, which is what makes this look out of date on a first read — they ship ahead
+# of the servers they talk to:
+#
+#   Open VSX  - the registry gained it in openvsx v1.2.0, released 10 September 2026;
+#               open-vsx.org still runs v1.1.2, so there is no policy to register yet.
+#               Watch `curl https://open-vsx.org/api/version`. Once it reports 1.2.0 or
+#               later, register a publisher at /user-settings/trusted-publishers for this
+#               repository and this workflow file, drop OVSX_PAT, add `id-token: write`,
+#               and pass `--trusted-publishing`.
+#   Marketplace - unreleased (microsoft/vscode-vsce#1275). It also rejects the
+#               organization-scoped tokens that would have outlived the global ones
+#               (microsoft/vsmarketplace#2121), so VSCE_PAT has to be a global Azure
+#               DevOps PAT — exactly the kind retired on 1 December 2026. That date is a
+#               hard deadline for this workflow: something has to replace this secret
+#               before it, and `vsce publish --oidc` is what it will be.
 name: Release
 
 on:
@@ -61,7 +72,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # attach the VSIX to the release release-please just cut
-      id-token: write # the OIDC identity both registries exchange for a short-lived token
     steps:
       - uses: actions/checkout@v4
 
@@ -98,17 +108,15 @@ jobs:
 
       # `--skip-duplicate` on both, so re-running a run that failed halfway through
       # republishes the registry that missed out and leaves the other one alone.
-      #
-      # `--oidc` does not fall back to a token if the exchange fails: a misconfigured
-      # policy is a failed release, not a silent one.
       - name: Publish to the VS Code Marketplace
-        run: pnpm exec vsce publish --oidc --packagePath "${{ steps.vsix.outputs.path }}" --skip-duplicate
+        run: pnpm exec vsce publish --packagePath "${{ steps.vsix.outputs.path }}" --skip-duplicate
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
-      # Open VSX would use trusted publishing on its own once an ID token is available;
-      # asking for it explicitly makes a missing one fail here rather than fall through to
-      # a token that is not there.
       - name: Publish to Open VSX
-        run: pnpm exec ovsx publish --trusted-publishing --packagePath "${{ steps.vsix.outputs.path }}" --skip-duplicate
+        run: pnpm exec ovsx publish --packagePath "${{ steps.vsix.outputs.path }}" --skip-duplicate
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
       - name: Attach the VSIX to the release
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" "${{ steps.vsix.outputs.path }}" --clobber
