@@ -4,6 +4,13 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.1.1](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.0...3.1.1) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* verify the release pipeline end to end ([992ea5f](https://github.com/BaryshevRS/angular-auto-import/commit/992ea5ffed4a5195db5c7af9265ae2f58c11fb7b))
+
 ## [3.1.0] – 2026-09-11
 
 ### Added
