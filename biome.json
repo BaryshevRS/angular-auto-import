@@ -223,7 +223,8 @@
         "!src/lsp/client.ts",
         "!src/lsp/client-commands.ts",
         "!src/lsp/client-status.ts",
-        "!src/lsp/client-mcp.ts"
+        "!src/lsp/client-mcp.ts",
+        "!src/lsp/client-agent-tools.ts"
       ],
       "linter": {
         "rules": {

@@ -91,6 +91,104 @@
         "label": "Angular Auto-Import"
       }
     ],
+    "languageModelTools": [
+      {
+        "name": "angular-auto-import_describeProject",
+        "displayName": "Angular project overview",
+        "modelDescription": "Get the shape of this Angular workspace before writing any of it: the installed Angular version, whether its components are standalone or NgModule-based, which UI libraries its files actually import and how widely, and the path aliases imports are written with. Call this once before your first file. None of it can be guessed from knowing Angular: a workspace with both Angular Material and ng-zorro installed uses one of them, and writing the other produces correct Angular that does not belong in this repository.",
+        "userDescription": "Report the Angular version, conventions and libraries this workspace uses.",
+        "toolReferenceName": "angularProject",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(project)",
+        "tags": ["angular", "angular-auto-import"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fromFile": {
+              "type": "string",
+              "description": "Absolute path to any file in the project being asked about. Optional: the open editor's project is used when it is omitted."
+            }
+          }
+        }
+      },
+      {
+        "name": "angular-auto-import_findElement",
+        "displayName": "Find an Angular element",
+        "modelDescription": "Find a component, directive or pipe in this workspace by describing what you need: \"date picker\", \"table\", \"modal\". Searches the workspace's own elements and every installed library. Results are ranked by what this repository actually writes, not by what it has installed, so the first hit is the one that belongs here. Each carries the specifier to import it from and the inputs it requires; ask describeElement for the rest of its surface. Every word must match. An empty answer means try another word for the same thing - it does not mean the workspace has nothing of the kind.",
+        "userDescription": "Search this workspace and its libraries for a component, directive or pipe.",
+        "toolReferenceName": "angularFind",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(search)",
+        "tags": ["angular", "angular-auto-import"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "What the element is for, in words. One or two words work better than a sentence."
+            },
+            "type": {
+              "type": "string",
+              "enum": ["component", "directive", "pipe"],
+              "description": "Narrow the search when the intent already says which kind you need."
+            },
+            "fromFile": {
+              "type": "string",
+              "description": "Absolute path to any file in the project being searched. Optional: the open editor's project is used when it is omitted."
+            }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "angular-auto-import_describeElement",
+        "displayName": "Angular element API",
+        "modelDescription": "Look up an Angular component, directive or pipe in this workspace and get its real public surface: the inputs it takes with their exact names and which are required, the outputs it emits, where it projects content, and the specifier to import it from. Call this before binding anything you did not declare yourself. Input names are a fact about this workspace, not about Angular: a component may take `loadingState` where every other library takes `isLoading`, and no amount of Angular knowledge will tell you which. Ask by selector or by class name, whichever you have.",
+        "userDescription": "Report the real inputs, outputs and import path of one Angular element.",
+        "toolReferenceName": "angularElement",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(symbol-class)",
+        "tags": ["angular", "angular-auto-import"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "A selector such as `nz-table`, or a class name such as `NzTableComponent`."
+            },
+            "fromFile": {
+              "type": "string",
+              "description": "Absolute path to any file in the project the element is used from; import specifiers are resolved relative to it. Optional: the open editor's project is used when it is omitted."
+            }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "angular-auto-import_verifyTemplate",
+        "displayName": "Verify an Angular template",
+        "modelDescription": "Check an Angular template against what its component can actually use, and get back the imports that make it work. Call this before writing or editing any Angular template, and again after changing one. Do not guess whether a component, directive or pipe is available and do not grep for it: this answers from the project's real index, including every installed library. Returns each problem with its line, the token that caused it, which classes would satisfy it and the module specifier to import each from, plus the component file rewritten with the imports added. An empty problems list means the template compiles as far as imports go.",
+        "userDescription": "Check a template for missing imports and return the component file that fixes them.",
+        "toolReferenceName": "verifyAngularTemplate",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(check)",
+        "tags": ["angular", "angular-auto-import"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "type": "string",
+              "description": "Absolute path to the component's TypeScript file, the one carrying the @Component decorator."
+            },
+            "template": {
+              "type": "string",
+              "description": "The template to check, as HTML. This need not be the template the component currently has: pass the one you are about to write."
+            }
+          },
+          "required": ["component", "template"]
+        }
+      }
+    ],
     "commands": [
       {
         "command": "angular-auto-import.reindex",

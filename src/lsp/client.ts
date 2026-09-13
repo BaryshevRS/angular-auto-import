@@ -18,6 +18,7 @@ import {
 } from "vscode-languageclient/node";
 import { CONFIGURATION_SECTION, readSettingsSection } from "../config/settings";
 import { logger } from "../logger";
+import { registerAgentTools } from "./client-agent-tools";
 import { registerClientCommands } from "./client-commands";
 import { createProjectsStatusItem } from "./client-status";
 import { CRASH_NOTIFICATION, ProjectsStatusNotification } from "./protocol";
@@ -87,6 +88,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
   context.subscriptions.push(started.onNotification(ProjectsStatusNotification, showProjectsStatus));
 
   registerClientCommands(context, started);
+  registerAgentTools(context, started);
   if (process.env[CRASH_COMMAND_ENV] === "1") {
     context.subscriptions.push(
       vscode.commands.registerCommand("angular-auto-import.test.crashAndWaitForRestart", crashAndWaitForRestart)

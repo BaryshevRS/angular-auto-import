@@ -25,11 +25,13 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { toCancellationSignal } from "../adapters/lsp/cancellation";
 import { toDocumentView } from "../adapters/lsp/document";
 import { type AngularCompilerApi, loadAngularCompiler } from "../core/angular-compiler";
-import { fileUriToPath } from "../core/document";
+import { fileUriToPath, pathToFileUri } from "../core/document";
 import { installSharedLogger } from "../core/logging";
 import { AngularProjectDiscovery } from "../core/project-discovery";
 import { DEFAULT_EXTENSION_CONFIG, resolveExtensionConfig } from "../core/settings";
+import { type IndexedProject, indexedProject } from "../mcp/indexed-project";
 import { clearTemplateCache } from "../utils/template-detection";
+import { AgentTools } from "./agent-tools";
 import { CodeActionHandler } from "./code-actions";
 import { CompletionHandler } from "./completion";
 import { DefinitionHandler } from "./definition";
@@ -43,6 +45,10 @@ import { ProjectRouter } from "./project-router";
 import { ProjectRuntimeHost } from "./project-runtime-host";
 import { describeProjectsStatus } from "./projects-status";
 import {
+  AgentDescribeElementRequest,
+  AgentDescribeProjectRequest,
+  AgentFindElementRequest,
+  AgentVerifyTemplateRequest,
   ApplyWorkspaceFixAllRequest,
   CRASH_NOTIFICATION,
   DiagnosticsReportRequest,
@@ -146,6 +152,7 @@ export function createServer(connection: Connection, options: ServerOptions = {}
   registerDocumentTracking(context);
   registerLanguageFeatures(context, options);
   registerOperations(context);
+  registerAgentTools(context);
 
   context.openDocuments.listen();
   context.documents.listen(connection);
@@ -604,6 +611,69 @@ function registerLanguageFeatures(context: ServerContext, options: ServerOptions
       process.exit(86);
     });
   }
+}
+
+/**
+ * Registers the questions an agent asks, answered from the index the editor already has.
+ *
+ * The standalone MCP server answers the same four from an index of its own, because
+ * outside an editor there is no other. Inside one, a second index of the same workspace
+ * would be paid for twice and kept current twice, so these route to the first.
+ * @internal
+ */
+function registerAgentTools(context: ServerContext): void {
+  const { connection, state } = context;
+
+  // One view per root, so the library-usage count a view caches survives from question
+  // to question; rebuilt when discovery replaces the root's runtime.
+  const views = new Map<string, IndexedProject>();
+
+  const tools = new AgentTools({
+    projectFor: async (filePath) => {
+      const projects = state.projects;
+      if (!projects) {
+        return undefined;
+      }
+
+      // Routed through discovery exactly as an opened document is, so a project no
+      // editor in this window has touched is still found and indexed.
+      await projects.handleDocument({ uri: pathToFileUri(filePath), languageId: languageIdOf(filePath) });
+
+      const rootPath = projects.rootForPath(filePath);
+      const runtime = rootPath ? state.runtimes?.get(rootPath) : undefined;
+      if (!rootPath || !runtime) {
+        return undefined;
+      }
+
+      await context.loadCompiler();
+      const compiler = state.compiler;
+      if (!compiler) {
+        return undefined;
+      }
+
+      const known = views.get(rootPath);
+      if (known?.runtime === runtime && known.compiler === compiler) {
+        return known;
+      }
+
+      const view = indexedProject(runtime, compiler);
+      views.set(rootPath, view);
+      return view;
+    },
+  });
+
+  connection.onRequest(AgentDescribeProjectRequest, (query) => tools.describeProject(query));
+  connection.onRequest(AgentFindElementRequest, (query) => tools.findElement(query));
+  connection.onRequest(AgentDescribeElementRequest, (query) => tools.describeElement(query));
+  connection.onRequest(AgentVerifyTemplateRequest, (query) => tools.verifyTemplate(query));
+}
+
+/**
+ * What language a path is, for the sole purpose of routing it through discovery.
+ * @internal
+ */
+function languageIdOf(filePath: string): string {
+  return filePath.endsWith(".html") ? "html" : "typescript";
 }
 
 /**

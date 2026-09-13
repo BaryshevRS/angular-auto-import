@@ -15,20 +15,9 @@ import { type AngularCompilerApi, adoptAngularCompiler } from "../core/angular-c
 import { AngularProjectDiscovery, nodeManifestReader } from "../core/project-discovery";
 import { findDeepestContainingProjectRoot } from "../core/project-registry";
 import { ProjectRuntime } from "../lsp/project-runtime";
-import { countImporters, packageOf } from "./library-usage";
+import { type IndexedProject, indexedProject } from "./indexed-project";
 
-/** A project, indexed and ready to answer. */
-export interface IndexedProject {
-  runtime: ProjectRuntime;
-  compiler: AngularCompilerApi;
-  /**
-   * How many of the project's files import from each installed package.
-   *
-   * Counted on the first question that needs it and reused until the live index changes,
-   * because it reads every source file in the workspace.
-   */
-  libraryUsage(): Promise<ReadonlyMap<string, number>>;
-}
+export type { IndexedProject };
 
 /**
  * The projects this process has been asked about.
@@ -97,20 +86,7 @@ export class Workspace {
   private async load(root: string): Promise<IndexedProject> {
     const runtime = new ProjectRuntime(root, { fileWatchers: this.fileWatchers });
     await runtime.load();
-
-    let usage: Promise<ReadonlyMap<string, number>> | undefined;
-    let usageGeneration = -1;
-    return {
-      runtime,
-      compiler: await this.angularCompiler(),
-      libraryUsage: () => {
-        if (!usage || usageGeneration !== runtime.indexGeneration) {
-          usageGeneration = runtime.indexGeneration;
-          usage = countImporters(runtime, installedPackages(runtime));
-        }
-        return usage;
-      },
-    };
+    return indexedProject(runtime, await this.angularCompiler());
   }
 
   /**
@@ -125,21 +101,4 @@ export class Workspace {
     this.compiler ??= import("@angular/compiler").then((module) => adoptAngularCompiler(module));
     return this.compiler;
   }
-}
-
-/**
- * The packages this project's index holds elements from.
- *
- * Only these are worth counting: a file importing `rxjs` says nothing about which UI
- * library a template should be written with.
- * @internal
- */
-function installedPackages(runtime: ProjectRuntime): Set<string> {
-  const packages = new Set<string>();
-  for (const { element } of runtime.indexer.searchWithSelectors("")) {
-    if (element.isExternal) {
-      packages.add(packageOf(element.path));
-    }
-  }
-  return packages;
 }

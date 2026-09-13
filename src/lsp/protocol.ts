@@ -7,13 +7,19 @@
  * other rather than at runtime.
  *
  * This module is deliberately dependency-light: only the protocol package, no `vscode`,
- * no `ts-morph`, no server internals. Every payload is a plain serializable DTO, since
- * everything here crosses a JSON-RPC boundary.
+ * no `ts-morph`, no server internals. The agent answers below are imported for their
+ * shape alone; the modules declaring them must never be imported here for a value.
+ * Every payload is a plain serializable DTO, since everything here crosses a JSON-RPC
+ * boundary.
  * @module
  */
 
 import { NotificationType, RequestType, RequestType0 } from "vscode-languageserver-protocol";
 import type { CoreDiagnosticSeverity, CoreRange } from "../core/language-types";
+import type { ElementApiAnswer } from "../mcp/element-api";
+import type { Orientation } from "../mcp/orient";
+import type { SearchAnswer } from "../mcp/search";
+import type { TemplateVerdict } from "../mcp/verify-template";
 
 /**
  * Kills the server, so a test can prove the client brings a new one up.
@@ -209,4 +215,67 @@ export const PrepareWorkspaceFixAllRequest = new RequestType<ProjectScope, Prepa
 /** Applies exactly one previously prepared transaction. */
 export const ApplyWorkspaceFixAllRequest = new RequestType<{ transactionId: string }, AppliedWorkspaceFixAll, void>(
   "angularAutoImport/applyFixAll"
+);
+
+/**
+ * The four questions an agent asks, routed to the index the editor already has.
+ *
+ * The same answers are published over the Model Context Protocol by the standalone
+ * server, which indexes a project of its own. Inside the editor there is no reason to
+ * pay for a second index: the extension contributes these as language-model tools and
+ * forwards them here, where a project is already loaded for the editor's own features.
+ */
+
+/**
+ * An answer, or the one sentence explaining why there is none.
+ *
+ * A path that belongs to no Angular project is the ordinary case here rather than a
+ * fault: an agent names files it has not checked. It is reported as text the model can
+ * act on, not as a request failure it would have to interpret.
+ */
+export type AgentAnswer<T> = { answered: true; answer: T } | { answered: false; problem: string };
+
+/** Every agent question names a file, because the project that owns it gives the answer. */
+export interface AgentFileQuery {
+  /** Absolute path of any file in the project being asked about. */
+  fromFile: string;
+}
+
+/** Finding an element by what it is for. */
+export interface AgentSearchQuery extends AgentFileQuery {
+  query: string;
+  type?: "component" | "directive" | "pipe";
+}
+
+/** Looking one element up by selector or class name. */
+export interface AgentElementQuery extends AgentFileQuery {
+  query: string;
+}
+
+/** Checking a template the agent is about to write against its component. */
+export interface AgentTemplateQuery {
+  /** Absolute path of the file carrying the `@Component` decorator. */
+  component: string;
+  /** The template to check, which need not be the one the component currently has. */
+  template: string;
+}
+
+/** What kind of Angular project this is: version, conventions, libraries, aliases. */
+export const AgentDescribeProjectRequest = new RequestType<AgentFileQuery, AgentAnswer<Orientation>, void>(
+  "angularAutoImport/agent/describeProject"
+);
+
+/** Elements matching a description, ranked by what this workspace actually writes. */
+export const AgentFindElementRequest = new RequestType<AgentSearchQuery, AgentAnswer<SearchAnswer>, void>(
+  "angularAutoImport/agent/findElement"
+);
+
+/** One element's real surface: inputs, outputs, content slots, import specifier. */
+export const AgentDescribeElementRequest = new RequestType<AgentElementQuery, AgentAnswer<ElementApiAnswer>, void>(
+  "angularAutoImport/agent/describeElement"
+);
+
+/** A template's missing imports, and the component file rewritten with them added. */
+export const AgentVerifyTemplateRequest = new RequestType<AgentTemplateQuery, AgentAnswer<TemplateVerdict>, void>(
+  "angularAutoImport/agent/verifyTemplate"
 );
