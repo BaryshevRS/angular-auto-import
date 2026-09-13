@@ -9,60 +9,27 @@
 [![GitHub issues](https://img.shields.io/github/issues/BaryshevRS/angular-auto-import?style=flat-square)](https://github.com/BaryshevRS/angular-auto-import/issues)
 [![Last commit](https://img.shields.io/github/last-commit/BaryshevRS/angular-auto-import?style=flat-square)](https://github.com/BaryshevRS/angular-auto-import/commits/main)
 
-**Stop manually importing Angular components, directives, and pipes.** Let Angular Auto-Import handle it for you with intelligent Quick Fixes and bulk import capabilities.
+**Fix every missing import in a template at once** — components, directives and pipes, whether they come from your own project, from Angular Material, PrimeNG, NG-ZORRO or Taiga UI, or from the private library nobody wrote documentation for.
 
 ![Angular Auto-Import in action](https://raw.githubusercontent.com/ngx-rock/vscode-angular-auto-import/refs/heads/main/img/demo.gif)
 
 ## Why Angular Auto-Import?
 
-Angular Auto-Import transforms how you work with Angular templates by eliminating the tedious task of manually importing components, directives, and pipes. Just use the element in your template, and let the extension handle the rest.
+Importing one element at a time is not the problem. Opening a template that needs fifteen of them is. This extension repairs the file in one command — and the whole project in one more, including the templates you never opened.
+
+The same index answers your AI assistant, so it stops inventing components and input names that do not exist in your workspace.
 
 ### Key Highlights
 
-- **Project-Wide Missing Import Audit** - Find missing imports in inline and external templates even when those files were never opened in VS Code
-- **Project-Wide Fix All** - Confirm one atomic edit that repairs every fixable finding in the audited project or workspace
-- **Go to Definition** - Navigate to any unimported element's source with a single click (Material Design, Angular CDK, any npm package)
-- **Intelligent Quick Fixes** - Get instant import suggestions with enhanced accuracy and performance
-- **MCP for Coding Agents** - Let agents inspect the real components, bindings, libraries, and import paths in this workspace
-- **Works with External Libraries** - Auto-import from any Angular library in your node_modules
-- **Monorepo Ready** - Seamless support for Nx and multi-project workspaces 
+- **Fix All in One Command** - Every missing component, directive and pipe in the current file, in one edit
+- **Project-Wide Audit and Repair** - Find and fix missing imports across inline and external templates that were never opened in VS Code, as one atomic edit
+- **Pipes and Attribute Directives Too** - `| translate`, `matTooltip`, `mat-raised-button`: the cases a template hits constantly and tooling usually skips
+- **Any Library, Including Yours** - Angular Material, PrimeNG, NG-ZORRO, Taiga UI, any npm package, and your own path-mapped design system
+- **Answers for Coding Agents** - Copilot, Cursor and Claude Code can ask what this workspace really contains: selectors, inputs, outputs, import paths
+- **Go to Definition** - Jump to any unimported element's source, before importing it
+- **Monorepo Ready** - Nx, multi-project and multi-root workspaces
 
 ## Features
-
-### Angular Auto-Import MCP
-
-The extension registers a project-aware MCP server with VS Code automatically. Coding
-agents can ask what Angular elements the workspace actually contains instead of guessing
-component APIs or import paths from training data. Multi-root workspaces are passed to the
-same server explicitly, and each request is routed to the project that owns its file.
-
-The server offers four tools:
-
-- `describe_project` reports the Angular version, standalone/NgModule balance,
-  path aliases, and which component libraries the project actually uses.
-- `find_element` finds components, directives, and pipes by purpose or name,
-  ranked by local project usage.
-- `describe_element` returns exact inputs, required bindings, outputs, content slots,
-  host directives, and the import specifier for an element.
-- `verify_template` checks a proposed template and returns both the missing imports
-  and an updated component file.
-
-For Claude Code, Cursor, and other MCP hosts outside VS Code, use the standalone npm package:
-
-```json
-{
-  "mcpServers": {
-    "angular-auto-import": {
-      "command": "npx",
-      "args": ["-y", "angular-auto-import-mcp"]
-    }
-  }
-}
-```
-
-Start the command from the Angular workspace root. If the host uses another working
-directory, append `"--workspace-root", "/absolute/path/to/workspace"` to `args`. Repeat
-the option for a multi-root workspace.
 
 ### 🔎 Project-Wide Missing Import Audit
 
@@ -121,6 +88,41 @@ Navigate directly to the source of any unimported Angular component, directive, 
 <!-- No import needed - just Ctrl+Click to see the source -->
 <button mat-raised-button>Click Me</button>
 ```
+
+### Angular Auto-Import MCP
+
+The extension registers a project-aware MCP server with VS Code automatically. Coding
+agents can ask what Angular elements the workspace actually contains instead of guessing
+component APIs or import paths from training data. Multi-root workspaces are passed to the
+same server explicitly, and each request is routed to the project that owns its file.
+
+The server offers four tools:
+
+- `describe_project` reports the Angular version, standalone/NgModule balance,
+  path aliases, and which component libraries the project actually uses.
+- `find_element` finds components, directives, and pipes by purpose or name,
+  ranked by local project usage.
+- `describe_element` returns exact inputs, required bindings, outputs, content slots,
+  host directives, and the import specifier for an element.
+- `verify_template` checks a proposed template and returns both the missing imports
+  and an updated component file.
+
+For Claude Code, Cursor, and other MCP hosts outside VS Code, use the standalone npm package:
+
+```json
+{
+  "mcpServers": {
+    "angular-auto-import": {
+      "command": "npx",
+      "args": ["-y", "angular-auto-import-mcp"]
+    }
+  }
+}
+```
+
+Start the command from the Angular workspace root. If the host uses another working
+directory, append `"--workspace-root", "/absolute/path/to/workspace"` to `args`. Repeat
+the option for a multi-root workspace.
 
 ### Additional Features
 
