@@ -89,14 +89,17 @@ Navigate directly to the source of any unimported Angular component, directive, 
 <button mat-raised-button>Click Me</button>
 ```
 
-### Angular Auto-Import MCP
+### Answers for Coding Agents
 
-The extension registers a project-aware MCP server with VS Code automatically. Coding
-agents can ask what Angular elements the workspace actually contains instead of guessing
-component APIs or import paths from training data. Multi-root workspaces are passed to the
-same server explicitly, and each request is routed to the project that owns its file.
+Coding agents can ask what Angular elements the workspace actually contains, instead of
+guessing component APIs or import paths from training data. Nothing has to be installed
+or configured: in VS Code the four answers below are contributed as chat tools, so agent
+mode picks them up and every question is answered by the language server that already has
+this workspace indexed. In editors without those tools, the same four are offered as a
+project-aware MCP server instead. Multi-root workspaces are routed to the project that
+owns each file either way.
 
-The server offers four tools:
+The four answers:
 
 - `describe_project` reports the Angular version, standalone/NgModule balance,
   path aliases, and which component libraries the project actually uses.
@@ -107,7 +110,7 @@ The server offers four tools:
 - `verify_template` checks a proposed template and returns both the missing imports
   and an updated component file.
 
-For Claude Code, Cursor, and other MCP hosts outside VS Code, use the standalone npm package:
+For Claude Code and other MCP hosts outside the editor, run the same server from npm:
 
 ```json
 {

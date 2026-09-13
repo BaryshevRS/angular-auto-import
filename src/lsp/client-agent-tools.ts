@@ -7,12 +7,16 @@
  * this workspace indexed already for the editor's own features.
  *
  * The MCP server stays for everything outside this window — Claude Code, Cursor, a
- * terminal — where there is no language server to ask.
+ * terminal — where there is no language server to ask. Inside one it is offered only
+ * when these are refused, because both answer the same four questions: listing them
+ * twice spends a model's attention on the choice, and the wrong choice starts a second
+ * index of a workspace this window has already indexed.
  * @module
  */
 
 import * as vscode from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
+import { logger } from "../logger";
 import {
   AgentDescribeElementRequest,
   AgentDescribeProjectRequest,
@@ -45,22 +49,51 @@ interface VerifyTemplateInput {
  * Registers the language-model tools this extension contributes.
  * @param context The extension context, which owns the registrations.
  * @param client The running language client, which holds the indexed projects.
+ * @returns Whether the editor accepted them; `false` asks the caller for the MCP server
+ * instead. Editors built on this API surface do not all implement it, and one that
+ * publishes `registerTool` may still ignore the manifest that declares what to register
+ * — so this reports what actually happened rather than what the API suggests.
  */
-export function registerAgentTools(context: vscode.ExtensionContext, client: LanguageClient): void {
-  context.subscriptions.push(
-    tool<FileScopedInput>("angular-auto-import_describeProject", (input) =>
-      client.sendRequest(AgentDescribeProjectRequest, scope(input))
-    ),
-    tool<FindElementInput>("angular-auto-import_findElement", (input) =>
-      client.sendRequest(AgentFindElementRequest, { ...scope(input), query: input.query, type: input.type })
-    ),
-    tool<DescribeElementInput>("angular-auto-import_describeElement", (input) =>
-      client.sendRequest(AgentDescribeElementRequest, { ...scope(input), query: input.query })
-    ),
-    tool<VerifyTemplateInput>("angular-auto-import_verifyTemplate", (input) =>
-      client.sendRequest(AgentVerifyTemplateRequest, { component: input.component, template: input.template })
-    )
-  );
+export function registerAgentTools(context: vscode.ExtensionContext, client: LanguageClient): boolean {
+  if (typeof vscode.lm?.registerTool !== "function") {
+    return false;
+  }
+
+  // Registered one at a time and collected as they land, so a refusal partway through
+  // leaves nothing half-offered: the ones already taken are given back before the caller
+  // is told to fall back.
+  const registered: vscode.Disposable[] = [];
+  try {
+    registered.push(
+      tool<FileScopedInput>("angular-auto-import_describeProject", (input) =>
+        client.sendRequest(AgentDescribeProjectRequest, scope(input))
+      )
+    );
+    registered.push(
+      tool<FindElementInput>("angular-auto-import_findElement", (input) =>
+        client.sendRequest(AgentFindElementRequest, { ...scope(input), query: input.query, type: input.type })
+      )
+    );
+    registered.push(
+      tool<DescribeElementInput>("angular-auto-import_describeElement", (input) =>
+        client.sendRequest(AgentDescribeElementRequest, { ...scope(input), query: input.query })
+      )
+    );
+    registered.push(
+      tool<VerifyTemplateInput>("angular-auto-import_verifyTemplate", (input) =>
+        client.sendRequest(AgentVerifyTemplateRequest, { component: input.component, template: input.template })
+      )
+    );
+  } catch (error) {
+    for (const disposable of registered) {
+      disposable.dispose();
+    }
+    logger.warn(`Angular Auto-Import: this editor refused the chat tools (${String(error)}); offering MCP instead.`);
+    return false;
+  }
+
+  context.subscriptions.push(...registered);
+  return true;
 }
 
 /**

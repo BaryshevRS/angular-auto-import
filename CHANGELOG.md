@@ -12,7 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Template verification for agents**: `verify_template` checks a proposed template against the owning component and returns the imports and rewritten component source that make it compile
 - **Automatic VS Code registration**: the extension contributes the MCP server directly to VS Code, including explicit routing across multi-root workspaces; no separate setup is required in the editor
 - **Standalone MCP package**: non-VS Code clients can run the same server through the `angular-auto-import-mcp` npm package
-- **Tools in the editor's own chat**: the same four answers are contributed as VS Code language-model tools, so Copilot agent mode can call them with no MCP configuration and no second index — every question is answered by the language server that already has the workspace indexed
+- **Tools in the editor's own chat**: the same four answers are contributed as VS Code language-model tools, so Copilot agent mode can call them with no MCP configuration and no second index — every question is answered by the language server that already has the workspace indexed. The MCP server is registered in the editor only where those tools are refused, so the two never list the same answer twice
 
 ### Changed
 - **Richer project index**: project and library elements now retain inputs, outputs, content selectors, host directives, and inherited bindings for editor and agent features alike

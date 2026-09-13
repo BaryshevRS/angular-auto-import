@@ -20,6 +20,7 @@ import { CONFIGURATION_SECTION, readSettingsSection } from "../config/settings";
 import { logger } from "../logger";
 import { registerAgentTools } from "./client-agent-tools";
 import { registerClientCommands } from "./client-commands";
+import { registerMcpServer } from "./client-mcp";
 import { createProjectsStatusItem } from "./client-status";
 import { CRASH_NOTIFICATION, ProjectsStatusNotification } from "./protocol";
 import type { ServerInitializationOptions } from "./server-environment";
@@ -88,7 +89,14 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
   context.subscriptions.push(started.onNotification(ProjectsStatusNotification, showProjectsStatus));
 
   registerClientCommands(context, started);
-  registerAgentTools(context, started);
+
+  // Two doors to the same four answers. This editor's own tools are the better one: no
+  // second process, and no second index of a workspace this window has already indexed.
+  // The MCP server is offered only where they are refused, which is every editor that
+  // borrows this API surface without implementing it.
+  if (!registerAgentTools(context, started)) {
+    registerMcpServer(context);
+  }
   if (process.env[CRASH_COMMAND_ENV] === "1") {
     context.subscriptions.push(
       vscode.commands.registerCommand("angular-auto-import.test.crashAndWaitForRestart", crashAndWaitForRestart)
