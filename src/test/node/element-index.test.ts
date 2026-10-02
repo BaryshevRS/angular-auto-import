@@ -343,6 +343,33 @@ describe("AngularElementIndex module exports", () => {
     );
   });
 
+  it("expands a re-export that names no origin through every declaration of the name", () => {
+    // Nothing says which `InnerModule` was meant and none is declared beside the outer
+    // one, so the name is all there is to go on.
+    const index = new AngularElementIndex();
+    const outer = entry("@acme/outer", ["InnerModule"]);
+    index.addModuleExports("OuterModule", outer);
+    index.addModuleExports("InnerModule", entry("@acme/inner", ["InnerDirective"]));
+
+    assert.deepStrictEqual(
+      index.expandModuleExports("OuterModule", outer, new Set()),
+      new Set(["InnerModule", "InnerDirective"])
+    );
+  });
+
+  it("prefers the declaration beside it for a re-export that names no origin", () => {
+    const index = new AngularElementIndex();
+    const outer = entry("@acme/lib", ["InnerModule"]);
+    index.addModuleExports("OuterModule", outer);
+    index.addModuleExports("InnerModule", entry("@acme/lib", ["OwnDirective"]));
+    index.addModuleExports("InnerModule", entry("@other/lib", ["ForeignDirective"]));
+
+    assert.deepStrictEqual(
+      index.expandModuleExports("OuterModule", outer, new Set()),
+      new Set(["InnerModule", "OwnDirective"])
+    );
+  });
+
   it("stops expanding when modules re-export each other", () => {
     const index = new AngularElementIndex();
     const first = entry("src/app/first.module.ts", ["SecondModule", "First"]);
@@ -365,6 +392,45 @@ describe("AngularElementIndex module exports", () => {
 
     assert.strictEqual(index.moduleExports, moduleExports, "Holders of the map must observe the new contents");
     assert.deepStrictEqual([...moduleExports.keys()], ["FreshModule"]);
+  });
+});
+
+describe("AngularElementIndex component modules", () => {
+  it("suggests the module that fits the element best, whatever order they were read in", () => {
+    const index = new AngularElementIndex();
+    index.addComponentModule("ButtonComponent", {
+      moduleName: "SharedModule",
+      importPath: "@acme/shared",
+      exportCount: 40,
+    });
+    index.addComponentModule("ButtonComponent", {
+      moduleName: "ButtonModule",
+      importPath: "@acme/button",
+      exportCount: 1,
+    });
+
+    assert.strictEqual(index.getComponentModule("ButtonComponent")?.moduleName, "ButtonModule");
+  });
+
+  it("keeps two modules one file declares, and replaces what one of them said before", () => {
+    // CardModule is the better fit while CardsModule exports thirty things; once CardsModule
+    // is read again exporting nothing else, it is.
+    const index = new AngularElementIndex();
+    index.addComponentModule("CardComponent", { moduleName: "CardModule", importPath: "src/cards", exportCount: 1 });
+    index.addComponentModule("CardComponent", { moduleName: "CardsModule", importPath: "src/cards", exportCount: 30 });
+    assert.strictEqual(index.getComponentModule("CardComponent")?.moduleName, "CardModule", "both are kept");
+
+    index.addComponentModule("CardComponent", { moduleName: "CardsModule", importPath: "src/cards", exportCount: 0 });
+    assert.strictEqual(index.getComponentModule("CardComponent")?.moduleName, "CardsModule", "the new reading counts");
+  });
+
+  it("says whether retracting a file's modules removed anything", () => {
+    const index = new AngularElementIndex();
+    index.addComponentModule("CardComponent", { moduleName: "CardModule", importPath: "src/cards", exportCount: 1 });
+
+    assert.strictEqual(index.removeComponentModulesFrom("src/other"), false);
+    assert.strictEqual(index.removeComponentModulesFrom("src/cards"), true);
+    assert.strictEqual(index.getComponentModule("CardComponent"), undefined);
   });
 });
 
