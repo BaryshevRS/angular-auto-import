@@ -485,10 +485,7 @@ function hasImportedPipeAlternativeMatch(
   candidate: AngularElementData,
   context: MissingImportContext
 ): boolean {
-  if (element.type !== "pipe") {
-    return false;
-  }
-
+  // Only reached for a pipe usage: a pipe candidate yields no diagnostic for anything else.
   for (const alternative of context.findCandidates(element.name)) {
     if (alternative.type !== "pipe" || isSameElement(alternative, candidate)) {
       continue;

@@ -161,4 +161,57 @@ describe("Missing import analysis", () => {
 
     assert.strictEqual(diagnostics.length, 1);
   });
+
+  it("lets a module named after a pipe answer only for a pipe from its own package", () => {
+    // ngx-translate ships both: a `translate` pipe and a `[translate]` directive. A
+    // TranslateModule whose exports were not indexed vouches for the package's pipe, and
+    // the package's directive answering to the same name is not that pipe.
+    const packageDirective = angularElement({
+      name: "TranslateDirective",
+      type: "directive",
+      path: "@ngx-translate/core",
+      originalSelector: "[translate]",
+    });
+    const workspacePipe = angularElement({
+      name: "WorkspaceTranslatePipe",
+      type: "pipe",
+      path: "./src/app/translate.pipe",
+      originalSelector: "translate",
+    });
+    const context: MissingImportContext = {
+      ...contextOf([packageDirective, workspacePipe], ["TranslateModule"]),
+      getNamedImportSpecifiers: (name) => (name === "TranslateModule" ? ["@ngx-translate/core"] : []),
+    };
+
+    const diagnostics = findMissingImports(
+      [element({ type: "pipe", name: "translate", tagName: "pipe" })],
+      "warning",
+      context
+    );
+
+    assert.deepStrictEqual(codes(diagnostics), ["missing-pipe-import:translate"]);
+  });
+
+  it("marks the same selector whichever order the index returns equal candidates in", () => {
+    // Neither is the attribute itself and both demand one attribute, so length decides.
+    const scoped = angularElement({ name: "ScopedDirective", type: "directive", originalSelector: "button[foo]" });
+    const conditional = angularElement({
+      name: "ConditionalDirective",
+      type: "directive",
+      originalSelector: "[foo]:not([disabled])",
+    });
+    const usage = element({
+      type: "attribute",
+      name: "foo",
+      tagName: "button",
+      isAttribute: true,
+      attributes: [{ name: "foo", value: "" }],
+    });
+
+    const forward = codes(findMissingImports([usage], "warning", contextOf([scoped, conditional])));
+    const backward = codes(findMissingImports([usage], "warning", contextOf([conditional, scoped])));
+
+    assert.deepStrictEqual(forward, ["missing-directive-import:[foo]:not([disabled])"]);
+    assert.deepStrictEqual(backward, forward);
+  });
 });
