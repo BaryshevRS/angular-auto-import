@@ -11,7 +11,6 @@
   ],
   "knip": {
     "entry": [
-      "src/extension.ts",
       "src/test/suite/**/*.ts",
       "src/e2e/**/*.ts",
       "src/test/runTest.ts"
@@ -21,8 +20,7 @@
     ],
     "ignore": [
       "src/test/fixtures/**",
-      "src/e2e/projects/**",
-      "typedoc.json"
+      "src/e2e/projects/**"
     ]
   }
 }

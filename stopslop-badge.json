@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "label": "slop",
-  "message": "low (17/100)",
-  "color": "green"
+  "label": "AI slop",
+  "message": "clear",
+  "color": "brightgreen"
 }

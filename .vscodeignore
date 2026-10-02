@@ -48,3 +48,7 @@ dist/mcp.js.map
 release-please-config.json
 .release-please-manifest.json
 commitlint.config.mjs
+stryker.config.mjs
+.mocharc.stryker.json
+reports/
+.stryker-tmp/

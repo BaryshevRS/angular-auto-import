@@ -160,3 +160,7 @@ CLAUDE.md
 FIX_COMPLETION.md
 IDEA_INPUTS.md
 notes
+
+# Mutation testing (Stryker)
+.stryker-tmp
+reports
