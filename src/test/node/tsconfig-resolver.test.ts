@@ -300,13 +300,16 @@ describe("TsConfigResolver", function () {
     });
 
     describe("Edge Cases", () => {
-      it("should handle files outside project root", async () => {
-        const targetPath = "/some/external/path/module";
+      it("writes a relative path to a file outside the project that no alias covers", async () => {
+        // What TypeScript's own auto-import writes. An absolute path would resolve on this
+        // machine only, and not for anyone who checks the file out somewhere else.
+        const targetPath = path.resolve("/some/external/path/module");
         const currentFile = path.join(simpleProjectPath, "src", "app", "components", "test.component.ts");
 
         const result = await TsConfigHelper.resolveImportPath(targetPath, currentFile, simpleProjectPath);
 
-        assert.strictEqual(result, "/some/external/path/module", "Should return absolute path for external files");
+        assert.ok(result.startsWith("../"), `expected a relative specifier, got ${result}`);
+        assert.strictEqual(path.resolve(path.dirname(currentFile), result), targetPath);
       });
 
       it("should handle current file outside project root", async () => {

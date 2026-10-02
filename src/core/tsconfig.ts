@@ -449,21 +449,11 @@ export class TsConfigResolver {
       );
     }
 
-    // No alias covers it, so the paths have to be within reach of one another — unless
-    // the target is somewhere this project's own aliases put in scope. An entry whose
-    // `*` sits mid-path maps a library in without giving the trie a specifier it can
-    // rebuild, and a file reached that way is inside the compilation but outside the
-    // root: the one thing it must not get is an absolute path, which is not an import
-    // any TypeScript file can carry.
-    if (await this.isInAliasScope(absoluteTargetModulePathNoExt, projectRoot)) {
-      return relativePath;
-    }
-
-    if (!isPathInside(projectRoot, absoluteTargetModulePathNoExt)) {
-      this.logger.warn(`[TsConfigHelper] Target file is outside project root, using absolute path`);
-      return absoluteTargetModulePathNoExt;
-    }
-
+    // No alias covers it, so the relative path is the specifier, wherever the target is.
+    // That is TypeScript's own auto-import fallback, and the one that resolves for
+    // everyone who checks the file out: an absolute path names a directory on this
+    // machine only. A target outside the root is usually a library an alias whose `*`
+    // sits mid-path maps in, which leaves the trie no specifier to rebuild.
     return relativePath;
   }
 
@@ -481,15 +471,6 @@ export class TsConfigResolver {
       this.logger.warn(`[TsConfigHelper] Failed to parse ${filePath}: ${(parseError as Error).message}`);
       return null;
     }
-  }
-
-  /**
-   * Whether a path is inside one of the directories this project's `paths` map in.
-   * @internal
-   */
-  private async isInAliasScope(absoluteTargetPath: string, projectRoot: string): Promise<boolean> {
-    const tsconfig = await this.loadTsConfig(projectRoot);
-    return (tsconfig?.aliasRoots ?? []).some((aliasRoot) => isPathInside(aliasRoot, absoluteTargetPath));
   }
 
   /** @internal */

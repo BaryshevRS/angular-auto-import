@@ -149,7 +149,7 @@ describe("LSP project runtime", function () {
     assert.ok(written.startsWith("."), `expected a relative specifier, got ${written}`);
   });
 
-  it("still refuses to guess for a file no part of the project reaches", async () => {
+  it("writes a relative path for a file no part of the project reaches", async () => {
     const root = path.join(sandbox, "apps", "shop");
     await writeProject(root);
     const runtime = new ProjectRuntime(root);
@@ -158,7 +158,8 @@ describe("LSP project runtime", function () {
     const outside = path.join(sandbox, "unrelated", "module");
     const written = await runtime.resolveImportPath(outside, path.join(root, "src", "host.component.ts"));
 
-    assert.strictEqual(written, outside, "nothing maps it in, so there is no specifier to invent");
+    // TypeScript's own fallback: an absolute path would resolve on this machine only.
+    assert.strictEqual(written, "../../../unrelated/module");
   });
 
   it("reports a project without a tsconfig instead of failing", async () => {
