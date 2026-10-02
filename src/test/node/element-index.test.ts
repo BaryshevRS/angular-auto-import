@@ -99,14 +99,6 @@ describe("AngularElementIndex module exports", () => {
     assert.strictEqual(index.getModuleExports("UnknownModule"), undefined);
   });
 
-  it("treats any indexed module name as a module", () => {
-    const index = new AngularElementIndex();
-    index.addModuleExports("ChipsModule", entry("primeng/chips", ["Chips"]));
-
-    assert.strictEqual(index.isModule("ChipsModule"), true);
-    assert.strictEqual(index.isModule("Chips"), false);
-  });
-
   it("answers for the declaration the asking file imports", () => {
     const index = new AngularElementIndex();
     index.addModuleExports("ScrollingModule", entry("@angular/cdk/scrolling", ["CdkVirtualScrollViewport"]));

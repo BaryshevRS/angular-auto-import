@@ -332,24 +332,18 @@ export class AngularElementIndex {
   }
 
   /**
-   * Records what a bundle holds.
-   * @param name The exported name of the bundle.
-   * @param importPath The path it is imported from.
-   * @param members The classes it holds.
+   * Records that a library entry point has been read.
+   * @param importPath The entry point's specifier.
    */
   public addLibraryPath(importPath: string): void {
     this.libraryPaths.add(importPath);
   }
 
   /**
-   * Whether this index has read the library a specifier names, and can therefore answer
-   * for it rather than sending the caller to TypeScript.
-   * @param specifier The specifier as an importing file writes it.
+   * Records what a bundle holds.
+   * @param name The exported name of the bundle.
+   * @param entry Where it is imported from and the classes it holds.
    */
-  public knowsLibrary(specifier: string | undefined): boolean {
-    return specifier !== undefined && this.libraryPaths.has(specifier);
-  }
-
   public addBundle(name: string, entry: BundleEntry): void {
     let byPath = this.bundles.get(name);
     if (!byPath) {
@@ -387,17 +381,6 @@ export class AngularElementIndex {
     }
 
     return holders;
-  }
-
-  /**
-   * What a bundle of this name holds.
-   * @param name The name as the importing file wrote it.
-   * @param specifier Where that file imported it from, when it is known.
-   * @returns The members of that bundle, of every bundle of the name when the specifier
-   * names none of them, or nothing when no bundle answers to the name.
-   */
-  public getBundleEntries(name: string): Map<string, BundleEntry> | undefined {
-    return this.bundles.get(name);
   }
 
   /**
@@ -669,16 +652,6 @@ export class AngularElementIndex {
       }
     }
     return union;
-  }
-
-  /**
-   * Checks if an exported element is a module.
-   * An element is considered a module if it exists as a key in the module export index.
-   * @param name The name of the element to check.
-   * @returns True if the element is a module, false otherwise.
-   */
-  public isModule(name: string): boolean {
-    return this.moduleExports.has(name);
   }
 
   /**
