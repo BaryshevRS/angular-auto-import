@@ -253,6 +253,20 @@ describe("Angular dependency root discovery", function () {
     );
   });
 
+  it("forgets every cached manifest when invalidated without one", async () => {
+    const appRoot = path.join(sandbox, "packages", "late-angular");
+    const documentPath = path.join(appRoot, "src", "app.component.ts");
+    await writePackageJson(sandbox, { name: "workspace" });
+    await writePackageJson(appRoot, { name: "late-angular" });
+    await writeDocument(documentPath);
+    assert.strictEqual(await findAngularDependencyRoot(documentPath, sandbox), undefined);
+
+    await writePackageJson(appRoot);
+    invalidateAngularProjectCache();
+
+    assert.strictEqual(await findAngularDependencyRoot(documentPath, sandbox), appRoot);
+  });
+
   it("answers whether a single directory is an Angular package", async () => {
     const appRoot = path.join(sandbox, "apps", "shop");
     const plainRoot = path.join(sandbox, "apps", "plain");
@@ -417,6 +431,16 @@ describe("AngularProjectDiscovery trusted roots", () => {
 
     assert.strictEqual(await discovery.isAngularProject(path.join(workspace, "apps")), false);
     assert.strictEqual(await discovery.isAngularProject(path.dirname(workspace)), false);
+  });
+
+  it("says whether new trusted roots change anything", () => {
+    const apps = path.join(workspace, "apps");
+    const libs = path.join(workspace, "libs");
+    const discovery = new AngularProjectDiscovery({ files: noAngularAnywhere, trustedRoots: [workspace, apps] });
+
+    assert.strictEqual(discovery.setTrustedRoots([apps, workspace]), false, "the same roots in another order");
+    assert.strictEqual(discovery.setTrustedRoots([workspace, libs]), true, "one root swapped for another");
+    assert.strictEqual(discovery.setTrustedRoots([workspace]), true, "one root dropped");
   });
 
   it("rejects the same directory when nothing said to trust it", async () => {

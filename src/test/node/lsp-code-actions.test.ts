@@ -79,11 +79,13 @@ describe("LSP code actions", function () {
     compiler = adoptAngularCompiler(await import("@angular/compiler"));
   });
 
-  function handlerFor(options: { resolveFormatting?: () => Promise<typeof DEFAULT_IMPORT_FORMATTING> } = {}): {
+  function handlerFor(
+    options: { resolveFormatting?: () => Promise<typeof DEFAULT_IMPORT_FORMATTING>; documents?: OpenDocuments } = {}
+  ): {
     actions: CodeActionHandler;
     diagnostics: DiagnosticsHandler;
   } {
-    const documents = noOpenDocuments();
+    const documents = options.documents ?? noOpenDocuments();
     const router = new ProjectRouter({
       rootForPath: (filePath) => (filePath.startsWith(root) ? root : undefined),
       runtimeForRoot: (rootPath) => (rootPath === root ? runtime : undefined),
@@ -198,6 +200,39 @@ describe("LSP code actions", function () {
     );
   });
 
+  it("prefers a fix that is the best answer for one token though only an alternative for another", async () => {
+    await fs.writeFile(
+      path.join(root, "src", "slot.directives.ts"),
+      [
+        'import { Directive } from "@angular/core";',
+        "",
+        '@Directive({ selector: "[shopSlot]", standalone: true })',
+        "export class ShopHeaderSlotDirective {}",
+        "",
+        '@Directive({ selector: "[shopSlot], [shopPanel]", standalone: true })',
+        "export class ShopPanelSlotDirective {}",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+    await runtime.reindex();
+
+    const { actions } = handlerFor();
+    const document = documentAt(templatePath, '<span shopSlot="top"></span><div shopPanel></div>', "html");
+
+    const offered = await actions.provide(document, WHOLE_DOCUMENT);
+    const quickFixes = offered.filter((action) => action.kind === CodeActionKind.QuickFix);
+
+    assert.deepStrictEqual(
+      quickFixes.map((action) => [action.title, action.isPreferred]),
+      [
+        ["⟐ Import ShopHeaderSlotDirective from './slot.directives'", true],
+        ["⟐ Import ShopPanelSlotDirective from './slot.directives'", true],
+      ],
+      "the panel directive is the only fix for shopPanel, so the editor's own fix must find it there"
+    );
+  });
+
   it("withholds Fix All when two exports need the same local import name", async () => {
     await fs.writeFile(path.join(root, "src", "one.component.ts"), component("SharedComponent", "one-shared"), "utf8");
     await fs.writeFile(path.join(root, "src", "two.component.ts"), component("SharedComponent", "two-shared"), "utf8");
@@ -297,6 +332,47 @@ describe("LSP code actions", function () {
     const resolved = await actions.resolve((await actions.provide(document, WHOLE_DOCUMENT))[0]);
 
     assert.match(editedText(resolved), /imports: \[ShopCardComponent]/);
+  });
+
+  it("drops a plan when the project was reindexed while it was being planned", async () => {
+    const { actions } = handlerFor();
+    const document = documentAt(templatePath, "<shop-card></shop-card>", "html");
+    const [offered] = await actions.provide(document, WHOLE_DOCUMENT);
+    const resolveImportPath = runtime.resolveImportPath.bind(runtime);
+    runtime.resolveImportPath = async (target, from) => {
+      await runtime.reindex();
+      return resolveImportPath(target, from);
+    };
+
+    const resolved = await actions.resolve(offered);
+
+    assert.strictEqual(resolved.edit, undefined, "edits planned against the old index must not be offered");
+  });
+
+  it("drops a plan when the component was edited while it was being planned", async () => {
+    // The edit carries the version it was planned against, and an editor refuses it for
+    // any other; the server is not to hand out an edit it already knows is stale.
+    let host = TextDocument.create(pathToFileURL(hostPath).toString(), "typescript", 1, HOST);
+    const documents = new OpenDocuments({
+      get: (uri) => (uri === host.uri ? host : undefined),
+      all: () => [host],
+      onDidOpen: () => undefined,
+      onDidSave: () => undefined,
+      onDidClose: () => undefined,
+    });
+    documents.listen();
+    const { actions } = handlerFor({ documents });
+    const document = documentAt(templatePath, "<shop-card></shop-card>", "html");
+    const [offered] = await actions.provide(document, WHOLE_DOCUMENT);
+    const resolveImportPath = runtime.resolveImportPath.bind(runtime);
+    runtime.resolveImportPath = async (target, from) => {
+      host = TextDocument.create(host.uri, "typescript", 2, `${HOST}// edited\n`);
+      return resolveImportPath(target, from);
+    };
+
+    const resolved = await actions.resolve(offered);
+
+    assert.strictEqual(resolved.edit, undefined, "edits planned against version 1 must not be offered for version 2");
   });
 
   it("attaches the edit up front for a client that cannot resolve actions", async () => {

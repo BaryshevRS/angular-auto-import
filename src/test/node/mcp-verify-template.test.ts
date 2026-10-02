@@ -186,6 +186,94 @@ export class ButtonMarkDirective {}
     assert.strictEqual(verdict.updatedComponent, undefined, "nothing to change means nothing to write");
   });
 
+  it("says nothing about an element an NgModule the component imports exports", async () => {
+    // Only the index knows SharedModule exports CardComponent: the name says nothing.
+    const { project, root } = await projectOf({
+      "host.component.ts": HOST,
+      "card.component.ts": CARD,
+      "shared.module.ts": `import { NgModule } from '@angular/core';
+import { CardComponent } from './card.component';
+
+@NgModule({ imports: [CardComponent], exports: [CardComponent] })
+export class SharedModule {}
+`,
+    });
+    const importingTheModule = HOST.replace("imports: []", "imports: [SharedModule]").replace(
+      "import { Component } from '@angular/core';",
+      "import { Component } from '@angular/core';\nimport { SharedModule } from './shared.module';"
+    );
+
+    const verdict = await verifyTemplate({
+      runtime: project,
+      compiler,
+      componentPath: path.join(root, "host.component.ts"),
+      componentText: importingTheModule,
+      template: "<app-card></app-card>",
+    });
+
+    assert.deepStrictEqual(verdict.problems, [], "an agent told to import it again would import it twice");
+  });
+
+  it("reads a module's exports through the constant they are listed in", async () => {
+    const { project, root } = await projectOf({
+      "host.component.ts": HOST,
+      "card.component.ts": CARD,
+      "shared.module.ts": `import { NgModule } from '@angular/core';
+import { CardComponent } from './card.component';
+
+const SHARED = [CardComponent];
+
+@NgModule({ imports: SHARED, exports: SHARED })
+export class SharedModule {}
+`,
+    });
+    const importingTheModule = HOST.replace("imports: []", "imports: [SharedModule]").replace(
+      "import { Component } from '@angular/core';",
+      "import { Component } from '@angular/core';\nimport { SharedModule } from './shared.module';"
+    );
+
+    const verdict = await verifyTemplate({
+      runtime: project,
+      compiler,
+      componentPath: path.join(root, "host.component.ts"),
+      componentText: importingTheModule,
+      template: "<app-card></app-card>",
+    });
+
+    assert.deepStrictEqual(verdict.problems, []);
+  });
+
+  it("imports one of two directives that answer to the same selector", async () => {
+    // Two owners of one token: importing either settles it, and importing both applies
+    // two directives where the template asked for one.
+    const { project, root } = await projectOf({
+      "host.component.ts": HOST,
+      "slot.directive.ts": `import { Directive } from '@angular/core';
+
+@Directive({ selector: '[appSlot]', standalone: true })
+export class HeaderSlotDirective {}
+
+@Directive({ selector: '[appSlot]', standalone: true })
+export class PanelSlotDirective {}
+`,
+    });
+
+    const verdict = await verifyTemplate({
+      runtime: project,
+      compiler,
+      componentPath: path.join(root, "host.component.ts"),
+      componentText: HOST,
+      template: "<span appSlot></span>",
+    });
+
+    assert.strictEqual(verdict.addedImports.length, 1, `imported ${verdict.addedImports.join(", ")}`);
+    assert.deepStrictEqual(
+      verdict.problems[0]?.fixes.map((fix) => fix.name).sort(),
+      ["HeaderSlotDirective", "PanelSlotDirective"],
+      "both are still named, so the agent can choose the other"
+    );
+  });
+
   it("checks the template it is given, not the one the component carries", async () => {
     // The whole point: an agent asks about the template it is about to write.
     const { project, root } = await projectOf({ "host.component.ts": HOST, "card.component.ts": CARD });
