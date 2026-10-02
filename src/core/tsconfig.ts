@@ -360,32 +360,18 @@ export class TsConfigResolver {
       const tsconfigBasePath = path.join(projectRoot, "tsconfig.base.json");
 
       let tsconfigResult: ReturnType<typeof getTsconfig> = null;
-      let actualTsconfigPath: string | null = null;
 
       // Check for existing files and try to parse them
       if (fs.existsSync(tsconfigPath)) {
         tsconfigResult = this.parseConfigFile(tsconfigPath);
-        actualTsconfigPath = tsconfigPath;
       } else if (fs.existsSync(tsconfigBasePath)) {
         tsconfigResult = this.parseConfigFile(tsconfigBasePath);
-        actualTsconfigPath = tsconfigBasePath;
       }
 
       // Validate that the found tsconfig is actually within our project directory
       if (tsconfigResult && !isPathInside(projectRoot, tsconfigResult.path)) {
         this.logger.warn(`[TsConfigHelper] Found tsconfig outside project root: ${tsconfigResult.path}`);
         tsconfigResult = null;
-      }
-
-      // Ensure the found tsconfig is the expected one
-      if (tsconfigResult && actualTsconfigPath && tsconfigResult.path !== actualTsconfigPath) {
-        this.logger.warn(
-          `[TsConfigHelper] get-tsconfig returned different path than expected: ${tsconfigResult.path} vs ${actualTsconfigPath}`
-        );
-        // Only allow if it's still within our project directory
-        if (!isPathInside(projectRoot, tsconfigResult.path)) {
-          tsconfigResult = null;
-        }
       }
 
       if (!tsconfigResult) {
@@ -473,16 +459,11 @@ export class TsConfigResolver {
       return relativePath;
     }
 
-    const pathValidation = this.validateProjectPaths(
-      absoluteTargetModulePathNoExt,
-      absoluteCurrentFilePath,
-      projectRoot
-    );
-    if (pathValidation.shouldReturn) {
-      return pathValidation.path;
+    if (!isPathInside(projectRoot, absoluteTargetModulePathNoExt)) {
+      this.logger.warn(`[TsConfigHelper] Target file is outside project root, using absolute path`);
+      return absoluteTargetModulePathNoExt;
     }
 
-    // Fallback: calculate relative path
     return relativePath;
   }
 
@@ -509,28 +490,6 @@ export class TsConfigResolver {
   private async isInAliasScope(absoluteTargetPath: string, projectRoot: string): Promise<boolean> {
     const tsconfig = await this.loadTsConfig(projectRoot);
     return (tsconfig?.aliasRoots ?? []).some((aliasRoot) => isPathInside(aliasRoot, absoluteTargetPath));
-  }
-
-  /** @internal */
-  private validateProjectPaths(
-    absoluteTargetModulePathNoExt: string,
-    absoluteCurrentFilePath: string,
-    projectRoot: string
-  ): { shouldReturn: boolean; path: string } {
-    // Check that target file is within the project boundaries
-    if (!isPathInside(projectRoot, absoluteTargetModulePathNoExt)) {
-      this.logger.warn(`[TsConfigHelper] Target file is outside project root, using absolute path`);
-      return { shouldReturn: true, path: absoluteTargetModulePathNoExt };
-    }
-
-    // Check that current file is within the project boundaries
-    if (!isPathInside(projectRoot, absoluteCurrentFilePath)) {
-      this.logger.warn(`[TsConfigHelper] Current file is outside project root, using relative path fallback`);
-      const relativePath = getRelativeFilePath(absoluteCurrentFilePath, absoluteTargetModulePathNoExt);
-      return { shouldReturn: true, path: relativePath };
-    }
-
-    return { shouldReturn: false, path: "" };
   }
 
   /** @internal */
