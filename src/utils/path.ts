@@ -18,22 +18,12 @@ export function normalizePath(p: string): string {
  * Replaces or removes the extension of a file path.
  *
  * @param filePath The original file path.
- * @param newExtensionWithDotOrEmpty The new extension (e.g., '.ts') or an empty string to remove the extension.
+ * @param newExtensionWithDotOrEmpty The new extension with its dot (e.g., '.ts'), or an empty string to remove it.
  * @returns The modified file path.
  */
 export function switchFileType(filePath: string, newExtensionWithDotOrEmpty: string): string {
-  const dir = path.dirname(filePath);
   const ext = path.extname(filePath);
-  const baseWithoutExt = path.basename(filePath, ext);
-
-  if (newExtensionWithDotOrEmpty === "") {
-    return path.join(dir, baseWithoutExt);
-  } else {
-    const finalExtension = newExtensionWithDotOrEmpty.startsWith(".")
-      ? newExtensionWithDotOrEmpty
-      : `.${newExtensionWithDotOrEmpty}`;
-    return path.join(dir, `${baseWithoutExt}${finalExtension}`);
-  }
+  return path.join(path.dirname(filePath), `${path.basename(filePath, ext)}${newExtensionWithDotOrEmpty}`);
 }
 
 /**
@@ -46,7 +36,9 @@ export function switchFileType(filePath: string, newExtensionWithDotOrEmpty: str
 export function getRelativeFilePath(fromFileAbs: string, toFileAbsNoExt: string): string {
   const relative = path.relative(path.dirname(fromFileAbs), toFileAbsNoExt);
   const normalized = normalizePath(relative);
-  return normalized.startsWith(".") ? normalized : `./${normalized}`;
+  // Already relative only when it walks up. A child directory whose name starts with a dot
+  // is still a child, and `.generated/api` without its `./` is read as a package name.
+  return normalized === ".." || normalized.startsWith("../") ? normalized : `./${normalized}`;
 }
 
 /** Returns whether candidatePath is rootPath itself or one of its descendants. */
