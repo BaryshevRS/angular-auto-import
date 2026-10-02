@@ -9,6 +9,7 @@
 
 import * as assert from "node:assert";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { TsConfigResolver } from "../../core/tsconfig";
 import type { ProcessedTsConfig } from "../../types";
@@ -545,6 +546,78 @@ describe("TsConfigResolver", function () {
       const result = await TsConfigHelper.resolveImportPath(targetPath, currentFile, testProjectPath);
 
       assert.strictEqual(result, "@domain/models/user.model", "Should resolve to @domain alias for domain models");
+    });
+  });
+
+  describe("What an alias may be used for", () => {
+    let root: string;
+    const write = (relative: string, text: string) => {
+      const file = path.join(root, relative);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+    };
+    const resolve = (target: string, preference?: "relative") =>
+      TsConfigHelper.resolveImportPath(
+        path.join(root, target),
+        path.join(root, "src/app/pages/home.component.ts"),
+        root,
+        preference
+      );
+
+    beforeEach(() => {
+      root = fs.mkdtempSync(path.join(os.tmpdir(), "aai-tsconfig-"));
+      write(
+        "tsconfig.json",
+        JSON.stringify({
+          compilerOptions: {
+            baseUrl: ".",
+            paths: { "@core": ["src/app/core/index.ts"], "@env": ["src/env/environment.ts"] },
+          },
+        })
+      );
+      write("src/app/core/index.ts", "export * from './logger';\n// export * from './legacy';\n");
+      write("src/app/core/logger.ts", "export class Logger {}\n");
+      write("src/app/core/legacy.ts", "export class Legacy {}\n");
+      write("src/app/core/internal.ts", "export class Internal {}\n");
+      write("src/env/environment.ts", "export const environment = {};\n");
+      write("src/env/environment.prod.ts", "export const environment = {};\n");
+    });
+
+    afterEach(() => {
+      fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it("imports what a barrel re-exports through the barrel", async () => {
+      assert.strictEqual(await resolve("src/app/core/logger"), "@core");
+    });
+
+    it("does not offer a barrel for a file the barrel does not re-export", async () => {
+      assert.strictEqual(await resolve("src/app/core/internal"), "../core/internal");
+    });
+
+    it("does not count a re-export that is commented out", async () => {
+      assert.strictEqual(await resolve("src/app/core/legacy"), "../core/legacy");
+    });
+
+    it("uses an alias written for one file for that file only", async () => {
+      assert.strictEqual(await resolve("src/env/environment"), "@env");
+      assert.strictEqual(await resolve("src/env/environment.prod"), "../../env/environment.prod");
+    });
+
+    it("writes a relative path when relative is preferred, even where the alias is shorter", async () => {
+      assert.strictEqual(await resolve("src/app/core/logger", "relative"), "../core/logger");
+    });
+
+    it("reads the aliases again once a project's cache is cleared", async () => {
+      assert.strictEqual(await resolve("src/app/core/logger"), "@core");
+
+      write(
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@kernel": ["src/app/core/index.ts"] } } })
+      );
+      TsConfigHelper.clearCache(root);
+
+      assert.strictEqual(await resolve("src/app/core/logger"), "@kernel");
     });
   });
 

@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createPathsMatcher, type getTsconfig, parseTsconfig } from "get-tsconfig";
+import { ts } from "ts-morph";
 import type { AliasTarget, ProcessedTsConfig } from "../types/tsconfig";
 import { getRelativeFilePath, isPathInside, normalizePath, switchFileType } from "../utils/path";
 import { type CoreLogger, silentLogger } from "./logging";
@@ -764,18 +765,26 @@ function pathsEqual(a: string, b: string): boolean {
 }
 
 /**
- * Extracts the module specifiers of every `export ... from '...'` re-export
- * statement found in a barrel's source (covers `export *`, `export * as ns`,
- * and named/`type` re-exports).
+ * The module specifiers of every `export ... from '...'` in a barrel's source:
+ * `export *`, `export * as ns`, and named or `type` re-exports.
+ *
+ * Read from TypeScript's parse rather than matched in the text, which also matched a
+ * re-export that was commented out, or written inside a string, and so offered the
+ * barrel for a file it does not export — an import that does not compile.
  * @internal
  */
 function extractReExportSpecifiers(content: string): string[] {
-  const reExportPattern =
-    /export\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z0-9_$]+)?|\{[\s\S]*?\})\s+from\s*['"]([^'"]+)['"]/g;
+  const source = ts.createSourceFile("index.ts", content, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
   const specifiers: string[] = [];
 
-  for (let match = reExportPattern.exec(content); match !== null; match = reExportPattern.exec(content)) {
-    specifiers.push(match[1]);
+  for (const statement of source.statements) {
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier !== undefined &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      specifiers.push(statement.moduleSpecifier.text);
+    }
   }
 
   return specifiers;
