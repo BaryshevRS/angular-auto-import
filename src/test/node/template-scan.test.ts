@@ -418,6 +418,29 @@ describe("Template scan", () => {
     }
   });
 
+  it("finds pipes in a @switch subject and its @case expressions, and walks every case", () => {
+    const template = [
+      "@switch (mode | lowercase) {",
+      "  @case (preset | uppercase) {",
+      "    <app-preset />",
+      "  }",
+      "  @default {",
+      "    <app-fallback />",
+      "  }",
+      "}",
+    ].join("\n");
+
+    const elements = scan(template, lookupOf("app-preset", "app-fallback"));
+
+    for (const pipeName of ["lowercase", "uppercase"]) {
+      const [pipe] = named(elements, pipeName);
+      assert.ok(pipe, `expected the ${pipeName} pipe to be reported`);
+      assert.strictEqual(textOf(template, pipe), pipeName);
+    }
+    assert.strictEqual(named(elements, "app-preset").length, 1);
+    assert.strictEqual(named(elements, "app-fallback").length, 1);
+  });
+
   it("reports elements nested in a @defer block and its placeholder", () => {
     const template = ["@defer {", "  <app-heavy />", "} @placeholder {", "  <app-skeleton />", "}"].join("\n");
 
