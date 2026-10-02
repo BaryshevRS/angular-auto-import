@@ -375,6 +375,65 @@ export class KitHostComponent {}
     );
   });
 
+  it("refuses a workspace bundle of the right name declared in another file", () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    project.createSourceFile(
+      `${projectRoot}/src/app/legacy/ui-kit.ts`,
+      "export class KitBadgeDirective {}\nexport const UiKit = [] as const;\n",
+      { overwrite: true }
+    );
+    const file = project.createSourceFile(
+      `${projectRoot}/src/app/legacy-host.component.ts`,
+      `
+import { UiKit } from './legacy/ui-kit';
+
+@Component({ selector: "app-legacy-host", standalone: true, template: "", imports: [UiKit] })
+export class LegacyHostComponent {}
+`,
+      { overwrite: true }
+    );
+
+    const index = new AngularElementIndex();
+    index.addBundle("UiKit", {
+      importPath: "src/app/modules/ui-kit.ts",
+      absolutePath: `${projectRoot}/src/app/modules/ui-kit.ts`,
+      members: [{ name: "KitBadgeDirective" }],
+    });
+
+    assert.strictEqual(
+      resolverFor({
+        getExternalModuleExports: () => undefined,
+        bundlesHolding: (names, absolutePath) => index.bundlesHolding(names, absolutePath),
+      }).isImported(file, element({ name: "KitBadgeDirective", path: "src/app/modules/ui-kit.ts" })),
+      false,
+      "a bundle of the same name in another file holds something else"
+    );
+  });
+
+  it("accepts the one of several same-named bundles the file imports", () => {
+    const index = new AngularElementIndex();
+    index.addBundle("Bundle", { importPath: "@lib/a", members: [{ name: "SharedDirective" }] });
+    index.addBundle("Bundle", { importPath: "@lib/b", members: [{ name: "SharedDirective" }] });
+
+    const file = componentFile(
+      "either-bundle-host",
+      `
+import { Bundle } from '@lib/b';
+
+@Component({ selector: "app-either-bundle", standalone: true, template: "", imports: [Bundle] })
+export class EitherBundleHostComponent {}
+`
+    );
+
+    assert.strictEqual(
+      resolverFor({
+        getExternalModuleExports: () => undefined,
+        bundlesHolding: (names, absolutePath) => index.bundlesHolding(names, absolutePath),
+      }).isImported(file, element({ name: "SharedDirective", path: "@lib/b", type: "directive" })),
+      true
+    );
+  });
+
   it("refuses a name that is a local variable rather than an imported bundle", () => {
     const index = new AngularElementIndex();
     index.addBundle("Bundle", { importPath: "@lib/a", members: [{ name: "OnlyInA" }] });
@@ -501,18 +560,90 @@ export class CachedComponent {}
     assert.strictEqual(resolver.isImported(file, element()), true, "invalidation forces a fresh read");
   });
 
+  it("re-reads what a renamed import stands for once the file is invalidated", () => {
+    const file = componentFile(
+      "renamed",
+      `
+import { CardComponent as Card } from "./card";
+
+@Component({ selector: "app-renamed", standalone: true, template: "", imports: [Card] })
+export class RenamedComponent {}
+`
+    );
+    const resolver = resolverFor(undefined);
+    assert.strictEqual(resolver.isImported(file, element()), true);
+
+    file.replaceWithText(`
+import { OtherComponent as Card } from "./other";
+
+@Component({ selector: "app-renamed", standalone: true, template: "", imports: [Card] })
+export class RenamedComponent {}
+`);
+    resolver.invalidate(file.getFilePath());
+
+    assert.strictEqual(resolver.isImported(file, element()), false, "Card is another class now");
+  });
+
+  it("forgets every file's answers when cleared", () => {
+    const file = componentFile(
+      "cleared",
+      `
+import { CardComponent as Card } from "./card";
+
+@Component({ selector: "app-cleared", standalone: true, template: "", imports: [Card] })
+export class ClearedComponent {}
+`
+    );
+    const resolver = resolverFor(undefined);
+    assert.strictEqual(resolver.isImported(file, element()), true);
+
+    file.replaceWithText(`
+import { OtherComponent as Card } from "./other";
+
+@Component({ selector: "app-cleared", standalone: true, template: "", imports: [Card] })
+export class ClearedComponent {}
+`);
+    resolver.clear();
+
+    assert.strictEqual(resolver.isImported(file, element()), false);
+  });
+
+  it("keeps each file's answers to itself", () => {
+    const importing = componentFile(
+      "importing",
+      `
+import { CardComponent } from "./card";
+
+@Component({ selector: "app-importing", standalone: true, template: "", imports: [CardComponent] })
+export class ImportingComponent {}
+`
+    );
+    const bare = componentFile(
+      "bare",
+      `
+@Component({ selector: "app-bare", standalone: true, template: "", imports: [] })
+export class BareComponent {}
+`
+    );
+    const resolver = resolverFor(undefined);
+
+    assert.strictEqual(resolver.isImported(importing, element()), true);
+    assert.strictEqual(resolver.isImported(bare, element()), false, "another file's answer is not this one's");
+  });
+
   it("lists the identifiers in the component's imports array and their module specifiers", () => {
     const file = componentFile(
       "listing",
       `
 import { CardComponent } from "./card";
-import { CardModule } from "@acme/cards";
+import { CARD_CONFIG, CardModule } from "@acme/cards";
+import { SHARED } from "./shared";
 
 @Component({
   selector: "app-listing",
   standalone: true,
   template: "",
-  imports: [CardComponent, CardModule],
+  imports: [CardComponent, CardModule, ...SHARED],
 })
 export class ListingComponent {}
 `
