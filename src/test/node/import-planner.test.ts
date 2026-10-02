@@ -337,4 +337,113 @@ export class HostComponent {}
     assert.deepStrictEqual(result.addedImports, []);
     assert.ok(text.includes('import { CardComponent } from "@acme/cards";'), "the import statement is still added");
   });
+
+  it("keeps the trailing comma of a wrapped imports array", async () => {
+    const existing = `import { Component } from "@angular/core";
+
+@Component({
+  selector: "app-host",
+  imports: [
+    FirstComponent,
+    SecondComponent,
+  ],
+})
+export class HostComponent {}
+`;
+
+    const text = plannedText(await plan(existing, [element()]), existing);
+
+    assert.ok(
+      text.includes(`  imports: [
+    FirstComponent,
+    SecondComponent,
+    CardComponent,
+  ],`),
+      text
+    );
+  });
+
+  it("adds only the decorator entry when the import statement is already there", async () => {
+    const existing = `import { Component } from "@angular/core";
+import { CardComponent } from "@acme/cards";
+
+@Component({ selector: "app-host", imports: [] })
+export class HostComponent {}
+`;
+
+    const result = await plan(existing, [element()]);
+    const text = plannedText(result, existing);
+
+    assert.ok(text.includes("imports: [CardComponent]"), text);
+    assert.strictEqual(text.match(/import \{ CardComponent \}/g)?.length, 1, text);
+    assert.deepStrictEqual(result.addedImports, ["CardComponent"]);
+  });
+
+  it("finds the component past a class declared before it", async () => {
+    const existing = `import { Component } from "@angular/core";
+
+class Helper {}
+
+@Component({ selector: "app-host", imports: [] })
+export class HostComponent {}
+`;
+
+    const text = plannedText(await plan(existing, [element()]), existing);
+
+    assert.ok(text.includes("class Helper {}"), text);
+    assert.ok(text.includes("imports: [CardComponent]"), text);
+  });
+
+  it("does not import a name the file already imports from another path", async () => {
+    const existing = `import { Component } from "@angular/core";
+import { CardComponent } from "@acme/cards/card";
+
+@Component({ selector: "app-host", imports: [] })
+export class HostComponent {}
+`;
+
+    const text = plannedText(await plan(existing, [element()]), existing);
+
+    assert.ok(!text.includes('from "@acme/cards";'), text);
+    assert.ok(text.includes("imports: [CardComponent]"), text);
+  });
+
+  it("leaves an imports array with a comment unwrapped, so the comment survives", async () => {
+    const existing = `import { Component } from "@angular/core";
+
+@Component({
+  selector: "app-host",
+  imports: [/* shared */ FirstComponent, SecondComponent],
+})
+export class HostComponent {}
+`;
+
+    const text = plannedText(
+      await plan(existing, [element()], 7, { printWidth: 40, tabWidth: 2, useTabs: false }),
+      existing
+    );
+
+    assert.ok(text.includes("  imports: [/* shared */ FirstComponent, SecondComponent, CardComponent],"), text);
+  });
+
+  it("wraps only the imports array of a single-line decorator", async () => {
+    const existing = `import { Component } from "@angular/core";
+
+@Component({ imports: [FirstComponent], template: "<app-card />" })
+export class HostComponent {}
+`;
+
+    const text = plannedText(
+      await plan(existing, [element()], 7, { printWidth: 60, tabWidth: 2, useTabs: false }),
+      existing
+    );
+
+    assert.ok(
+      text.includes(`@Component({ imports: [
+    FirstComponent,
+    CardComponent
+  ], template: "<app-card />" })`),
+      text
+    );
+  });
 });

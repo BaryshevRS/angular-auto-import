@@ -88,7 +88,6 @@ export async function planImports(request: ImportPlanRequest): Promise<ImportPla
   const addedImports: string[] = [];
   const changedImportDeclarations = new Set<ImportDeclaration>();
   const changedComponentImports = new Set<PropertyAssignment>();
-  let modified = false;
 
   for (const element of request.elements) {
     const importPath = await request.resolveImportPath(element);
@@ -105,14 +104,11 @@ export async function planImports(request: ImportPlanRequest): Promise<ImportPla
       changedComponentImports.add(changedComponentImport);
       addedImports.push(annotationName);
     }
-    modified = modified || changedImport !== undefined || changedComponentImport !== undefined;
   }
 
   // Format the declarations the plan changed after all elements are added.
-  if (modified) {
-    formatChangedImports(changedImportDeclarations, formatting);
-    formatChangedComponentImports(changedComponentImports, formatting);
-  }
+  formatChangedImports(changedImportDeclarations, formatting);
+  formatChangedComponentImports(changedComponentImports, formatting);
 
   const newText = sourceFile.getFullText();
   if (newText === request.text) {
@@ -160,13 +156,10 @@ function addImportStatementForElement(
     (d) => d.getModuleSpecifierValue() === importPathString
   );
 
+  // The name is not among its named imports: the lookup above would have found it.
   if (existingImportFromSameModule) {
-    const alreadyImported = existingImportFromSameModule.getNamedImports().some((ni) => ni.getName() === element.name);
-    if (!alreadyImported) {
-      existingImportFromSameModule.addNamedImport(element.name);
-      return existingImportFromSameModule;
-    }
-    return undefined;
+    existingImportFromSameModule.addNamedImport(element.name);
+    return existingImportFromSameModule;
   }
 
   const existingImportWithName = sourceFile
@@ -251,7 +244,15 @@ function addToExistingImportsArray(
     return undefined; // Already in imports array
   }
 
-  importsArray.addElement(importName);
+  // ts-morph appends after an existing trailing comma and leaves the new last element
+  // without one, so the comma the array was written with is put back after it.
+  const hadTrailingComma = importsArray.compilerNode.elements.hasTrailingComma;
+  const added = importsArray.addElement(importName);
+  if (hadTrailingComma && !importsArray.compilerNode.elements.hasTrailingComma) {
+    const arrayText = importsArray.getText();
+    const addedEnd = added.getEnd() - importsArray.getStart();
+    importsArray.replaceWithText(`${arrayText.slice(0, addedEnd)},${arrayText.slice(addedEnd)}`);
+  }
   return importsProperty;
 }
 
@@ -303,7 +304,7 @@ function formatChangedComponentImport(
   const propertyIndentation = `${baseIndentation}${indentation}`;
   const elementIndentation = `${propertyIndentation}${indentation}`;
   const elements = importsArray.getElements().map((element) => element.getText());
-  const trailingComma = /,\s*]$/.test(arrayText) ? "," : "";
+  const trailingComma = importsArray.compilerNode.elements.hasTrailingComma ? "," : "";
   const formattedArray = `[\n${elementIndentation}${elements.join(`,\n${elementIndentation}`)}${trailingComma}\n${propertyIndentation}]`;
 
   const propertyPrefix = sourceText.slice(lineStart, importsProperty.getStart());
