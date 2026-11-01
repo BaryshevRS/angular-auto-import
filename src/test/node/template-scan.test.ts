@@ -703,7 +703,7 @@ describe("Template scan", () => {
         const expected = compilerPipeSites(parsed.nodes);
         // Angular's visitor sees the deduplicated placeholder map: it misses the
         // first repeated interpolation and the expression on an ICU tag.
-        if (templatePath.endsWith("/modern-angular/modern-angular.component.html")) {
+        if (templatePath.endsWith(path.join("modern-angular", "modern-angular.component.html"))) {
           expected.push(`uppercase@${text.indexOf("uppercase", text.indexOf("{count"))}`);
           expected.push(`uppercase@${text.indexOf("uppercase", text.indexOf("<span [title]"))}`);
           expected.sort((a, b) => Number(a.split("@")[1]) - Number(b.split("@")[1]));
