@@ -53,6 +53,11 @@ const EXCLUDED_LIBRARIES = new Set([
  * ```
  */
 export function isLibraryExcluded(importPath: string): boolean {
+  // Signal Forms exports standalone directives, unlike the legacy forms modules.
+  // Index only the entry point a project's installed Angular actually provides.
+  if (importPath === "@angular/forms/signals") {
+    return false;
+  }
   // Normalize the import path by removing any subpath exports
   // e.g., "@angular/forms/testing" -> "@angular/forms"
   const normalizedPath = importPath.split("/").slice(0, 2).join("/");

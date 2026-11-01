@@ -67,6 +67,8 @@ export type TemplateElementLookup = ElementLookup;
  * so that `instanceof` checks run against the very classes that produced the nodes.
  */
 export interface TemplateAstConstructors {
+  /** Parses an ICU tag using the same compiler and options as its owning template. */
+  parseTemplate: (text: string) => TemplateAstNode[];
   tmplAstElement: TemplateAstClass<TmplAstElement>;
   tmplAstTemplate: TemplateAstClass<TmplAstTemplate>;
   tmplAstBoundEvent: TemplateAstClass<TmplAstBoundEvent>;
@@ -81,6 +83,16 @@ export interface TemplateAstConstructors {
    * apart from the `class` attribute it is spelled like.
    */
   tmplAstTextAttribute: TemplateAstClass<{ name: string; value: string }>;
+  tmplAstLetDeclaration: TemplateAstClass<{ value: unknown }>;
+  tmplAstIcu: TemplateAstClass<{
+    vars: Record<string, TemplateAstNode>;
+    placeholders: Record<string, TemplateAstNode>;
+    i18n?: { nodes: I18nNode[] };
+  }>;
+  tmplAstBoundaryBlock: TemplateAstClass<{
+    children: TemplateAstNode[];
+    errorBlocks: Array<{ expression?: unknown; children: TemplateAstNode[] }>;
+  }>;
   /**
    * Which kinds of binding overwrite an attribute of the same name.
    *
@@ -116,6 +128,17 @@ type ExpressionVisitorClass = new () => {
 type BindingPipeNode = {
   name: string;
   nameSpan: { start: number };
+};
+
+/** Nodes of the compiler's i18n message tree, which retains each ICU occurrence. */
+type I18nNode = {
+  name?: string;
+  value?: string;
+  sourceSpan?: { start: { offset: number } };
+  children?: I18nNode[];
+  cases?: Record<string, I18nNode>;
+  tag?: string;
+  startSourceSpan?: { start: { offset: number }; end: { offset: number } };
 };
 
 /** An expression node the compiler can walk. */
@@ -207,6 +230,20 @@ function extractPipesFromExpression(context: ScanContext, expression: unknown): 
  * @internal
  */
 function processTemplateNode(node: TemplateAstNode, context: ScanContext): void {
+  if (node instanceof context.constructors.tmplAstLetDeclaration) {
+    context.extractPipesFromExpression(node.value);
+    return;
+  }
+  if (node instanceof context.constructors.tmplAstIcu) {
+    context.visit(Object.values(node.vars));
+    visitIcuPlaceholders(node, context);
+    return;
+  }
+  if (node instanceof context.constructors.tmplAstBoundaryBlock) {
+    context.visit(node.children);
+    processBranchLikeArray(node.errorBlocks, context);
+    return;
+  }
   // Handle all types of control flow expressions
   if (isControlFlowNode(node)) {
     processControlFlowNode(node, context);
@@ -225,6 +262,66 @@ function processTemplateNode(node: TemplateAstNode, context: ScanContext): void 
   if (hasChildren(node) && !isControlFlowNode(node)) {
     // @ts-expect-error: Complex Angular template AST node types from ts-morph
     context.visit(node.children);
+  }
+}
+
+/** The R3 ICU map merges identical interpolations; its i18n tree retains their spans. */
+function visitIcuPlaceholders(
+  node: { placeholders: Record<string, TemplateAstNode>; i18n?: { nodes: I18nNode[] } },
+  context: ScanContext
+): void {
+  const visited = new Set<string>();
+  const walk = (item: I18nNode): void => {
+    visitIcuTag(item, context);
+    const placeholder = item.name && node.placeholders[item.name];
+    if (
+      placeholder instanceof context.constructors.tmplAstBoundText &&
+      item.sourceSpan &&
+      typeof item.value === "string"
+    ) {
+      const original = placeholder as TmplAstBoundText & { sourceSpan: { start: { offset: number } } };
+      pushPipes(context, original.value, item.sourceSpan.start.offset - original.sourceSpan.start.offset);
+      visited.add(item.name as string);
+    }
+    for (const child of item.children ?? []) {
+      walk(child);
+    }
+    for (const child of Object.values(item.cases ?? {})) {
+      walk(child);
+    }
+  };
+  for (const item of node.i18n?.nodes ?? []) {
+    walk(item);
+  }
+  for (const [name, placeholder] of Object.entries(node.placeholders)) {
+    if (!visited.has(name)) {
+      context.visit([placeholder]);
+    }
+  }
+}
+
+/** Reparse only the compiler-identified opening tag, not its already visited children. */
+function visitIcuTag(item: I18nNode, context: ScanContext): void {
+  if (typeof item.tag !== "string" || !item.startSourceSpan) {
+    return;
+  }
+  const start = item.startSourceSpan.start.offset;
+  const end = item.startSourceSpan.end.offset;
+  const text = context.text.slice(start, end);
+  try {
+    context.elements.push(
+      ...scanTemplate({
+        nodes: context.constructors.parseTemplate(text),
+        document: context.document,
+        offset: context.offset + start,
+        text,
+        lookup: context.lookup,
+        constructors: context.constructors,
+        onError: context.onError,
+      })
+    );
+  } catch (error) {
+    context.onError("Error parsing an ICU tag:", error as Error);
   }
 }
 
@@ -655,7 +752,7 @@ function processBoundTextNode(node: TmplAstBoundText, context: ScanContext): voi
  * grammar; the parser has already done it.
  * @internal
  */
-function pushPipes(context: ScanContext, expression: unknown): void {
+function pushPipes(context: ScanContext, expression: unknown, displacement = 0): void {
   if (!isVisitableExpression(expression)) {
     return;
   }
@@ -677,7 +774,7 @@ function pushPipes(context: ScanContext, expression: unknown): void {
   }
 
   for (const pipe of pipes) {
-    const start = context.offset + pipe.nameSpan.start;
+    const start = context.offset + pipe.nameSpan.start + displacement;
     context.elements.push({
       type: "pipe",
       name: pipe.name,

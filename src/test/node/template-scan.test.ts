@@ -133,6 +133,7 @@ describe("Template scan", () => {
     const angular = (await import("@angular/compiler")) as unknown as Record<string, unknown>;
     parseTemplate = angular.parseTemplate as ParseTemplate;
     constructors = {
+      parseTemplate: (text: string) => parseTemplate(text, "icu-tag", PARSE_OPTIONS).nodes,
       tmplAstElement: angular.TmplAstElement,
       tmplAstTemplate: angular.TmplAstTemplate,
       tmplAstBoundEvent: angular.TmplAstBoundEvent,
@@ -140,6 +141,9 @@ describe("Template scan", () => {
       tmplAstBoundAttribute: angular.TmplAstBoundAttribute,
       tmplAstBoundText: angular.TmplAstBoundText,
       tmplAstTextAttribute: angular.TmplAstTextAttribute,
+      tmplAstLetDeclaration: angular.TmplAstLetDeclaration,
+      tmplAstIcu: angular.TmplAstIcu,
+      tmplAstBoundaryBlock: angular.TmplAstBoundaryBlock,
       bindingType: angular.BindingType,
       recursiveAstVisitor: angular.RecursiveAstVisitor,
     } as TemplateAstConstructors;
@@ -211,6 +215,101 @@ describe("Template scan", () => {
       assert.strictEqual(pipe.tagName, "pipe");
       assert.strictEqual(textOf(template, pipe), pipeName);
     }
+  });
+
+  it("finds pipes in let declarations and ICU interpolation at their exact positions", () => {
+    const template = "@let data = source | async;\n{n, plural, =0 {{{a | uppercase}}} other {{{b | date}}}}";
+    const pipes = scan(template).filter((element) => element.type === "pipe");
+    assert.deepStrictEqual(
+      pipes.map((pipe) => pipe.name),
+      ["async", "uppercase", "date"]
+    );
+    assert.deepStrictEqual(
+      pipes.map((pipe) => textOf(template, pipe)),
+      ["async", "uppercase", "date"]
+    );
+    assert.deepStrictEqual(
+      pipes.map((pipe) => `${pipe.name}@${pipe.range.start.line}:${pipe.range.start.character}`),
+      ["async@0:21", "uppercase@1:22", "date@1:48"]
+    );
+  });
+
+  it("walks the boundary body, each error condition and fallback, and following content", () => {
+    const template =
+      "@boundary { <app-main /> {{a | async}} } @error (let e; when e | json) { <app-fallback /> {{b | date}} } @error { <app-other /> } <app-after />";
+    const parsed = parseTemplate(template, "app.component.html", PARSE_OPTIONS) as { errors?: unknown[] };
+    assert.ok(!parsed.errors?.length, "the bundled compiler must understand the boundary syntax");
+    const elements = scan(template, lookupOf("app-main", "app-fallback", "app-other", "app-after"));
+    assert.deepStrictEqual(
+      elements.filter((element) => element.type === "pipe").map((element) => element.name),
+      ["async", "json", "date"]
+    );
+    for (const name of ["app-main", "app-fallback", "app-other", "app-after"]) {
+      assert.strictEqual(named(elements, name).length, 1, name);
+    }
+  });
+
+  it("reports each occurrence when Angular shares an ICU interpolation placeholder", () => {
+    const template = "{n, plural, =0 {{{name | uppercase}}} other {{{name | uppercase}}}}";
+    const pipes = scan(template).filter((element) => element.type === "pipe");
+    assert.strictEqual(pipes.length, 2);
+    assert.deepStrictEqual(
+      pipes.map((pipe) => textOf(template, pipe)),
+      ["uppercase", "uppercase"]
+    );
+    assert.deepStrictEqual(
+      pipes.map((pipe) => pipe.range.start.character),
+      [25, 54]
+    );
+  });
+
+  it("finds components and pipes in bindings in each ICU branch", () => {
+    const template = '{n, plural, =0 {<app-card [title]="name | uppercase"/>} other {<app-card/>}}';
+    assert.ok(!(parseTemplate(template, "icu", PARSE_OPTIONS) as { errors?: unknown[] }).errors?.length);
+    const elements = scan(template, lookupOf("app-card"));
+    const cards = named(elements, "app-card");
+    const pipes = named(elements, "uppercase");
+    assert.deepStrictEqual(
+      cards.map((card) => textOf(template, card)),
+      ['<app-card [title]="name | uppercase"/>', "<app-card/>"]
+    );
+    assert.deepStrictEqual(
+      pipes.map((pipe) => textOf(template, pipe)),
+      ["uppercase"]
+    );
+  });
+
+  it("walks nested ICU tags, structural directives and interpolations without duplicates", () => {
+    const template =
+      '{n, plural, =0 {<div *ngIf="ready | async"><app-card>{{name | uppercase}}</app-card></div>} other {{g, select, a {<app-card [title]="name | json"/>} other {none}}}}';
+    assert.ok(!(parseTemplate(template, "icu", PARSE_OPTIONS) as { errors?: unknown[] }).errors?.length);
+    const elements = scan(template, lookupOf("app-card"));
+    assert.strictEqual(named(elements, "app-card").length, 2);
+    assert.strictEqual(named(elements, "ngIf").length, 1);
+    assert.deepStrictEqual(
+      elements.filter((element) => element.type === "pipe").map((element) => element.name),
+      ["async", "uppercase", "json"]
+    );
+    for (const element of elements.filter((item) => item.type === "pipe")) {
+      assert.strictEqual(textOf(template, element), element.name);
+    }
+  });
+
+  it("finds pipes around arrow functions, spreads and tagged template literals", () => {
+    const template = [
+      "{{ (items | slice:0:2).filter(x => x.active) | json }}",
+      "{{ ({...obj, value: (x | async)}) | json }}",
+      "{{ tag`value ${x | uppercase}` | json }}",
+    ].join("\n");
+    const pipes = scan(template).filter((element) => element.type === "pipe");
+    assert.deepStrictEqual(
+      pipes.map((pipe) => pipe.name),
+      ["slice", "json", "async", "json", "uppercase", "json"]
+    );
+    assert.deepStrictEqual(
+      pipes.map((pipe) => textOf(template, pipe)),
+      pipes.map((pipe) => pipe.name)
+    );
   });
 
   it("does not mistake the second bar of a logical OR for a pipe", () => {
@@ -479,6 +578,27 @@ describe("Template scan", () => {
     assert.strictEqual(document.getText({ start: card.range.start, end: card.range.end }), "<app-card>");
   });
 
+  it("keeps ICU tag and binding ranges inside an inline template", () => {
+    const template = '{n, plural, =0 {<app-card [title]="name | uppercase"/>} other {<app-card/>}}';
+    const component = `@Component({ template: \`${template}\` })`;
+    const document = TextDocument.create("file:///project/src/app.component.ts", "typescript", 1, component);
+    const parsed = parseTemplate(template, "inline", PARSE_OPTIONS);
+    const elements = scanTemplate({
+      nodes: parsed.nodes,
+      document,
+      offset: component.indexOf(template),
+      text: template,
+      lookup: lookupOf("app-card"),
+      constructors,
+    });
+    const slice = (element: ScannedTemplateElement) => document.getText(element.range);
+    assert.deepStrictEqual(named(elements, "app-card").map(slice), [
+      '<app-card [title]="name | uppercase"/>',
+      "<app-card/>",
+    ]);
+    assert.deepStrictEqual(named(elements, "uppercase").map(slice), ["uppercase"]);
+  });
+
   it("carries the element's own attributes so selector matching can use them", () => {
     const elements = scan('<app-card title="hello" [subtitle]="sub"></app-card>', lookupOf("app-card"));
 
@@ -581,6 +701,13 @@ describe("Template scan", () => {
           .map((element) => `${element.name}@${document.offsetAt(element.range.start)}`);
 
         const expected = compilerPipeSites(parsed.nodes);
+        // Angular's visitor sees the deduplicated placeholder map: it misses the
+        // first repeated interpolation and the expression on an ICU tag.
+        if (templatePath.endsWith(path.join("modern-angular", "modern-angular.component.html"))) {
+          expected.push(`uppercase@${text.indexOf("uppercase", text.indexOf("{count"))}`);
+          expected.push(`uppercase@${text.indexOf("uppercase", text.indexOf("<span [title]"))}`);
+          expected.sort((a, b) => Number(a.split("@")[1]) - Number(b.split("@")[1]));
+        }
         pipes += expected.length;
 
         if (JSON.stringify(scanned) !== JSON.stringify(expected)) {

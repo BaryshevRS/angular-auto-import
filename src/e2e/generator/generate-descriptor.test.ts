@@ -32,6 +32,19 @@ interface CaseRunContext {
 
 const CASES: CaseConfig[] = [
   {
+    name: "modern-angular",
+    componentPath: "apps/angular-demo/src/app/modern-angular/modern-angular.component.ts",
+    templatePath: "apps/angular-demo/src/app/modern-angular/modern-angular.component.html",
+    expectedDiagnostics: 24,
+  },
+  {
+    name: "modern-angular-imported",
+    componentPath: "apps/angular-demo/src/app/modern-angular/modern-angular.component.ts",
+    templatePath: "apps/angular-demo/src/app/modern-angular/modern-angular.component.html",
+    preserveImports: true,
+    expectedDiagnostics: 0,
+  },
+  {
     // Regression for https://github.com/ngx-rock/vscode-angular-auto-import/issues/33
     // `translate` pipe provided via TranslateModule must NOT be flagged when the
     // module is present in the standalone component's imports array.

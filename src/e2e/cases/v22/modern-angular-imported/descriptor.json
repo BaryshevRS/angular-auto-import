@@ -1,0 +1,8 @@
+{
+  "case": "modern-angular-imported",
+  "componentPath": "apps/angular-demo/src/app/modern-angular/modern-angular.component.ts",
+  "templatePath": "apps/angular-demo/src/app/modern-angular/modern-angular.component.html",
+  "preserveImports": true,
+  "diagnostics": [],
+  "quickfixes": []
+}

@@ -1,0 +1,305 @@
+{
+  "case": "modern-angular",
+  "componentPath": "apps/angular-demo/src/app/modern-angular/modern-angular.component.ts",
+  "templatePath": "apps/angular-demo/src/app/modern-angular/modern-angular.component.html",
+  "diagnostics": [
+    {
+      "code": "missing-pipe-import:async",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 0,
+      "startCharacter": 22,
+      "endLine": 0,
+      "endCharacter": 27
+    },
+    {
+      "code": "missing-pipe-import:uppercase",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 1,
+      "startCharacter": 20,
+      "endLine": 1,
+      "endCharacter": 29
+    },
+    {
+      "code": "missing-directive-import:form[formRoot]",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 4,
+      "startCharacter": 7,
+      "endLine": 4,
+      "endCharacter": 15
+    },
+    {
+      "code": "missing-directive-import:[formField]",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 5,
+      "startCharacter": 10,
+      "endLine": 5,
+      "endCharacter": 19
+    },
+    {
+      "code": "missing-directive-import:[ngToolbar]",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 8,
+      "startCharacter": 5,
+      "endLine": 8,
+      "endCharacter": 14
+    },
+    {
+      "code": "missing-directive-import:[ngToolbarWidget]",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 9,
+      "startCharacter": 10,
+      "endLine": 9,
+      "endCharacter": 25
+    },
+    {
+      "code": "missing-pipe-import:uppercase",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 12,
+      "startCharacter": 38,
+      "endLine": 12,
+      "endCharacter": 47
+    },
+    {
+      "code": "missing-pipe-import:uppercase",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 12,
+      "startCharacter": 69,
+      "endLine": 12,
+      "endCharacter": 78
+    },
+    {
+      "code": "missing-pipe-import:uppercase",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 13,
+      "startCharacter": 52,
+      "endLine": 13,
+      "endCharacter": 61
+    },
+    {
+      "code": "missing-component-import:lib-ui-demo-one",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 13,
+      "startCharacter": 63,
+      "endLine": 13,
+      "endCharacter": 82
+    },
+    {
+      "code": "missing-component-import:lib-ui-demo-one",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 13,
+      "startCharacter": 98,
+      "endLine": 13,
+      "endCharacter": 117
+    },
+    {
+      "code": "missing-pipe-import:slice",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 15,
+      "startCharacter": 23,
+      "endLine": 15,
+      "endCharacter": 28
+    },
+    {
+      "code": "missing-pipe-import:json",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 15,
+      "startCharacter": 68,
+      "endLine": 15,
+      "endCharacter": 72
+    },
+    {
+      "code": "missing-pipe-import:uppercase",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 16,
+      "startCharacter": 22,
+      "endLine": 16,
+      "endCharacter": 31
+    },
+    {
+      "code": "missing-pipe-import:lowercase",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 16,
+      "startCharacter": 36,
+      "endLine": 16,
+      "endCharacter": 45
+    },
+    {
+      "code": "missing-component-import:lib-ui-demo-one",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 20,
+      "startCharacter": 18,
+      "endLine": 20,
+      "endCharacter": 37
+    },
+    {
+      "code": "missing-pipe-import:async",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 24,
+      "startCharacter": 22,
+      "endLine": 24,
+      "endCharacter": 27
+    },
+    {
+      "code": "missing-pipe-import:async",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 24,
+      "startCharacter": 60,
+      "endLine": 24,
+      "endCharacter": 65
+    },
+    {
+      "code": "missing-pipe-import:async",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 24,
+      "startCharacter": 96,
+      "endLine": 24,
+      "endCharacter": 101
+    },
+    {
+      "code": "missing-component-import:lib-ui-demo-one",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 25,
+      "startCharacter": 2,
+      "endLine": 25,
+      "endCharacter": 21
+    },
+    {
+      "code": "missing-component-import:lib-ui-demo-one",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 29,
+      "startCharacter": 2,
+      "endLine": 29,
+      "endCharacter": 21
+    },
+    {
+      "code": "missing-pipe-import:uppercase",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 31,
+      "startCharacter": 12,
+      "endLine": 31,
+      "endCharacter": 21
+    },
+    {
+      "code": "missing-component-import:lib-ui-demo-one",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 33,
+      "startCharacter": 2,
+      "endLine": 33,
+      "endCharacter": 21
+    },
+    {
+      "code": "missing-component-import:lib-ui-demo-one",
+      "severity": "Warning",
+      "source": "angular-auto-import",
+      "startLine": 36,
+      "startCharacter": 0,
+      "endLine": 36,
+      "endCharacter": 19
+    }
+  ],
+  "quickfixes": [
+    {
+      "diagnosticCode": "missing-pipe-import:async",
+      "title": "⟐ Import AsyncPipe from '@angular/common'",
+      "expectedImport": {
+        "className": "AsyncPipe",
+        "moduleSpecifier": "@angular/common"
+      }
+    },
+    {
+      "diagnosticCode": "missing-pipe-import:uppercase",
+      "title": "⟐ Import UpperCasePipe from '@angular/common'",
+      "expectedImport": {
+        "className": "UpperCasePipe",
+        "moduleSpecifier": "@angular/common"
+      }
+    },
+    {
+      "diagnosticCode": "missing-directive-import:form[formRoot]",
+      "title": "⟐ Import FormRoot from '@angular/forms/signals'",
+      "expectedImport": {
+        "className": "FormRoot",
+        "moduleSpecifier": "@angular/forms/signals"
+      }
+    },
+    {
+      "diagnosticCode": "missing-directive-import:[formField]",
+      "title": "⟐ Import FormField from '@angular/forms/signals'",
+      "expectedImport": {
+        "className": "FormField",
+        "moduleSpecifier": "@angular/forms/signals"
+      }
+    },
+    {
+      "diagnosticCode": "missing-directive-import:[ngToolbar]",
+      "title": "⟐ Import Toolbar from '@angular/aria/toolbar'",
+      "expectedImport": {
+        "className": "Toolbar",
+        "moduleSpecifier": "@angular/aria/toolbar"
+      }
+    },
+    {
+      "diagnosticCode": "missing-directive-import:[ngToolbarWidget]",
+      "title": "⟐ Import ToolbarWidget from '@angular/aria/toolbar'",
+      "expectedImport": {
+        "className": "ToolbarWidget",
+        "moduleSpecifier": "@angular/aria/toolbar"
+      }
+    },
+    {
+      "diagnosticCode": "missing-component-import:lib-ui-demo-one",
+      "title": "⟐ Import UiDemoOneComponent from '@angular-demo/ui-demo-one'",
+      "expectedImport": {
+        "className": "UiDemoOneComponent",
+        "moduleSpecifier": "@angular-demo/ui-demo-one"
+      }
+    },
+    {
+      "diagnosticCode": "missing-pipe-import:slice",
+      "title": "⟐ Import SlicePipe from '@angular/common'",
+      "expectedImport": {
+        "className": "SlicePipe",
+        "moduleSpecifier": "@angular/common"
+      }
+    },
+    {
+      "diagnosticCode": "missing-pipe-import:json",
+      "title": "⟐ Import JsonPipe from '@angular/common'",
+      "expectedImport": {
+        "className": "JsonPipe",
+        "moduleSpecifier": "@angular/common"
+      }
+    },
+    {
+      "diagnosticCode": "missing-pipe-import:lowercase",
+      "title": "⟐ Import LowerCasePipe from '@angular/common'",
+      "expectedImport": {
+        "className": "LowerCasePipe",
+        "moduleSpecifier": "@angular/common"
+      }
+    }
+  ]
+}
