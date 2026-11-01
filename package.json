@@ -3,7 +3,7 @@
   "displayName": "Angular Auto Import",
   "description": "Fix every missing import in an Angular template at once: components, directives and pipes from Material, PrimeNG, NG-ZORRO, Taiga UI or your own libraries. Your AI assistant gets the same answers.",
   "publisher": "baryshevrs",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "icon": "img/icon.png",
   "galleryBanner": {
     "color": "#0f172a",
