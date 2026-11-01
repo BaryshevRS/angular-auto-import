@@ -4,6 +4,13 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.3.0](https://github.com/BaryshevRS/angular-auto-import/compare/3.2.0...3.3.0) (2026-11-01)
+
+
+### Features
+
+* support modern Angular template imports ([3e87ce2](https://github.com/BaryshevRS/angular-auto-import/commit/3e87ce2d82f1c7a64fde92fd6cf4a10213fb7c28))
+
 ## [3.2.0](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.1...3.2.0) (2026-11-01)
 
 ### Added
