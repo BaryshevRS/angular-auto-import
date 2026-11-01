@@ -4,6 +4,22 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.2.0](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.1...3.2.0) (2026-11-01)
+
+
+### Features
+
+* answer the agent from the index the editor already has ([c0eafbf](https://github.com/BaryshevRS/angular-auto-import/commit/c0eafbf5e96af97d3ec67289a40443fc426b03f5))
+
+
+### Bug Fixes
+
+* keep ./ before a directory whose name starts with a dot ([ca78b52](https://github.com/BaryshevRS/angular-auto-import/commit/ca78b529f1cd3460ed509863f989e4d2955b7fd7))
+* keep the trailing comma of a Component imports array ([e9e3fe6](https://github.com/BaryshevRS/angular-auto-import/commit/e9e3fe63a364a1bc7c81920d566f614ccd547378))
+* never write an absolute path as an import specifier ([049216e](https://github.com/BaryshevRS/angular-auto-import/commit/049216e0462b63e7ecdeeb46353bd283dd894a01))
+* offer one door to the agent, not two ([118cf53](https://github.com/BaryshevRS/angular-auto-import/commit/118cf53d42d31da51d49e2d7241612f818554fa6))
+* read a barrel's re-exports from the parse, not the text ([67c6b93](https://github.com/BaryshevRS/angular-auto-import/commit/67c6b933925a140b4e7f2daa85fffae448bb05f9))
+
 ## [3.1.1](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.0...3.1.1) (2026-09-11)
 
 
