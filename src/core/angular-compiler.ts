@@ -76,6 +76,7 @@ export function adoptAngularCompiler(compiler: CompilerModule): AngularCompilerA
   return {
     parseTemplate: (text, name) => compiler.parseTemplate(text, name, PARSE_OPTIONS),
     ast: {
+      parseTemplate: (text) => compiler.parseTemplate(text, "icu-tag", PARSE_OPTIONS).nodes,
       tmplAstElement: compiler.TmplAstElement,
       tmplAstTemplate: compiler.TmplAstTemplate,
       tmplAstBoundEvent: compiler.TmplAstBoundEvent,
@@ -83,6 +84,9 @@ export function adoptAngularCompiler(compiler: CompilerModule): AngularCompilerA
       tmplAstBoundAttribute: compiler.TmplAstBoundAttribute,
       tmplAstBoundText: compiler.TmplAstBoundText,
       tmplAstTextAttribute: compiler.TmplAstTextAttribute,
+      tmplAstLetDeclaration: compiler.TmplAstLetDeclaration,
+      tmplAstIcu: compiler.TmplAstIcu,
+      tmplAstBoundaryBlock: compiler.TmplAstBoundaryBlock,
       bindingType: compiler.BindingType,
       recursiveAstVisitor: compiler.RecursiveAstVisitor,
     },

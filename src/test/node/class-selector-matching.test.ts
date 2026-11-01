@@ -95,6 +95,7 @@ describe("Class selectors, through the scan", function () {
     compiler = adoptAngularCompiler(angular);
     parseTemplate = angular.parseTemplate as ParseTemplate;
     constructors = {
+      parseTemplate: (text: string) => parseTemplate(text, "icu-tag", PARSE_OPTIONS).nodes,
       tmplAstElement: angular.TmplAstElement,
       tmplAstTemplate: angular.TmplAstTemplate,
       tmplAstBoundEvent: angular.TmplAstBoundEvent,
@@ -102,6 +103,9 @@ describe("Class selectors, through the scan", function () {
       tmplAstBoundAttribute: angular.TmplAstBoundAttribute,
       tmplAstBoundText: angular.TmplAstBoundText,
       tmplAstTextAttribute: angular.TmplAstTextAttribute,
+      tmplAstLetDeclaration: angular.TmplAstLetDeclaration,
+      tmplAstIcu: angular.TmplAstIcu,
+      tmplAstBoundaryBlock: angular.TmplAstBoundaryBlock,
       bindingType: angular.BindingType,
       recursiveAstVisitor: angular.RecursiveAstVisitor,
     } as TemplateAstConstructors;

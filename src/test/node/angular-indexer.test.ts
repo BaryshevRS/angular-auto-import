@@ -1204,6 +1204,58 @@ export class InheritedHostComponent {}
       await cleanupMockNodeModules();
     });
 
+    it("indexes Signal Forms from its public entry point without indexing legacy forms", async () => {
+      const libPath = path.join(mockNodeModulesPath, "@angular", "forms");
+      fs.mkdirSync(libPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(libPath, "package.json"),
+        JSON.stringify({
+          name: "@angular/forms",
+          version: "22.0.0",
+          exports: { ".": { types: "./index.d.ts" }, "./signals": { types: "./signals.d.ts" } },
+        })
+      );
+      fs.writeFileSync(
+        path.join(libPath, "index.d.ts"),
+        `export declare class Legacy {
+        static ɵdir: i0.ɵɵDirectiveDeclaration<Legacy, "[legacyForm]", never, {}, {}, never, never, true, never>;
+      }`
+      );
+      fs.writeFileSync(
+        path.join(libPath, "signals.d.ts"),
+        `export { FormField } from './chunk';
+        export declare class FormRoot {
+          static ɵdir: i0.ɵɵDirectiveDeclaration<FormRoot, "form[formRoot]", never, {}, {}, never, never, true, never>;
+        }`
+      );
+      fs.writeFileSync(
+        path.join(libPath, "chunk.d.ts"),
+        `export declare class FormField {
+        static ɵdir: i0.ɵɵDirectiveDeclaration<FormField, "[formField]", never, {}, {}, never, never, true, never>;
+      }`
+      );
+      const manifestPath = path.join(testProjectPath, "package.json");
+      const manifest = fs.readFileSync(manifestPath, "utf8");
+      const updated = JSON.parse(manifest);
+      updated.dependencies = { ...updated.dependencies, "@angular/forms": "22.0.0" };
+      fs.writeFileSync(manifestPath, JSON.stringify(updated));
+      try {
+        await indexer.indexNodeModules();
+        for (const [selector, name] of [
+          ["formField", "FormField"],
+          ["formRoot", "FormRoot"],
+        ]) {
+          const element = indexer.getElements(selector).find((entry) => entry.name === name);
+          assert.ok(element, `${name} should be indexed`);
+          assert.strictEqual(element.path, "@angular/forms/signals");
+          assert.strictEqual(element.isStandalone, true);
+        }
+        assert.deepStrictEqual(indexer.getElements("legacyForm"), []);
+      } finally {
+        fs.writeFileSync(manifestPath, manifest);
+      }
+    });
+
     it("records what a library's bundle holds, so a template need not open the library again", async () => {
       const libPath = path.join(mockNodeModulesPath, "mock-bundle-lib");
       fs.mkdirSync(libPath, { recursive: true });
