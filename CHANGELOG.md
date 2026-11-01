@@ -6,19 +6,26 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [3.2.0](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.1...3.2.0) (2026-11-01)
 
+### Added
 
-### Features
+- **Four tools for coding agents**: inspect project conventions with `describe_project`, search components, directives and pipes with `find_element`, read their public APIs with `describe_element`, and check missing template imports with `verify_template`.
+- **Built-in VS Code chat tools**: Copilot agent mode can use these tools without configuring an MCP server. Requests use the language server's existing workspace index.
+- **Bundled MCP server**: editors without native chat tools can use the server shipped with the extension. Explicit workspace roots and multi-root projects are supported.
+- **Workspace and library APIs**: inspect input aliases, required inputs, outputs, content slots, host directives and inherited bindings, together with the import path for each declaration.
+- **Search by purpose**: queries such as "date picker" find elements across the workspace and installed libraries, prioritizing local declarations and libraries the project actually uses.
+- **Template import verification**: check a proposed template against its owning component and receive the missing imports and updated component source. The tool returns source for the agent to apply; it does not write files.
 
-* answer the agent from the index the editor already has ([c0eafbf](https://github.com/BaryshevRS/angular-auto-import/commit/c0eafbf5e96af97d3ec67289a40443fc426b03f5))
+### Changed
 
+- **One tool registration per editor**: editors that accept native chat tools use those; other supported editors receive the MCP registration instead, avoiding duplicate tools and a second index in VS Code.
+- **MCP protocol checks**: CI checks the built server over stdio on Linux and Windows.
 
-### Bug Fixes
+### Fixed
 
-* keep ./ before a directory whose name starts with a dot ([ca78b52](https://github.com/BaryshevRS/angular-auto-import/commit/ca78b529f1cd3460ed509863f989e4d2955b7fd7))
-* keep the trailing comma of a Component imports array ([e9e3fe6](https://github.com/BaryshevRS/angular-auto-import/commit/e9e3fe63a364a1bc7c81920d566f614ccd547378))
-* never write an absolute path as an import specifier ([049216e](https://github.com/BaryshevRS/angular-auto-import/commit/049216e0462b63e7ecdeeb46353bd283dd894a01))
-* offer one door to the agent, not two ([118cf53](https://github.com/BaryshevRS/angular-auto-import/commit/118cf53d42d31da51d49e2d7241612f818554fa6))
-* read a barrel's re-exports from the parse, not the text ([67c6b93](https://github.com/BaryshevRS/angular-auto-import/commit/67c6b933925a140b4e7f2daa85fffae448bb05f9))
+- **MCP index updates**: creating, editing, renaming or deleting Angular declarations updates the standalone server's index without restarting it or manually reindexing.
+- **Portable import paths**: fallback imports use relative paths instead of machine-specific absolute paths, including targets outside the project root. Imports into dot-prefixed directories retain the required `./`.
+- **Barrel export resolution**: commented-out exports and export-like text inside strings no longer make a barrel appear to export a declaration.
+- **Import formatting**: adding an element to a component's `imports` array preserves its existing trailing comma.
 
 ## [3.1.1](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.0...3.1.1) (2026-09-11)
 
