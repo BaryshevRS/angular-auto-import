@@ -4,6 +4,30 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [3.2.0](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.1...3.2.0) (2026-11-01)
+
+### Added
+
+- **Four tools for coding agents**: inspect project conventions with `describe_project`, search components, directives and pipes with `find_element`, read their public APIs with `describe_element`, and check missing template imports with `verify_template`.
+- **Built-in VS Code chat tools**: Copilot agent mode can use these tools without configuring an MCP server. Requests use the language server's existing workspace index.
+- **Bundled MCP server**: editors without native chat tools can use the server shipped with the extension. Explicit workspace roots and multi-root projects are supported.
+- **Standalone MCP package**: `angular-auto-import-mcp` packages the same server for Claude Code, Cursor and other MCP hosts. The release workflow publishes it to npm alongside the extension.
+- **Workspace and library APIs**: inspect input aliases, required inputs, outputs, content slots, host directives and inherited bindings, together with the import path for each declaration.
+- **Search by purpose**: queries such as "date picker" find elements across the workspace and installed libraries, prioritizing local declarations and libraries the project actually uses.
+- **Template import verification**: check a proposed template against its owning component and receive the missing imports and updated component source. The tool returns source for the agent to apply; it does not write files.
+
+### Changed
+
+- **One tool registration per editor**: editors that accept native chat tools use those; other supported editors receive the MCP registration instead, avoiding duplicate tools and a second index in VS Code.
+- **MCP protocol checks**: CI checks the built server over stdio on Linux and Windows.
+
+### Fixed
+
+- **MCP index updates**: creating, editing, renaming or deleting Angular declarations updates the standalone server's index without restarting it or manually reindexing.
+- **Portable import paths**: fallback imports use relative paths instead of machine-specific absolute paths, including targets outside the project root. Imports into dot-prefixed directories retain the required `./`.
+- **Barrel export resolution**: commented-out exports and export-like text inside strings no longer make a barrel appear to export a declaration.
+- **Import formatting**: adding an element to a component's `imports` array preserves its existing trailing comma.
+
 ## [3.1.1](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.0...3.1.1) (2026-09-11)
 
 

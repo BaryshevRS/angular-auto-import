@@ -3,7 +3,7 @@
   "displayName": "Angular Auto Import",
   "description": "Fix every missing import in an Angular template at once: components, directives and pipes from Material, PrimeNG, NG-ZORRO, Taiga UI or your own libraries. Your AI assistant gets the same answers.",
   "publisher": "baryshevrs",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "icon": "img/icon.png",
   "galleryBanner": {
     "color": "#0f172a",
@@ -100,7 +100,10 @@
         "toolReferenceName": "angularProject",
         "canBeReferencedInPrompt": true,
         "icon": "$(project)",
-        "tags": ["angular", "angular-auto-import"],
+        "tags": [
+          "angular",
+          "angular-auto-import"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -119,7 +122,10 @@
         "toolReferenceName": "angularFind",
         "canBeReferencedInPrompt": true,
         "icon": "$(search)",
-        "tags": ["angular", "angular-auto-import"],
+        "tags": [
+          "angular",
+          "angular-auto-import"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -129,7 +135,11 @@
             },
             "type": {
               "type": "string",
-              "enum": ["component", "directive", "pipe"],
+              "enum": [
+                "component",
+                "directive",
+                "pipe"
+              ],
               "description": "Narrow the search when the intent already says which kind you need."
             },
             "fromFile": {
@@ -137,7 +147,9 @@
               "description": "Absolute path to any file in the project being searched. Optional: the open editor's project is used when it is omitted."
             }
           },
-          "required": ["query"]
+          "required": [
+            "query"
+          ]
         }
       },
       {
@@ -148,7 +160,10 @@
         "toolReferenceName": "angularElement",
         "canBeReferencedInPrompt": true,
         "icon": "$(symbol-class)",
-        "tags": ["angular", "angular-auto-import"],
+        "tags": [
+          "angular",
+          "angular-auto-import"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -161,7 +176,9 @@
               "description": "Absolute path to any file in the project the element is used from; import specifiers are resolved relative to it. Optional: the open editor's project is used when it is omitted."
             }
           },
-          "required": ["query"]
+          "required": [
+            "query"
+          ]
         }
       },
       {
@@ -172,7 +189,10 @@
         "toolReferenceName": "verifyAngularTemplate",
         "canBeReferencedInPrompt": true,
         "icon": "$(check)",
-        "tags": ["angular", "angular-auto-import"],
+        "tags": [
+          "angular",
+          "angular-auto-import"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -185,7 +205,10 @@
               "description": "The template to check, as HTML. This need not be the template the component currently has: pass the one you are about to write."
             }
           },
-          "required": ["component", "template"]
+          "required": [
+            "component",
+            "template"
+          ]
         }
       }
     ],
