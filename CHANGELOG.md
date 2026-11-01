@@ -4,24 +4,6 @@ All notable changes to the "angular-auto-import" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [3.2.0] – 2026-08-31
-
-### Added
-- **Project-aware MCP server**: coding agents can inspect the Angular version, project conventions, path aliases, used UI libraries, and indexed workspace/library elements through `describe_project` and `find_element`
-- **Real element APIs for agents**: `describe_element` reports exact inputs and aliases, required signal inputs, outputs, content slots, host directives, and import specifiers from the project index
-- **Template verification for agents**: `verify_template` checks a proposed template against the owning component and returns the imports and rewritten component source that make it compile
-- **Automatic VS Code registration**: the extension contributes the MCP server directly to VS Code, including explicit routing across multi-root workspaces; no separate setup is required in the editor
-- **Standalone MCP package**: non-VS Code clients can run the same server through the `angular-auto-import-mcp` npm package
-- **Tools in the editor's own chat**: the same four answers are contributed as VS Code language-model tools, so Copilot agent mode can call them with no MCP configuration and no second index — every question is answered by the language server that already has the workspace indexed. The MCP server is registered in the editor only where those tools are refused, so the two never list the same answer twice
-
-### Changed
-- **Richer project index**: project and library elements now retain inputs, outputs, content selectors, host directives, and inherited bindings for editor and agent features alike
-- **MCP release checks**: CI drives the built stdio server through the official MCP client on Windows and Linux and verifies the standalone npm package contents
-
-### Fixed
-- **Live MCP index**: the standalone server now follows component, directive, and pipe files created, changed, renamed, or deleted during an agent session without a restart or manual reindex
-
-
 ## [3.1.1](https://github.com/BaryshevRS/angular-auto-import/compare/3.1.0...3.1.1) (2026-09-11)
 
 
