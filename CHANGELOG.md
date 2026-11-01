@@ -11,6 +11,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Four tools for coding agents**: inspect project conventions with `describe_project`, search components, directives and pipes with `find_element`, read their public APIs with `describe_element`, and check missing template imports with `verify_template`.
 - **Built-in VS Code chat tools**: Copilot agent mode can use these tools without configuring an MCP server. Requests use the language server's existing workspace index.
 - **Bundled MCP server**: editors without native chat tools can use the server shipped with the extension. Explicit workspace roots and multi-root projects are supported.
+- **Standalone MCP package**: `angular-auto-import-mcp` packages the same server for Claude Code, Cursor and other MCP hosts. The release workflow publishes it to npm alongside the extension.
 - **Workspace and library APIs**: inspect input aliases, required inputs, outputs, content slots, host directives and inherited bindings, together with the import path for each declaration.
 - **Search by purpose**: queries such as "date picker" find elements across the workspace and installed libraries, prioritizing local declarations and libraries the project actually uses.
 - **Template import verification**: check a proposed template against its owning component and receive the missing imports and updated component source. The tool returns source for the agent to apply; it does not write files.
